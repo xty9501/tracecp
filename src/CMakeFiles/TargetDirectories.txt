@@ -1,0 +1,3 @@
+/home/mxi235/traceview/src/CMakeFiles/rebuild_cache.dir
+/home/mxi235/traceview/src/CMakeFiles/test.dir
+/home/mxi235/traceview/src/CMakeFiles/edit_cache.dir
