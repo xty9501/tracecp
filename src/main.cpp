@@ -611,141 +611,30 @@ std::vector<std::array<double, 2>> simulate_motion(const std::array<double, 2>& 
   std::vector<std::array<double, 2>> result;
   // result.push_back(initial_x);
   std::array<double, 2> current_x = initial_x;
-  std::array<double, 2> current_v;
+  // std::array<double, 2> current_v;
   // current_v[0] = grad(0, initial_x[0], initial_x[1]);
   // current_v[1] = grad(1, initial_x[0], initial_x[1]);
 
-
-  ////// interpolate
-  double new_X[3][2];
-  double new_V[3][2];
-  int x0 = floor(initial_x[0]);
-  int y0 = floor(initial_x[1]);
-  float x_ex = initial_x[0] - x0;
-  float y_ex = initial_x[1] - y0;
-  int upper =1;
-  if (y_ex > x_ex){
-    upper = 1;
-  }
-  else{
-    upper = 0;
-  }
-  if (upper == 1){
-      double offset[3][2] = {{0,0},{0,1},{1,1}};
-      new_X[0][0] = x0;
-      new_X[0][1] = y0;
-      new_X[1][0] = x0;
-      new_X[1][1] = y0+1;
-      new_X[2][0] = x0+1;
-      new_X[2][1] = y0+1;
-      for (int i =0;i <2;i++){
-        new_V[0][i] = grad(i, x0, y0);
-        new_V[1][i] = grad(i, x0, y0+1);
-        new_V[2][i] = grad(i, x0+1, y0+1);
-      }
-    }
-  else{
-    new_X[0][0] = x0;
-    new_X[0][1] = y0;
-    new_X[1][0] = x0+1;
-    new_X[1][1] = y0;
-    new_X[2][0] = x0+1;
-    new_X[2][1] = y0+1;
-    for (int i =0;i <2;i++){
-      new_V[0][i] = grad(i, x0, y0);
-      new_V[1][i] = grad(i, x0+1, y0);
-      new_V[2][i] = grad(i, x0+1, y0+1);
-    }
-  }
-  double lambda[3];
-  barycent2d(new_X[0], new_X[1], new_X[2], initial_x.data(), lambda);
-  double u0 = lambda[0]*new_V[0][0] + lambda[1]*new_V[1][0] + lambda[2]*new_V[2][0];
-  double v0 = lambda[0]*new_V[0][1] + lambda[1]*new_V[1][1] + lambda[2]*new_V[2][1];
-  current_v[0] = u0;
-  current_v[1] = v0;
-  
-  // printf("initial perturbed coords: (%f,%f)\n", initial_x[0], initial_x[1]);
-  // printf("initial u,v based on perturbed coord: (%f,%f)\n", current_v[0], current_v[1]);
-  
-
   for(int i=0; i<num_steps; i++){
     result.push_back(current_x);
+    double current_v[2] = {0};
+    interp2d(current_x.data(), current_v);
     // printf("step %d\n", i);
     // printf("current_x: (%f,%f)\n", current_x[0], current_x[1]);
-    // printf("current_v: (%f,%f)\n", current_v[0], current_v[1]);
-    std::array<double, 2> RK4result = RK4(current_x.data(), current_v.data(), time_step);
-    // now need interpolate to get new u,v
-    //first need to check this coordinate is in upper or lower
-    //get left bottom coordinate
-    int x0 = floor(RK4result[0]);
-    int y0 = floor(RK4result[1]);
-    float x_ex = RK4result[0] - x0;
-    float y_ex = RK4result[1] - y0;
-    int upper =1;
-    if (y_ex > x_ex){
-      upper = 1;
-    }
-    else{
-      upper = 0;
-    }
+    // printf("current interpolated_v: (%f,%f)\n", current_v[0], current_v[1]);
+    std::array<double, 2> RK4result = RK4(current_x.data(), current_v, time_step);
 
-    if (upper == 1){
-      double offset[3][2] = {{0,0},{0,1},{1,1}};
-      new_X[0][0] = x0;
-      new_X[0][1] = y0;
-      new_X[1][0] = x0;
-      new_X[1][1] = y0+1;
-      new_X[2][0] = x0+1;
-      new_X[2][1] = y0+1;
-      for (int i =0;i <2;i++){
-        new_V[0][i] = grad(i, x0, y0);
-        new_V[1][i] = grad(i, x0, y0+1);
-        new_V[2][i] = grad(i, x0+1, y0+1);
-      }
-    }
-    else{
-      new_X[0][0] = x0;
-      new_X[0][1] = y0;
-      new_X[1][0] = x0+1;
-      new_X[1][1] = y0;
-      new_X[2][0] = x0+1;
-      new_X[2][1] = y0+1;
-      for (int i =0;i <2;i++){
-        new_V[0][i] = grad(i, x0, y0);
-        new_V[1][i] = grad(i, x0+1, y0);
-        new_V[2][i] = grad(i, x0+1, y0+1);
-      }
-    }
-    //now we have new_X(3x2) and new_V(3x2)
-    //update current_x and current_v:
-
-    //interpolate
-    // double lambda[3];
-    barycent2d(new_X[0], new_X[1], new_X[2], RK4result.data(), lambda);
-    double u0 = lambda[0]*new_V[0][0] + lambda[1]*new_V[1][0] + lambda[2]*new_V[2][0];
-    double v0 = lambda[0]*new_V[0][1] + lambda[1]*new_V[1][1] + lambda[2]*new_V[2][1];
-    
-    // printf("RK4_coords: (%f,%f)\n", RK4result[0], RK4result[1]);
-    // printf("simplex coords: (%f,%f), (%f,%f), (%f,%f)\n", new_X[0][0], new_X[0][1], new_X[1][0], new_X[1][1], new_X[2][0], new_X[2][1]);
-    // printf("simplex values: (%f,%f), (%f,%f), (%f,%f)\n", new_V[0][0], new_V[0][1], new_V[1][0], new_V[1][1], new_V[2][0], new_V[2][1]);
-    // printf("barycentric mu: (%f,%f,%f)\n", lambda[0], lambda[1], lambda[2]);
-    // printf("interploated u,v: (%f,%f)\n", u0, v0);
-
-    // printf("check Vmu: %f,%f\n",new_X[0][0]*lambda[0] + new_X[1][0]*lambda[1]
-    //  + new_X[2][0]*lambda[2],new_X[0][1]*lambda[0] + new_X[1][1]*lambda[1] + new_X[2][1]*lambda[2]);
 
     //TODO： 需要检查边界是否越界！！！！
-    if (!inside(RK4result, DH, DW)){
+    if (!inside(current_x, DH, DW)){
       //printf("out of bound!\n");
       break;
     }
 
 
-
-    current_x[0] = RK4result[0];
-    current_x[1] = RK4result[1];
-    current_v[0] = u0; //interpolated u
-    current_v[1] = v0; //interpolated v
+    current_x = RK4result;
+    // current_x[0] = current_x[0];
+    // current_x[1] = current_x[1];
 
 
   }
@@ -790,8 +679,8 @@ int main(int argc, char **argv){
 //   free(u);
 //   free(v);
 
-  int num_steps = 50;
-  double h = 1e-3;
+  int num_steps = 1000;
+  double h = 0.01;
   // need record each size of tracepoint
   // printf("creating tracepoints size: %ld,%d \n", saddle_points_0.size(), num_steps);
   std::vector<std::vector<std::array<double, 2>>> tracepoints;
@@ -807,7 +696,7 @@ int main(int argc, char **argv){
   // }
 
   //std::vector<std::vector<std::array<double, 2>>> tracepoints;
-  int index = 0;
+ 
   for(const auto& p:saddle_points_0){
     auto cp = p.second;
     // std::cout << "SADDLE POINT FOUND AT " << cp.x[0] << ", " << cp.x[1] << std::endl;
@@ -828,7 +717,7 @@ int main(int argc, char **argv){
 
     //std::cout << "Eigenvector2: " << cp.eig_vec[1][0] << ", " << cp.eig_vec[1][1] << std::endl;
     //add perturbation
-    double eps = 1e-3;
+    double eps = 0.01;
     double X0[2] = {cp.x[0] + eps*cp.eig_vec[0][0], cp.x[1] + eps*cp.eig_vec[0][1]}; //direction1 positive
     //print perturbed point
 
@@ -836,30 +725,11 @@ int main(int argc, char **argv){
 
     double lambda[3];
     double values[2];
-    // get lambda according to X0
-    // barycent2d(cp.X[0], cp.X[1], cp.X[2], X0, lambda); 
-    /* 
-    dont need this,because we need calculate based on perturbed point
-    double u0 = lambda[0]*cp.V[0][0] + lambda[1]*cp.V[1][0] + lambda[2]*cp.V[2][0];
-    double v0 = lambda[0]*cp.V[0][1] + lambda[1]*cp.V[1][1] + lambda[2]*cp.V[2][1];
-    values[0] = u0;
-    values[1] = v0;
-    //print u' v'
-    std::cout << "interpolate values: " << u0 << ", " << v0 << std::endl;
-    */
-    
-    //std::array<double, 2> X1 = RK4(X0, values, h);
-    //print x1 y1
-    
-    //std::cout << "RK4 result coord: " << X1[0] << ", " << X1[1] << std::endl;
-
-    //start iteration
-    
     std::array<double, 2> X_start;
     X_start[0] = X0[0];
     X_start[1] = X0[1];
     std::vector<std::array<double, 2>> result_return = simulate_motion(X_start, h, num_steps,DH,DW);
-    std::vector<std::array<double, 2>> result(num_steps, {0.0, 0.0});
+    std::vector<std::array<double, 2>> result(num_steps, {0.0, 0.0}); // Initialize all elements to zero
     for (int i = 0; i < result_return.size(); i ++) {
       result[i][0] = result_return[i][0];
       result[i][1] = result_return[i][1];
