@@ -617,26 +617,16 @@ std::vector<std::array<double, 2>> simulate_motion(const std::array<double, 2>& 
 
   for(int i=0; i<num_steps; i++){
     result.push_back(current_x);
-    double current_v[2] = {0};
-    interp2d(current_x.data(), current_v);
-    // printf("step %d\n", i);
-    // printf("current_x: (%f,%f)\n", current_x[0], current_x[1]);
-    // printf("current interpolated_v: (%f,%f)\n", current_v[0], current_v[1]);
-    std::array<double, 2> RK4result = RK4(current_x.data(), current_v, time_step);
-
-
-    //TODO： 需要检查边界是否越界！！！！
-    if (!inside(current_x, DH, DW)){
-      //printf("out of bound!\n");
-      break;
+    if (inside(current_x, DH, DW)){
+      double current_v[2] = {0};
+      interp2d(current_x.data(), current_v);
+      std::array<double, 2> RK4result = RK4(current_x.data(), current_v, time_step);
+      current_x = RK4result;
     }
-
-
-    current_x = RK4result;
-    // current_x[0] = current_x[0];
-    // current_x[1] = current_x[1];
-
-
+    else{
+      // printf("out of bound!\n");
+      // break; // dont need break
+      }
   }
   return result;
 }
@@ -680,7 +670,7 @@ int main(int argc, char **argv){
 //   free(v);
 
   int num_steps = 1000;
-  double h = 0.01;
+  double h = 0.1;
   // need record each size of tracepoint
   // printf("creating tracepoints size: %ld,%d \n", saddle_points_0.size(), num_steps);
   std::vector<std::vector<std::array<double, 2>>> tracepoints;
@@ -730,6 +720,12 @@ int main(int argc, char **argv){
     X_start[1] = X0[1];
     std::vector<std::array<double, 2>> result_return = simulate_motion(X_start, h, num_steps,DH,DW);
     std::vector<std::array<double, 2>> result(num_steps, {0.0, 0.0}); // Initialize all elements to zero
+
+    if(result_return.size() < num_steps){
+      printf("return reuslt size is less than num_steps, %ld, %d\n", result_return.size(), num_steps);
+      break;
+    }
+
     for (int i = 0; i < result_return.size(); i ++) {
       result[i][0] = result_return[i][0];
       result[i][1] = result_return[i][1];
