@@ -625,7 +625,7 @@ std::vector<std::array<double, 2>> simulate_motion(const std::array<double, 2>& 
     }
     else{
       // printf("out of bound!\n");
-      // break; // dont need break
+      break; // dont need break
       }
   }
   return result;
@@ -636,8 +636,8 @@ int main(int argc, char **argv){
   size_t num = 0;
   float * u = readfile<float>(argv[1], num);
   float * v = readfile<float>(argv[2], num);
-  int DW = atoi(argv[3]);
-  int DH = atoi(argv[4]);
+  int DW = atoi(argv[3]); //2400
+  int DH = atoi(argv[4]); //3600
   int sos = 1;
   grad.reshape({2, static_cast<unsigned long>(DW), static_cast<unsigned long>(DH)});
   refill_gradient(0, DH, DW, u);
@@ -708,33 +708,50 @@ int main(int argc, char **argv){
     //std::cout << "Eigenvector2: " << cp.eig_vec[1][0] << ", " << cp.eig_vec[1][1] << std::endl;
     //add perturbation
     double eps = 0.01;
-    double X0[2] = {cp.x[0] + eps*cp.eig_vec[0][0], cp.x[1] + eps*cp.eig_vec[0][1]}; //direction1 positive
-    //print perturbed point
-
-    // std::cout << "Perturbed point1 coord: " << X0[0] << ", " << X0[1] << std::endl;
-
+    //double X0[2] = {cp.x[0] + eps*cp.eig_vec[0][0], cp.x[1] + eps*cp.eig_vec[0][1]}; //direction1 positive
+    // double X0[2] = {cp.x[0] - eps*cp.eig_vec[0][0], cp.x[1] - eps*cp.eig_vec[0][1]}; //direction1 negative
+    // double X0[2] = {cp.x[0] + eps*cp.eig_vec[1][0], cp.x[1] + eps*cp.eig_vec[1][1]}; //direction2 positive
+    // double X0[2] = {cp.x[0] - eps*cp.eig_vec[1][0], cp.x[1] - eps*cp.eig_vec[1][1]}; //direction2 negative
+    double X_all_direction[4][2] = {{cp.x[0] + eps*cp.eig_vec[0][0], cp.x[1] + eps*cp.eig_vec[0][1]},
+                                    {cp.x[0] - eps*cp.eig_vec[0][0], cp.x[1] - eps*cp.eig_vec[0][1]},
+                                    {cp.x[0] + eps*cp.eig_vec[1][0], cp.x[1] + eps*cp.eig_vec[1][1]},
+                                    {cp.x[0] - eps*cp.eig_vec[1][0], cp.x[1] - eps*cp.eig_vec[1][1]}};
     double lambda[3];
     double values[2];
-    std::array<double, 2> X_start;
-    X_start[0] = X0[0];
-    X_start[1] = X0[1];
-    std::vector<std::array<double, 2>> result_return = simulate_motion(X_start, h, num_steps,DH,DW);
-    std::vector<std::array<double, 2>> result(num_steps, {0.0, 0.0}); // Initialize all elements to zero
 
-    if(result_return.size() < num_steps){
-      printf("return reuslt size is less than num_steps, %ld, %d\n", result_return.size(), num_steps);
-      break;
+    for (int i = 0; i < 4; i ++) {
+      std::array<double, 2> X_start;
+      std::vector<std::array<double, 2>> result_return;
+      X_start[0] = X_all_direction[i][0];
+      X_start[1] = X_all_direction[i][1];
+      //check if inside
+      if (inside(X_start,DH, DW))
+        result_return = simulate_motion(X_start, h, num_steps,DH,DW);
+      if(result_return.size() < num_steps){
+        // fill the rest with the last element
+        for (int i = result_return.size(); i < num_steps; i ++) {
+          result_return.push_back(result_return.back());
+        }
+      }
+      tracepoints.push_back(result_return);
     }
-
-    for (int i = 0; i < result_return.size(); i ++) {
-      result[i][0] = result_return[i][0];
-      result[i][1] = result_return[i][1];
-    }
-    tracepoints.push_back(result);
-
   }
+
+    // X_start[0] = X0[0];
+    // X_start[1] = X0[1];
+    // std::vector<std::array<double, 2>> result_return = simulate_motion(X_start, h, num_steps,DH,DW);
+
+    // if(result_return.size() < num_steps){
+    //   // fill the rest with the last element
+    //   for (int i = result_return.size(); i < num_steps; i ++) {
+    //     result_return.push_back(result_return.back());
+    //   }
+    // }
+
+      
   //write tracepoints to file
-  std::string filename = "/home/mxi235/data/traceview/tracepoints.bin";
+  std::string filename = argv[5];
+  // std::string filename = "/home/mxi235/data/traceview/tracepoints.bin";
   std::ofstream file(filename, std::ios::out | std::ios::binary);
 
     if (!file.is_open()) {
