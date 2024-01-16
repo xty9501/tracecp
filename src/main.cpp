@@ -33,6 +33,8 @@ ftk::ndarray<double> grad; //grad是三纬，第一个纬度是2，代表着u或
 ftk::simplicial_regular_mesh m(2);
 std::mutex mutex;
 
+size_t global_count = 0;
+
 
 
 
@@ -148,6 +150,12 @@ typedef struct critical_point_t{
 }critical_point_t;
 
 std::unordered_map<int, critical_point_t> saddles;
+std::unordered_map<int, critical_point_t> attractings;
+std::unordered_map<int, critical_point_t> repelings;
+std::unordered_map<int, critical_point_t> centers;
+std::unordered_map<int, critical_point_t> attractings_focus;
+std::unordered_map<int, critical_point_t> repelings_focus;
+
 
 // std::unordered_map<int, critical_point_t> critical_points;
  
@@ -234,6 +242,7 @@ bool check_simplex(const ftk::simplicial_regular_mesh_element &s)
   int indices[3];
   for (int i = 0; i < vertices.size(); i ++)
     indices[i] = m.get_lattice().to_integer(vertices[i]);
+
   bool succ = ftk::robust_critical_point_in_simplex2(vf, indices); //robust_critical_point_in_simplex2 是sos
   //succ 返回如果uv在原点组成的三角形包含原点？
   if (!succ) return false;
@@ -259,8 +268,10 @@ bool check_simplex(const ftk::simplicial_regular_mesh_element &s)
   double delta = ftk::solve_eigenvalues2x2(J, eig);
   double eig_vec[2][2]={0};
   // if(fabs(delta) < std::numeric_limits<double>::epsilon())
+
   if (delta >= 0) { // two real roots
     if (eig[0].real() * eig[1].real() < 0) { //different sign
+      global_count ++;
       cp_type = SADDLE;
       double eig_r[2];
       eig_r[0] = eig[0].real(), eig_r[1] = eig[1].real();
@@ -300,7 +311,7 @@ void extract_saddles(const int DH,const int DW)
 {
   m.set_lb_ub({1, 1}, {DW-2, DH-2}); // set the lower and upper bounds of the mesh
   // printf("DW=%d, DH=%d\n", DW, DH);
-  m.element_for(2, check_simplex); // iterate over all 3-simplices #这里是不是2-simplex？
+  m.element_for(2, check_simplex); // iterate over all 2d-simplex
 }
 
 std::unordered_map<int, critical_point_t> get_saddle_points(const int DH,const int DW){
@@ -308,97 +319,112 @@ std::unordered_map<int, critical_point_t> get_saddle_points(const int DH,const i
   // derive_gradients();
   extract_saddles(DH, DW);
   std::unordered_map<int, critical_point_t> result(saddles);
+  
   return result;
 }
 
 
-// template<typename T_fp>
-// static void 
-// check_simplex_seq_saddle(const T_fp vf[3][2], const double v[3][2], const double X[3][2], const int indices[3], int i, int j, int simplex_id, std::unordered_map<int, critical_point_t>& critical_points){
-//   // robust critical point test
-//   bool succ = ftk::robust_critical_point_in_simplex2(vf, indices);
-//   if (!succ) return;
-//   double mu[3]; // check intersection
-//   double cond;
-//   bool succ2 = ftk::inverse_lerp_s2v2(v, mu, &cond);
-//   if (!succ2) ftk::clamp_barycentric<3>(mu);
-//   double x[2]; // position
-//   ftk::lerp_s2v2(X, mu, x);
-//   double J[2][2]; // jacobian
-//   ftk::jacobian_2dsimplex2(X, v, J);  
-//   int cp_type = 0;
-//   std::complex<double> eig[2];
-//   double delta = ftk::solve_eigenvalues2x2(J, eig);
-//   // if(fabs(delta) < std::numeric_limits<double>::epsilon())
-//   if (delta >= 0) { // two real roots
-//     if (eig[0].real() * eig[1].real() < 0) {
-//         cp_type = SADDLE;
-//         critical_point_t cp;
-//         cp.x[0] = j + x[0]; cp.x[1] = i + x[1];
-//         cp.simplex_id = simplex_id;
-//         cp.type = cp_type;
-//         // cp.v = mu[0]*v[0][0] + mu[1]*v[1][0] + mu[2]*v[2][0];
-//         // cp.u = mu[0]*v[0][1] + mu[1]*v[1][1] + mu[2]*v[2][1];
-//         critical_points[simplex_id] = cp;
-//     } 
-//   }
-  
-// }
+template<typename T_fp>
+static void 
+check_simplex_seq_saddle(const T_fp vf[3][2], const double v[3][2], const double X[3][2], const int indices[3], int i, int j, int simplex_id, std::unordered_map<int, critical_point_t>& critical_points){
+  // robust critical point test
+  bool succ = ftk::robust_critical_point_in_simplex2(vf, indices);
+  if (!succ) return;
+  double mu[3]; // check intersection
+  double cond;
+  bool succ2 = ftk::inverse_lerp_s2v2(v, mu, &cond);
+  if (!succ2) ftk::clamp_barycentric<3>(mu);
+  double x[2]; // position
+  ftk::lerp_s2v2(X, mu, x);
+  double J[2][2]; // jacobian
+  ftk::jacobian_2dsimplex2(X, v, J);  
+  int cp_type = 0;
+  std::complex<double> eig[2];
+  double delta = ftk::solve_eigenvalues2x2(J, eig);
+  // if(fabs(delta) < std::numeric_limits<double>::epsilon())
+  if (delta >= 0) { // two real roots
+    if (eig[0].real() * eig[1].real() < 0) {
+        cp_type = SADDLE;
+        critical_point_t cp;
 
-// template<typename T>
-// std::unordered_map<int, critical_point_t>
-// compute_saddle_critical_points(const T * U, const T * V, int r1, int r2, uint64_t vector_field_scaling_factor){
-//   // check cp for all cells
-//   using T_fp = int64_t;
-//   size_t num_elements = r1*r2;
-//   T_fp * U_fp = (T_fp *) malloc(num_elements * sizeof(T_fp));
-//   T_fp * V_fp = (T_fp *) malloc(num_elements * sizeof(T_fp));
-//   for(int i=0; i<num_elements; i++){
-//     U_fp[i] = U[i]*vector_field_scaling_factor;
-//     V_fp[i] = V[i]*vector_field_scaling_factor;
-//   }
-//   int indices[3] = {0};
-//   // __int128 vf[4][3] = {0};
-// 	double X1[3][2] = {
-// 		{0, 0},
-// 		{0, 1},
-// 		{1, 1}
-// 	};
-// 	double X2[3][2] = {
-// 		{0, 0},
-// 		{1, 0},
-// 		{1, 1}
-// 	};
-//   int64_t vf[3][2] = {0};
-//   double v[3][2] = {0};
-//   std::unordered_map<int, critical_point_t> critical_points;
-// 	for(int i=1; i<r1-2; i++){
-//     if(i%100==0) std::cout << i << " / " << r1-1 << std::endl;
-// 		for(int j=1; j<r2-2; j++){
-//       ptrdiff_t cell_offset = 2*(i * (r2-1) + j);
-// 			indices[0] = i*r2 + j;
-// 			indices[1] = (i+1)*r2 + j;
-// 			indices[2] = (i+1)*r2 + (j+1); 
-// 			// cell index 0
-// 			for(int p=0; p<3; p++){
-// 				vf[p][0] = U_fp[indices[p]];
-// 				vf[p][1] = V_fp[indices[p]];
-// 				v[p][0] = U[indices[p]];
-// 				v[p][1] = V[indices[p]];
-// 			}
+        // critical_point_t cp(x, eig_vec,v,X, cp_type);
+
+        cp.x[0] = j + x[0]; cp.x[1] = i + x[1];
+        double eig_vec[2][2]={0};
+        double eig_r[2];
+        eig_r[0] = eig[0].real(), eig_r[1] = eig[1].real();
+        ftk::solve_eigenvectors2x2(J, 2, eig_r, eig_vec);
+        cp.eig_vec[0][0] = eig_vec[0][0]; cp.eig_vec[0][1] = eig_vec[0][1];
+        cp.eig_vec[1][0] = eig_vec[1][0]; cp.eig_vec[1][1] = eig_vec[1][1];
+        cp.V[0][0] = v[0][0]; cp.V[0][1] = v[0][1];
+        cp.V[1][0] = v[1][0]; cp.V[1][1] = v[1][1];
+        cp.V[2][0] = v[2][0]; cp.V[2][1] = v[2][1];
+        cp.X[0][0] = X[0][0]; cp.X[0][1] = X[0][1];
+        cp.X[1][0] = X[1][0]; cp.X[1][1] = X[1][1];
+        cp.X[2][0] = X[2][0]; cp.X[2][1] = X[2][1];
+        cp.type = cp_type;
+        // cp.v = mu[0]*v[0][0] + mu[1]*v[1][0] + mu[2]*v[2][0];
+        // cp.u = mu[0]*v[0][1] + mu[1]*v[1][1] + mu[2]*v[2][1];
+        critical_points[simplex_id] = cp;
+    } 
+  }
+  
+}
+
+template<typename T>
+std::unordered_map<int, critical_point_t>
+compute_saddle_points(const T * U, const T * V, int r1, int r2, uint64_t vector_field_scaling_factor){
+  // check cp for all cells
+  using T_fp = int64_t;
+  size_t num_elements = r1*r2;
+  T_fp * U_fp = (T_fp *) malloc(num_elements * sizeof(T_fp));
+  T_fp * V_fp = (T_fp *) malloc(num_elements * sizeof(T_fp));
+  for(int i=0; i<num_elements; i++){
+    U_fp[i] = U[i]*vector_field_scaling_factor;
+    V_fp[i] = V[i]*vector_field_scaling_factor;
+  }
+  int indices[3] = {0};
+  // __int128 vf[4][3] = {0};
+	double X1[3][2] = {
+		{0, 0},
+		{0, 1},
+		{1, 1}
+	};
+	double X2[3][2] = {
+		{0, 0},
+		{1, 0},
+		{1, 1}
+	};
+  int64_t vf[3][2] = {0};
+  double v[3][2] = {0};
+  std::unordered_map<int, critical_point_t> critical_points;
+	for(int i=1; i<r1-2; i++){
+    if(i%100==0) std::cout << i << " / " << r1-1 << std::endl;
+		for(int j=1; j<r2-2; j++){
+      ptrdiff_t cell_offset = 2*(i * (r2-1) + j);
+			indices[0] = i*r2 + j;
+			indices[1] = (i+1)*r2 + j;
+			indices[2] = (i+1)*r2 + (j+1); 
+			// cell index 0
+			for(int p=0; p<3; p++){
+				vf[p][0] = U_fp[indices[p]];
+				vf[p][1] = V_fp[indices[p]];
+				v[p][0] = U[indices[p]];
+				v[p][1] = V[indices[p]];
+			}
       
-//       check_simplex_seq_saddle(vf, v, X1, indices, i, j, cell_offset, critical_points);
-// 			// cell index 1
-// 			indices[1] = i*r2 + (j+1);
-// 			vf[1][0] = U_fp[indices[1]], vf[1][1] = V_fp[indices[1]];
-// 			v[1][0] = U[indices[1]], v[1][1] = V[indices[1]];			
-//       check_simplex_seq_saddle(vf, v, X2, indices, i, j, cell_offset + 1, critical_points);
-// 		}
-// 	}
-//   free(U_fp);
-//   free(V_fp);
-//   return critical_points; 
-// }
+      check_simplex_seq_saddle(vf, v, X1, indices, i, j, cell_offset, critical_points);
+			// cell index 1
+			indices[1] = i*r2 + (j+1);
+			vf[1][0] = U_fp[indices[1]], vf[1][1] = V_fp[indices[1]];
+			v[1][0] = U[indices[1]], v[1][1] = V[indices[1]];			
+      check_simplex_seq_saddle(vf, v, X2, indices, i, j, cell_offset + 1, critical_points);
+		}
+	}
+  free(U_fp);
+  free(V_fp);
+  return critical_points; 
+}
 
 template<typename Type>
 Type * readfile(const char * file, size_t& num){
@@ -662,8 +688,12 @@ int main(int argc, char **argv){
   bool cp_file = false; //file_exists(cp_prefix + "_sid.dat");
   cp_file ? printf("Critical point file found!\n") : printf("Critical point Not found, recomputing\n");
   // auto saddle_points_0 = cp_file ? read_saddlepoints(cp_prefix) : compute_saddle_critical_points(u, v, DH, DW, vector_field_scaling_factor);
-  auto saddle_points_0 = get_saddle_points(DH, DW);
+  // auto saddle_points_0 = get_saddle_points(DH, DW);
+
+  auto saddle_points_0 =compute_saddle_points(u, v, DH, DW, vector_field_scaling_factor);
+
   printf("Saddle points size: %ld\n", saddle_points_0.size());
+  printf("global_count: %d\n", global_count);
 
 
 //   free(u);
@@ -675,17 +705,7 @@ int main(int argc, char **argv){
   // printf("creating tracepoints size: %ld,%d \n", saddle_points_0.size(), num_steps);
   std::vector<std::vector<std::array<double, 2>>> tracepoints;
   tracepoints.reserve(saddle_points_0.size());
-  
-  // (saddle_points_0.size(), std::vector<std::array<double, 2>>(num_steps));
-  // Initialize all elements to zero
-  // for (auto& row : tracepoints) {
-  //   row.resize(num_steps);
-  //     for (auto& point : row) {
-  //         point = {0.0, 0.0}; // Set both elements to zero
-  //     }
-  // }
 
-  //std::vector<std::vector<std::array<double, 2>>> tracepoints;
  
   for(const auto& p:saddle_points_0){
     auto cp = p.second;
@@ -708,7 +728,7 @@ int main(int argc, char **argv){
     //std::cout << "Eigenvector2: " << cp.eig_vec[1][0] << ", " << cp.eig_vec[1][1] << std::endl;
     //add perturbation
     double eps = 0.01;
-    //double X0[2] = {cp.x[0] + eps*cp.eig_vec[0][0], cp.x[1] + eps*cp.eig_vec[0][1]}; //direction1 positive
+    double X0[2] = {cp.x[0] + eps*cp.eig_vec[0][0], cp.x[1] + eps*cp.eig_vec[0][1]}; //direction1 positive
     // double X0[2] = {cp.x[0] - eps*cp.eig_vec[0][0], cp.x[1] - eps*cp.eig_vec[0][1]}; //direction1 negative
     // double X0[2] = {cp.x[0] + eps*cp.eig_vec[1][0], cp.x[1] + eps*cp.eig_vec[1][1]}; //direction2 positive
     // double X0[2] = {cp.x[0] - eps*cp.eig_vec[1][0], cp.x[1] - eps*cp.eig_vec[1][1]}; //direction2 negative
