@@ -1,5 +1,9 @@
 cmake_minimum_required(VERSION 3.12)  # 指定CMake的最低版本号
 
+if(NOT CMAKE_BUILD_TYPE)
+  set(CMAKE_BUILD_TYPE Release)
+endif()
+
 set(FTK_INCLUDE_DIR /home/mxi235/cpSZ_naive/external/ftk/install/include)
 
 # 等同于cmake -DFTK_DIR=/home/mxi235/CP/ftk/debuginstall/lib64/cmake/FTK .

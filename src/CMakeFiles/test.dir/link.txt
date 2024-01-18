@@ -1,1 +1,0 @@
-/usr/bin/c++ CMakeFiles/test.dir/main.cpp.o -o /home/mxi235/traceview/test  -Wl,-rpath,/home/mxi235/CP/ftk/debuginstall/lib64 /home/mxi235/CP/ftk/debuginstall/lib64/liblibftk.so -lpthread 
