@@ -1,0 +1,44 @@
+# Ignore CMake build and output directories
+build/
+bin/
+lib/
+CMakeFiles/
+CMakeScripts/
+Testing/
+
+# Ignore C/C++ compiled files
+*.o
+*.a
+*.so
+*.dll
+*.exe
+*.out
+
+# Ignore CMake generated files
+CMakeCache.txt
+CMakeFiles/
+CMakeScripts/
+CMakeDoxyfile.in
+CMakeDoxygenDefaults.cmake
+CMakeDoxygenDefaults.in
+
+# Ignore CMake user-specific files
+CMakeUserPresets.json
+CMakeUserPresets.json.user
+CMakeUserPresets.json.lock
+
+# Ignore compiler-generated files
+CMakeCache.txt
+CMakeFiles/
+CMakeScripts/
+compile_commands.json
+Makefile
+*.cmake
+*.cbp
+*.depend
+*.layout
+*.sln
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+*.vcproj
