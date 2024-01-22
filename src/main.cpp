@@ -393,6 +393,16 @@ inline int get_cell_offset(const double *x, const int DW, const int DH){
   return cell_offset;
 }
 
+inline bool check_result(const double error, const double *v){
+  if (fabs(v[0]) < error && fabs(v[1]) < error){
+    printf("v[0]: %f, v[1]: %f\n", v[0], v[1]);
+    return true;
+  }
+  else{
+    return false;
+  }
+}
+
 
 
 void interp2d(const double p[2], double v[2]){
@@ -442,74 +452,80 @@ void interp2d(const double p[2], double v[2]){
 
 }
 
-// std::vector<std::array<double, 2>> trajectory(const std::array<double, 2>& initial_x, const double time_step, const int DH,const int DW, const std::unordered_map<int, critical_point_t>& critical_points_0){
-//   std::vector<std::array<double, 2>> result;
-//   // double *tmp_pos;
-//   // memset(&tmp_pos, 0, sizeof(double*)*2);
-//   // memccpy(tmp_pos, initial_x.data(), 0, sizeof(double)*2);
-//   std::array<double, 2> current_x = initial_x;
-  
-  
+std::vector<std::array<double, 2>> trajectory(double *X_original,const std::array<double, 2>& initial_x, const double time_step, const int DH,const int DW, const std::unordered_map<int, critical_point_t>& critical_points_0, int &count_limit,int &count_found, int &count_not_found, int &count_out_bound, std::vector<int>& index){
+  std::vector<std::array<double, 2>> result;
+  int flag = 0;
+  int length = 0;
+  result.push_back({X_original[0], X_original[1]}); //add original true position
+  length ++;
+  int orginal_offset = get_cell_offset(X_original, DW, DH);
 
-//   int flag = 0;
-//   int length = 1;
-//   int orginal_offset = get_cell_offset(initial_x.data(), DW, DH);
-//   while (flag == 0){
-//     if (length > 1000){
-//       printf("not reach critical point when hit 500000 iteration\n");
-//       printf("current position: %f, %f,initial position: %f, %f\n", current_x[0], current_x[1], initial_x[0], initial_x[1]);
-//       double current_v[2] = {0};
-//       interp2d(current_x.data(), current_v);
-//       printf("current values: %f, %f\n", current_v[0], current_v[1]);
-//       auto it = critical_points_0.find(get_cell_offset(current_x.data(), DW, DH));
-//       if (it != critical_points_0.end()) {
-//         int type = it->second.type;
-//         printf("type: %s\n", get_critical_point_type_string(type).c_str());
-//         flag = 1;
-//         break;
-//       }
-//       else {
-//         printf("hit max but not in critical point0\n");
-//         break;
-//       }
-//       // break;
-//     }
+  std::array<double, 2> current_x = initial_x;
 
-//     result.push_back(current_x);
-//     if (!inside(current_x, DH, DW)){
-//       flag = 1;
-//       printf("out of bound! current position: %f, %f,initial position: %f, %f\n", current_x[0], current_x[1], initial_x[0], initial_x[1]);
-//       break;
-//     }
-//     double current_v[2] = {0};
-//     interp2d(current_x.data(), current_v);
-//     std::array<double, 2> RK4result = RK4(current_x.data(), current_v, time_step);
-//     length ++;
-//     current_x = RK4result;
-//     double error = 1e-3;
-//     if (orginal_offset != get_cell_offset(current_x.data(), DW, DH)){
-//     // not the same cell 
-//       if (fabs(current_v[0]) < error && fabs(current_v[1]) < error){
-//         printf("reach critical point with %d steps\n, current values: %f, %f\n", length, current_v[0], current_v[1]);
-//         flag = 1;
-//         break;
-//       }
-//    }
-//     // if (orginal_offset != get_cell_offset(current_x.data(), DW, DH)){
-//     //   // not the same cell 
-//     //   auto it = critical_points_0.find(get_cell_offset(current_x.data(), DW, DH));
-//     //   if (it != critical_points_0.end()) {
-//     //     printf("reach critical point with %d steps\n", length);
-//     //     flag = 1;
-//     //     double current_v[2] = {0};
-//     //     interp2d(current_x.data(), current_v);
-//     //     printf("current values: %f, %f\n", current_v[0], current_v[1]);
-//     //     break;
-//     //   }
-//     // }
-//   }
-//   return result;
-// }
+  if(!inside(current_x, DH, DW)){
+    //printf("out of bound!\n");
+    count_out_bound ++;
+    return result;
+  }
+  else{
+    result.push_back(current_x); //add initial position
+    length ++;
+  }
+
+  
+  while (flag == 0){
+    if (length == 1000) {
+      //printf("reach max length!\n");
+      count_limit ++;
+      break;
+    }
+    if(!inside(current_x, DH, DW)){
+      //printf("out of bound!\n");
+      count_out_bound ++;
+      break;
+    }
+    double current_v[2] = {0};
+    interp2d(current_x.data(), current_v);
+    int current_offset = get_cell_offset(current_x.data(), DW, DH);
+    std::array<double, 2> RK4result = RK4(current_x.data(), current_v, time_step);
+    
+
+    //early stop
+    //check if diff between current_x and RK4result is small enough
+    if (fabs(RK4result[0] - current_x[0]) < 1e-5 && fabs(RK4result[1] - current_x[1]) < 1e-5){
+      auto it = critical_points_0.find(current_offset);
+      if (it != critical_points_0.end() && it->second.type != SADDLE) {
+      flag = 1;
+      count_found ++;
+      //printf("found cp in critical_points_0! start position: (%f, %f), current position: (%f, %f), #iteration: %d\n", initial_x[0],initial_x[1],current_x[0],current_x[1], length);
+      //printf("start_id: %d, current_id: %d\n", orginal_offset,get_cell_offset(current_x.data(), DW, DH));
+      double temp_v[2] = {0};
+      interp2d(initial_x.data(), temp_v);
+      printf("start_values: (%f, %f), current_values: (%f, %f)\n", temp_v[0],temp_v[1],current_v[0],current_v[1]);
+      break;
+      }
+      else{
+        //printf("not found cp in critical_points_0! start position: (%f, %f), current position: (%f, %f), #iteration: %d\n", initial_x[0],initial_x[1],current_x[0],current_x[1], length);
+        //printf("start_id: %d, current_id: %d\n", orginal_offset,get_cell_offset(current_x.data(), DW, DH));
+        double temp_v[2] = {0};
+        interp2d(initial_x.data(), temp_v);
+        //printf("start_values: (%f, %f), current_values: (%f, %f)\n", temp_v[0],temp_v[1],current_v[0],current_v[1]);
+        count_not_found ++;
+        break;  
+      }
+    }
+
+    current_x = RK4result;
+    result.push_back(current_x);
+    length++;
+
+  }
+  // printf("length: %d\n", length);
+  // printf("result size: %ld\n", result.size());
+  index.push_back(length);
+
+  return result;
+}
 
 std::vector<std::array<double, 2>> simulate_motion(const std::array<double, 2>& initial_x, const double time_step, const int num_steps,const int DH,const int DW, const std::unordered_map<int, critical_point_t>& critical_points_0) {
   //x is the position, v is the velocity, h is the step size, n is the number of iterations
@@ -612,18 +628,29 @@ int main(int argc, char **argv){
   free(v);
 
   int num_steps = 1000;
-  double h = 0.01;
+  double h = atof(argv[5]);
+  // double h = 0.1;
+  double eps = atof(argv[6]);
+  // double eps = 0.01;
+  int count_reach_limit = 0;
+  int count_found = 0;
+  int count_not_found = 0;
+  int count_out_bound = 0;
+  int *index = (int *) malloc(sizeof(int)*sad_count*4);
+  int *index_pos = index;
+  std::vector<int> myindex;
+  printf("current setting: num_steps: %d, h: %f, eps: %f\n", num_steps, h, eps);
   // need record each size of tracepoint
   // printf("creating tracepoints size: %ld,%d \n", saddle_points_0.size(), num_steps);
   std::vector<std::vector<std::array<double, 2>>> tracepoints;
-  tracepoints.reserve(critical_points_0.size());
+  tracepoints.reserve(critical_points_0.size()*4);
 
  
   for(const auto& p:critical_points_0){
     auto cp = p.second;
     if (cp.type == SADDLE){
       global_count ++;
-      double eps = 0.01;
+      
       double X0[2] = {cp.x[0] + eps*cp.eig_vec[0][0], cp.x[1] + eps*cp.eig_vec[0][1]}; //direction1 positive
       // double X0[2] = {cp.x[0] - eps*cp.eig_vec[0][0], cp.x[1] - eps*cp.eig_vec[0][1]}; //direction1 negative
       // double X0[2] = {cp.x[0] + eps*cp.eig_vec[1][0], cp.x[1] + eps*cp.eig_vec[1][1]}; //direction2 positive
@@ -645,20 +672,29 @@ int main(int argc, char **argv){
           
           if(i == 0 || i ==2){
             //result_return = trajectory(X_start, h,DH,DW, critical_points_0);
-            result_return = simulate_motion(X_start, h, num_steps,DH,DW, critical_points_0);
+            //result_return = simulate_motion(X_start, h, num_steps,DH,DW, critical_points_0);
+            result_return = trajectory(cp.x,X_start, h,DH,DW, critical_points_0,count_reach_limit,count_found,count_not_found,count_out_bound,myindex);
           }
           else{
             //result_return = trajectory(X_start, -h,DH,DW, critical_points_0);
-            result_return = simulate_motion(X_start, -h, num_steps,DH,DW, critical_points_0);
+            //result_return = simulate_motion(X_start, -h, num_steps,DH,DW, critical_points_0);
+            result_return = trajectory(cp.x,X_start, -h,DH,DW, critical_points_0,count_reach_limit,count_found,count_not_found,count_out_bound,myindex);
           }
         //printf("tracepoints size: %ld\n", result_return.size());
         tracepoints.push_back(result_return);
       }
     }
   }
+  printf("myindex size: %ld\n", myindex.size());
   printf("total saddle points: %ld\n", global_count);
+  printf("number of reach max length: %d\n", count_reach_limit);
+  printf("number of found cp: %d\n", count_found);
+  printf("number of not found cp: %d\n", count_not_found);
+  printf("number of out of bound: %d\n", count_out_bound);
   //write tracepoints to file
-  std::string filename = argv[5];
+  std::string filename = argv[7];
+
+  exit(0);
   // std::string filename = "/home/mxi235/data/traceview/tracepoints.bin";
   std::ofstream file(filename, std::ios::out | std::ios::binary);
 
@@ -680,6 +716,12 @@ int main(int argc, char **argv){
     // Close the file
     file.close();
     std::cout << "Data written to " << filename << std::endl;
+
+    //write index to file
+    std::string filename2 = argv[8];
+    writefile(filename2.c_str(), myindex.data(), myindex.size());
+    std::cout << "index written to " << filename2 << std::endl;
+
 
 }
 
