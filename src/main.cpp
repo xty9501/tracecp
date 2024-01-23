@@ -14,6 +14,7 @@
 #include "ftk/ndarray.hh"
 #include "ftk/numeric/critical_point_type.hh"
 #include "ftk/numeric/critical_point_test.hh"
+#include <chrono>
 
 // #include <hypermesh/ndarray.hh>
 // #include <hypermesh/regular_simplex_mesh.hh>
@@ -124,7 +125,8 @@ typedef struct critical_point_t{
   double X[3][2];
   // double mu[3];
   int type;
-  critical_point_t(double* x_, double eig_v[2][2], double V_[3][2],double X_[3][2], int t_){
+  size_t simplex_id;
+  critical_point_t(double* x_, double eig_v[2][2], double V_[3][2],double X_[3][2], int t_, size_t simplex_id_){
     x[0] = x_[0];
     x[1] = x_[1];
     eig_vec[0][0] = eig_v[0][0];
@@ -145,6 +147,7 @@ typedef struct critical_point_t{
     //   mu[i] = mu_[i];
     // }
     type = t_;
+    simplex_id = simplex_id_;
   }
   critical_point_t(){}
 }critical_point_t;
@@ -254,6 +257,7 @@ check_simplex_seq_saddle(const T_fp vf[3][2], const double v[3][2], const double
   cp.X[1][0] = X[1][0]; cp.X[1][1] = X[1][1];
   cp.X[2][0] = X[2][0]; cp.X[2][1] = X[2][1];
   cp.type = cp_type;
+  cp.simplex_id = simplex_id;
   // cp.v = mu[0]*v[0][0] + mu[1]*v[1][0] + mu[2]*v[2][0];
   // cp.u = mu[0]*v[0][1] + mu[1]*v[1][1] + mu[2]*v[2][1];
   critical_points[simplex_id] = cp;
@@ -372,6 +376,59 @@ inline bool inside(const std::array<double, 2> x,const int DH, const int DW){
 
 }
 
+void record_criticalpoints(const std::string& prefix, const std::unordered_map<int, critical_point_t>& cps, bool write_sid=false){
+  std::vector<double> singular;
+  std::vector<double> attracting;
+  std::vector<double> repelling;
+  std::vector<double> saddle;
+  std::vector<double> attracting_focus;
+  std::vector<double> repelling_focus;
+  std::vector<double> center;
+  for (const auto& cpd:cps){
+    auto cp = cpd.second;
+    if (cp.type == SINGULAR){
+      singular.push_back(cp.x[0]);
+      singular.push_back(cp.x[1]);
+    }
+    else if (cp.type == ATTRACTING){
+      attracting.push_back(cp.x[0]);
+      attracting.push_back(cp.x[1]);
+    }
+    else if (cp.type == REPELLING){
+      repelling.push_back(cp.x[0]);
+      repelling.push_back(cp.x[1]);
+    }
+    else if (cp.type == SADDLE){
+      saddle.push_back(cp.x[0]);
+      saddle.push_back(cp.x[1]);
+    }
+    else if (cp.type == ATTRACTING_FOCUS){
+      attracting_focus.push_back(cp.x[0]);
+      attracting_focus.push_back(cp.x[1]);
+    }
+    else if (cp.type == REPELLING_FOCUS){
+      repelling_focus.push_back(cp.x[0]);
+      repelling_focus.push_back(cp.x[1]);
+    }
+    else if (cp.type == CENTER){
+      center.push_back(cp.x[0]);
+      center.push_back(cp.x[1]);
+    }
+    else {
+      continue;
+    }
+  }
+  // std::string prefix = "../data/position";
+  writefile((prefix + "_singular.dat").c_str(), singular.data(), singular.size());
+  writefile((prefix + "_attracting.dat").c_str(), attracting.data(), attracting.size());
+  writefile((prefix + "_repelling.dat").c_str(), repelling.data(), repelling.size());
+  writefile((prefix + "_saddle.dat").c_str(), saddle.data(), saddle.size());
+  writefile((prefix + "_attracting_focus.dat").c_str(), attracting_focus.data(), attracting_focus.size());
+  writefile((prefix + "_repelling_focus.dat").c_str(), repelling_focus.data(), repelling_focus.size());
+  writefile((prefix + "_center.dat").c_str(), center.data(), center.size());
+  
+}
+
 inline bool is_upper(const std::array<double, 2> x){
   double x_ex = x[0] - floor(x[0]);
   double y_ex = x[1] - floor(x[1]);
@@ -391,6 +448,48 @@ inline int get_cell_offset(const double *x, const int DW, const int DH){
     cell_offset += 1;
   }
   return cell_offset;
+}
+
+inline bool vaild_offset(const int offset, const int DW, const int DH){
+  if (offset < 0 || offset >= 2*(DW-1)*(DH-1)){
+    return false;
+  }
+  else{
+    return true;
+  }
+}
+
+inline std::vector<int> get_surrounding_cell(const int cell_offset, const int DW, const int DH){
+  std::vector<int> surrounding_cell;
+  if (cell_offset %2 == 0){
+    //upper cell
+    if (vaild_offset(cell_offset,DW,DH)){
+      surrounding_cell.push_back(cell_offset);
+    }
+    if (vaild_offset(cell_offset+1,DW,DH)){
+      surrounding_cell.push_back(cell_offset+1);
+    }
+    if (vaild_offset(cell_offset-2*(DW-1)+1,DW,DH)){
+      surrounding_cell.push_back(cell_offset-2*(DW-1)+1);
+    }
+    // if (vaild_offset(cell_offset-2*(DW-1),DW,DH)){
+    //   surrounding_cell.push_back(cell_offset-2*(DW-1));
+    // }
+
+
+  }
+  else {
+    if (vaild_offset(cell_offset,DW,DH)){
+      surrounding_cell.push_back(cell_offset);
+    }
+    if (vaild_offset(cell_offset-1,DW,DH)){
+      surrounding_cell.push_back(cell_offset-1);
+    }
+    if (vaild_offset(cell_offset+2*(DW-1)-1,DW,DH)){
+      surrounding_cell.push_back(cell_offset+2*(DW-1)-1);
+    }
+  }
+  return surrounding_cell;
 }
 
 inline bool check_result(const double error, const double *v){
@@ -472,27 +571,59 @@ std::vector<std::array<double, 2>> trajectory(double *X_original,const std::arra
     length ++;
   }
 
-  
   while (flag == 0){
     if (length == 1000) {
       //printf("reach max length!\n");
       count_limit ++;
+      flag = 1;
       break;
     }
     if(!inside(current_x, DH, DW)){
       //printf("out of bound!\n");
       count_out_bound ++;
+      flag = 1;
       break;
     }
     double current_v[2] = {0};
     interp2d(current_x.data(), current_v);
     int current_offset = get_cell_offset(current_x.data(), DW, DH);
     std::array<double, 2> RK4result = RK4(current_x.data(), current_v, time_step);
-    
+    if (current_offset != orginal_offset){
+      //moved to another cell
+        auto surrounding_cell = get_surrounding_cell(current_offset, DW, DH);
+        for (auto cell_offset:surrounding_cell){
+          try{
+              auto cp = critical_points_0.at(cell_offset);
+              if (cp.type == SADDLE) break;
+              //check if distance between current_x and cp.x is small enough
+              double error = 1e-3;
+              if (fabs(RK4result[0] - cp.x[0]) < error && fabs(RK4result[1] - cp.x[1]) < error){
+                // found cp
+                flag = 1;
+                count_found ++;
+                //printf("found after %d iteration\n", length);
+                //printf("start_id: %d, current_id: %d\n", orginal_offset,get_cell_offset(current_x.data(), DW, DH));
+                double temp_v[2] = {0};
+                interp2d(initial_x.data(), temp_v);
+                //printf("start_values: (%f, %f), current_values: (%f, %f)\n", temp_v[0],temp_v[1],current_v[0],current_v[1]);
+                //printf("start_position: (%f, %f), current_position: (%f, %f)\n", initial_x[0],initial_x[1],current_x[0],current_x[1]);
 
+                break;
+              }
+              else{
+                //not found cp in this cell
+
+              }
+          }
+          catch(const std::out_of_range& e){
+            // 键不存在，继续查找下一个键
+          }
+        }
+    }
+  /*
     //early stop
     //check if diff between current_x and RK4result is small enough
-    if (fabs(RK4result[0] - current_x[0]) < 1e-5 && fabs(RK4result[1] - current_x[1]) < 1e-5){
+    if ((fabs(RK4result[0] - current_x[0]) < 1e-3 && fabs(RK4result[1] - current_x[1]) < 1e-3) || (fabs(current_v[0]) < 1e-3 && fabs(current_v[1]) < 1e-3)){
       auto it = critical_points_0.find(current_offset);
       if (it != critical_points_0.end() && it->second.type != SADDLE) {
       flag = 1;
@@ -501,7 +632,7 @@ std::vector<std::array<double, 2>> trajectory(double *X_original,const std::arra
       //printf("start_id: %d, current_id: %d\n", orginal_offset,get_cell_offset(current_x.data(), DW, DH));
       double temp_v[2] = {0};
       interp2d(initial_x.data(), temp_v);
-      printf("start_values: (%f, %f), current_values: (%f, %f)\n", temp_v[0],temp_v[1],current_v[0],current_v[1]);
+      //printf("start_values: (%f, %f), current_values: (%f, %f)\n", temp_v[0],temp_v[1],current_v[0],current_v[1]);
       break;
       }
       else{
@@ -514,14 +645,25 @@ std::vector<std::array<double, 2>> trajectory(double *X_original,const std::arra
         break;  
       }
     }
-
+  */
     current_x = RK4result;
     result.push_back(current_x);
     length++;
-
   }
   // printf("length: %d\n", length);
   // printf("result size: %ld\n", result.size());
+  
+  if (flag == 0){
+    count_not_found ++;
+    printf("not found after %d iteration\n",length);
+    printf("start_id: %d, current_id: %d\n", orginal_offset,get_cell_offset(current_x.data(), DW, DH));
+    double temp_v[2] = {0};
+    interp2d(initial_x.data(), temp_v);
+    double current_v[2] = {0};
+    interp2d(current_x.data(), current_v);
+    printf("start_values: (%f, %f), current_values: (%f, %f)\n", temp_v[0],temp_v[1],current_v[0],current_v[1]);
+    printf("start_position: (%f, %f), current_position: (%f, %f)\n", initial_x[0],initial_x[1],current_x[0],current_x[1]);
+  }
   index.push_back(length);
 
   return result;
@@ -604,10 +746,11 @@ int main(int argc, char **argv){
   << ", factor=" << vector_field_scaling_factor 
   << ", nbits=" << nbits << ", vbits=" << vbits << ", shift_bits=" << nbits - vbits << std::endl;
 
-  std::string cp_prefix = "origin_M_" + std::to_string(nbits - vbits) + "_bits";
-  if(sos) cp_prefix += "_sos";
-  bool cp_file = false; //file_exists(cp_prefix + "_sid.dat");
-  cp_file ? printf("Critical point file found!\n") : printf("Critical point Not found, recomputing\n");
+  // std::string cp_prefix = "origin_M_" + std::to_string(nbits - vbits) + "_bits";
+  // if(sos) cp_prefix += "_sos";
+  // bool cp_file = false; //file_exists(cp_prefix + "_sid.dat");
+  // cp_file ? printf("Critical point file found!\n") : printf("Critical point Not found, recomputing\n");
+
   // auto saddle_points_0 = cp_file ? read_saddlepoints(cp_prefix) : compute_saddle_critical_points(u, v, DH, DW, vector_field_scaling_factor);
   // auto saddle_points_0 = get_saddle_points(DH, DW);
 
@@ -622,10 +765,12 @@ int main(int argc, char **argv){
     it ++;
   }
   printf("saddle points size: %d\n", sad_count);
-
-
   free(u);
   free(v);
+
+  //write critical points to file
+  std::string cp_prefix = "../data/position";
+  record_criticalpoints(cp_prefix, critical_points_0);
 
   int num_steps = 1000;
   double h = atof(argv[5]);
@@ -645,7 +790,7 @@ int main(int argc, char **argv){
   std::vector<std::vector<std::array<double, 2>>> tracepoints;
   tracepoints.reserve(critical_points_0.size()*4);
 
- 
+ auto start = std::chrono::high_resolution_clock::now();
   for(const auto& p:critical_points_0){
     auto cp = p.second;
     if (cp.type == SADDLE){
@@ -691,10 +836,14 @@ int main(int argc, char **argv){
   printf("number of found cp: %d\n", count_found);
   printf("number of not found cp: %d\n", count_not_found);
   printf("number of out of bound: %d\n", count_out_bound);
+  auto end = std::chrono::high_resolution_clock::now();
+  std::chrono::duration<double> duration = end - start;
+  std::cout << "Time taken: " << duration.count() << " seconds" << std::endl;
+  
   //write tracepoints to file
   std::string filename = argv[7];
 
-  exit(0);
+  //exit(0);
   // std::string filename = "/home/mxi235/data/traceview/tracepoints.bin";
   std::ofstream file(filename, std::ios::out | std::ios::binary);
 
@@ -721,6 +870,8 @@ int main(int argc, char **argv){
     std::string filename2 = argv[8];
     writefile(filename2.c_str(), myindex.data(), myindex.size());
     std::cout << "index written to " << filename2 << std::endl;
+
+
 
 
 }
