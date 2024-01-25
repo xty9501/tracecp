@@ -26,6 +26,7 @@
 #include <unordered_map>
 #include <queue>
 #include <fstream>
+#include <utility>
 
 double vector_field_resolution = std::numeric_limits<double>::max();
 uint64_t vector_field_scaling_factor = 1;
@@ -152,6 +153,29 @@ typedef struct critical_point_t{
   critical_point_t(){}
 }critical_point_t;
 
+typedef struct record_t{
+  double sid_start;
+  double sid_end;
+  double dir;
+  double eig_vector_x;
+  double eig_vector_y;
+  record_t(double sid_start_, double sid_end_, double dir_, double eig_vector_x_, double eig_vector_y_){
+    sid_start = sid_start_;
+    sid_end = sid_end_;
+    dir = dir_;
+    eig_vector_x = eig_vector_x_;
+    eig_vector_y = eig_vector_y_;
+  }
+  record_t(){}
+}record_t;
+
+struct PairHash {
+    size_t operator()(const std::pair<int, int>& p) const {
+        auto hash1 = std::hash<int>{}(p.first);
+        auto hash2 = std::hash<int>{}(p.second);
+        return hash1 ^ hash2; // XOR 两个哈希值，也可以用其他方法组合
+    }
+};
 
 // std::unordered_map<int, critical_point_t> critical_points;
  
@@ -344,6 +368,24 @@ void writefile(const char * file, Type * data, size_t num_elements){
   std::ofstream fout(file, std::ios::binary);
   fout.write(reinterpret_cast<const char*>(&data[0]), num_elements*sizeof(Type));
   fout.close();
+}
+
+void writeRecordsToBinaryFile(const std::vector<record_t>& records, const std::string& filename) {
+    std::ofstream outfile(filename, std::ios::binary);
+    if (!outfile) {
+        std::cerr << "Unable to open file for writing." << std::endl;
+        return;
+    }
+
+    for (const auto& record : records) {
+        outfile.write(reinterpret_cast<const char*>(&record.sid_start), sizeof(record.sid_start));
+        outfile.write(reinterpret_cast<const char*>(&record.sid_end), sizeof(record.sid_end));
+        outfile.write(reinterpret_cast<const char*>(&record.dir), sizeof(record.dir));
+        outfile.write(reinterpret_cast<const char*>(&record.eig_vector_x), sizeof(record.eig_vector_x));
+        outfile.write(reinterpret_cast<const char*>(&record.eig_vector_y), sizeof(record.eig_vector_y));
+    }
+
+    outfile.close();
 }
 
 template<typename Type>
@@ -551,7 +593,7 @@ void interp2d(const double p[2], double v[2]){
 
 }
 
-std::vector<std::array<double, 2>> trajectory(double *X_original,const std::array<double, 2>& initial_x, const double time_step, const int DH,const int DW, const std::unordered_map<int, critical_point_t>& critical_points_0, int &count_limit,int &count_found, int &count_not_found, int &count_out_bound, std::vector<int>& index){
+std::vector<std::array<double, 2>> trajectory(double *X_original,const std::array<double, 2>& initial_x, const double time_step, const int DH,const int DW, const std::unordered_map<int, critical_point_t>& critical_points_0, int &count_limit,int &count_found, int &count_not_found, int &count_out_bound, std::vector<int>& index, std::vector<double>& config, std::vector<record_t>& record){
   std::vector<std::array<double, 2>> result;
   int flag = 0;
   int length = 0;
@@ -598,17 +640,26 @@ std::vector<std::array<double, 2>> trajectory(double *X_original,const std::arra
               //check if distance between current_x and cp.x is small enough
               double error = 1e-3;
               if (fabs(RK4result[0] - cp.x[0]) < error && fabs(RK4result[1] - cp.x[1]) < error){
-                // found cp
+                // if interpolated location is close to cp location, then find cp
                 flag = 1;
                 count_found ++;
-                //printf("found after %d iteration\n", length);
+                //printf("found cp after %d iteration, type: %s\n",length, get_critical_point_type_string(cp.type).c_str());
+                //printf("distance: %f\n",sqrt((initial_x[0]-current_x[0])*(initial_x[0]-current_x[0]) + (initial_x[1]-current_x[1])*(initial_x[1]-current_x[1])));
                 //printf("start_id: %d, current_id: %d\n", orginal_offset,get_cell_offset(current_x.data(), DW, DH));
-                double temp_v[2] = {0};
-                interp2d(initial_x.data(), temp_v);
                 //printf("start_values: (%f, %f), current_values: (%f, %f)\n", temp_v[0],temp_v[1],current_v[0],current_v[1]);
                 //printf("start_position: (%f, %f), current_position: (%f, %f)\n", initial_x[0],initial_x[1],current_x[0],current_x[1]);
 
-                break;
+                //add to record
+                record_t r(static_cast<double>(orginal_offset), static_cast<double>(cell_offset), config[2], config[0], config[1]);
+                //printf("start_id: %d, current_id: %d, dir: %f, eig_vector: (%f, %f)\n", orginal_offset,cell_offset, config[2], config[0], config[1]);
+                record.push_back(r);
+
+                // break;
+                std::array<double, 2> true_cp = {cp.x[0], cp.x[1]};
+                result.push_back(true_cp);
+                length++;
+                index.push_back(length);
+                return result;
               }
               else{
                 //not found cp in this cell
@@ -754,6 +805,9 @@ int main(int argc, char **argv){
   // auto saddle_points_0 = cp_file ? read_saddlepoints(cp_prefix) : compute_saddle_critical_points(u, v, DH, DW, vector_field_scaling_factor);
   // auto saddle_points_0 = get_saddle_points(DH, DW);
 
+  // std::unordered_map<std::pair<int, int>, record_t, PairHash> record;
+  std::vector<record_t> record;
+
   auto critical_points_0 =compute_critical_points(u, v, DH, DW, vector_field_scaling_factor);
 
   printf("critical points size: %ld\n", critical_points_0.size());
@@ -768,9 +822,7 @@ int main(int argc, char **argv){
   free(u);
   free(v);
 
-  //write critical points to file
-  std::string cp_prefix = "../data/position";
-  record_criticalpoints(cp_prefix, critical_points_0);
+ 
 
   int num_steps = 1000;
   double h = atof(argv[5]);
@@ -796,37 +848,45 @@ int main(int argc, char **argv){
     if (cp.type == SADDLE){
       global_count ++;
       
-      double X0[2] = {cp.x[0] + eps*cp.eig_vec[0][0], cp.x[1] + eps*cp.eig_vec[0][1]}; //direction1 positive
-      // double X0[2] = {cp.x[0] - eps*cp.eig_vec[0][0], cp.x[1] - eps*cp.eig_vec[0][1]}; //direction1 negative
-      // double X0[2] = {cp.x[0] + eps*cp.eig_vec[1][0], cp.x[1] + eps*cp.eig_vec[1][1]}; //direction2 positive
-      // double X0[2] = {cp.x[0] - eps*cp.eig_vec[1][0], cp.x[1] - eps*cp.eig_vec[1][1]}; //direction2 negative
-      double X_all_direction[4][2] = {{cp.x[0] + eps*cp.eig_vec[0][0], cp.x[1] + eps*cp.eig_vec[0][1]},
-                                      {cp.x[0] - eps*cp.eig_vec[0][0], cp.x[1] - eps*cp.eig_vec[0][1]},
-                                      {cp.x[0] + eps*cp.eig_vec[1][0], cp.x[1] + eps*cp.eig_vec[1][1]},
-                                      {cp.x[0] - eps*cp.eig_vec[1][0], cp.x[1] - eps*cp.eig_vec[1][1]}};
+      std::vector<std::array<double,2>> X_all_direction;  
+      X_all_direction.push_back({cp.x[0] + eps*cp.eig_vec[0][0], cp.x[1] + eps*cp.eig_vec[0][1]});
+      X_all_direction.push_back({cp.x[0] - eps*cp.eig_vec[0][0], cp.x[1] - eps*cp.eig_vec[0][1]});
+      X_all_direction.push_back({cp.x[0] + eps*cp.eig_vec[1][0], cp.x[1] + eps*cp.eig_vec[1][1]});
+      X_all_direction.push_back({cp.x[0] - eps*cp.eig_vec[1][0], cp.x[1] - eps*cp.eig_vec[1][1]});                              
       double lambda[3];
       double values[2];
+      std::vector<std::vector<double>> config;
+      config.push_back({cp.eig_vec[0][0], cp.eig_vec[0][1],1});
+      config.push_back({cp.eig_vec[0][0], cp.eig_vec[0][1],-1});
+      config.push_back({cp.eig_vec[1][0], cp.eig_vec[1][1],1});
+      config.push_back({cp.eig_vec[1][0], cp.eig_vec[1][1],-1});
+
+
+
       for (int i = 0; i < 4; i ++) {
         std::array<double, 2> X_start;
         std::vector<std::array<double, 2>> result_return;
-        X_start[0] = X_all_direction[i][0];
-        X_start[1] = X_all_direction[i][1];
+        X_start = X_all_direction[i];
         //check if inside
-        if (inside(X_start,DH, DW))
+        if (inside(X_start,DH, DW)){
           //result_return = simulate_motion(X_start, h, num_steps,DH,DW, critical_points_0);
           
           if(i == 0 || i ==2){
+
             //result_return = trajectory(X_start, h,DH,DW, critical_points_0);
             //result_return = simulate_motion(X_start, h, num_steps,DH,DW, critical_points_0);
-            result_return = trajectory(cp.x,X_start, h,DH,DW, critical_points_0,count_reach_limit,count_found,count_not_found,count_out_bound,myindex);
+            //printf("config: %f, %f, %f\n", config[i][0],config[i][1],config[i][2]);
+            result_return = trajectory(cp.x,X_start, h,DH,DW, critical_points_0,count_reach_limit,count_found,count_not_found,count_out_bound,myindex,config[i],record);
           }
           else{
             //result_return = trajectory(X_start, -h,DH,DW, critical_points_0);
             //result_return = simulate_motion(X_start, -h, num_steps,DH,DW, critical_points_0);
-            result_return = trajectory(cp.x,X_start, -h,DH,DW, critical_points_0,count_reach_limit,count_found,count_not_found,count_out_bound,myindex);
+            //printf("config: %f, %f, %f\n", config[i][0],config[i][1],config[i][2]);
+            result_return = trajectory(cp.x,X_start, -h,DH,DW, critical_points_0,count_reach_limit,count_found,count_not_found,count_out_bound,myindex,config[i],record);
           }
         //printf("tracepoints size: %ld\n", result_return.size());
         tracepoints.push_back(result_return);
+        }
       }
     }
   }
@@ -839,20 +899,25 @@ int main(int argc, char **argv){
   auto end = std::chrono::high_resolution_clock::now();
   std::chrono::duration<double> duration = end - start;
   std::cout << "Time taken: " << duration.count() << " seconds" << std::endl;
+
+  printf("record size: %ld\n", record.size());
   
-  //write tracepoints to file
+
   std::string filename = argv[7];
+  std::string filename2 = argv[8];
+  std::string filename3 = argv[9];
 
-  //exit(0);
-  // std::string filename = "/home/mxi235/data/traceview/tracepoints.bin";
+  // if no filename provided, no write file
+  if (filename.empty() && filename2.empty() && filename3.empty()){
+      exit(0);
+  }
+
+  //write tracepoints to file
   std::ofstream file(filename, std::ios::out | std::ios::binary);
-
     if (!file.is_open()) {
         std::cerr << "Failed to open file for writing." << std::endl;
         return 1;
     }
-
-    // Write the tracepoints data as binary
     int count = 0;
     std::cout << tracepoints.size() <<std::endl;
     for (const auto& row : tracepoints) {
@@ -862,14 +927,20 @@ int main(int argc, char **argv){
         }
     }
     printf("write %d points\n", count);
-    // Close the file
     file.close();
     std::cout << "Data written to " << filename << std::endl;
 
     //write index to file
-    std::string filename2 = argv[8];
     writefile(filename2.c_str(), myindex.data(), myindex.size());
     std::cout << "index written to " << filename2 << std::endl;
+
+    //write record to file
+    writeRecordsToBinaryFile(record, filename3);
+
+    //write critical points to file
+    std::string cp_prefix = "../data/position";
+    record_criticalpoints(cp_prefix, critical_points_0);
+
 
 
 
