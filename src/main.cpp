@@ -391,16 +391,16 @@ void writeRecordsToBinaryFile(const std::vector<record_t>& records, const std::s
 template<typename Type>
 std::array<Type, 2> RK4(const Type * x, const Type * v, const Type h){
   // x is the position, v is the velocity, h is the step size
-  Type k1_u = v[0];
-  Type k1_v = v[1];
-  Type k2_u = v[0] + h * k1_u / 2;
-  Type k2_v = v[1] + h * k1_v / 2;
-  Type k3_u = v[0] + h * k2_u / 2;
-  Type k3_v = v[1] + h * k2_v / 2;
+  Type k1_u = h*v[0];
+  Type k1_v = h*v[1];
+  Type k2_u = v[0] + h * k1_u / 2.0;
+  Type k2_v = v[1] + h * k1_v / 2.0;
+  Type k3_u = v[0] + h * k2_u / 2.0;
+  Type k3_v = v[1] + h * k2_v / 2.0;
   Type k4_u = v[0] + h * k3_u;
   Type k4_v = v[1] + h * k3_v;
-  Type u = x[0] + h * (k1_u + 2 * k2_u + 2 * k3_u + k4_u) / 6;
-  Type v_result = x[1] + h * (k1_v + 2 * k2_v + 2 * k3_v + k4_v) / 6;
+  Type u = x[0] + h * (k1_u + 2 * k2_u + 2 * k3_u + k4_u) / 6.0;
+  Type v_result = x[1] + h * (k1_v + 2 * k2_v + 2 * k3_v + k4_v) / 6.0;
   std::array<Type, 2> result = {u, v_result};
   return result;
 }
@@ -412,10 +412,10 @@ inline bool file_exists(const std::string& filename) {
 }
 
 
-inline bool inside(const std::array<double, 2> x,const int DH, const int DW){
-  if (x[0] < 0 || x[0] >= DW || x[1] < 0 || x[1] >= DH) return false;
-  else return true;
-
+template<typename Container>
+bool inside(const Container& x, int DH, int DW) {
+  if (x[0] < 0 || x[0] >= DW-1 || x[1] < 0 || x[1] >= DH-1) return false;
+  return true;
 }
 
 void record_criticalpoints(const std::string& prefix, const std::unordered_map<int, critical_point_t>& cps, bool write_sid=false){
@@ -593,6 +593,62 @@ void interp2d(const double p[2], double v[2]){
 
 }
 
+inline int printsign(double value){
+  if (value > 0){
+    return 1;
+  }
+  else if (value < 0){
+    return -1;
+  }
+  else{
+    return 0;
+  }
+} 
+
+template<typename Type>
+std::array<Type, 2> newRK4(const Type * x, const Type * v,  Type h, const int DH, const int DW) {
+  // x and y are positions, and h is the step size
+  double rk1[2] = {0};
+  const double p1[] = {x[0], x[1]};
+  if(!inside(p1, DH, DW)){
+    return std::array<Type, 2>{x[0], x[1]};
+  }
+  interp2d(p1, rk1);
+  
+  double rk2[2] = {0};
+  const double p2[] = {x[0] + 0.5 * h * rk1[0], x[1] + 0.5 * h * rk1[1]};
+  if (!inside(p2, DH, DW)){
+    return std::array<Type, 2>{p1[0], p1[1]};
+  }
+  interp2d(p2, rk2);
+  
+  double rk3[2] = {0};
+  const double p3[] = {x[0] + 0.5 * h * rk2[0], x[1] + 0.5 * h * rk2[1]};
+  if (!inside(p3, DH, DW)){
+    return std::array<Type, 2>{p2[0], p2[1]};
+  }
+  interp2d(p3, rk3);
+  
+  double rk4[2] = {0};
+  const double p4[] = {x[0] + h * rk3[0], x[1] + h * rk3[1]};
+  if (!inside(p4, DH, DW)){
+    return std::array<Type, 2>{p3[0], p3[1]};
+  }
+  interp2d(p4, rk4);
+  
+  Type next_x = x[0] + h * (rk1[0] + 2 * rk2[0] + 2 * rk3[0] + rk4[0]) / 6;
+  Type next_y = x[1] + h * (rk1[1] + 2 * rk2[1] + 2 * rk3[1] + rk4[1]) / 6;
+  // printf("shift: (%f, %f)\n", next_x - x[0], next_y - x[1]);
+  // printf("coefficients: (%f,%f)\n",(rk1[0] + 2 * rk2[0] + 2 * rk3[0] + rk4[0]) / 6, (rk1[1] + 2 * rk2[1] + 2 * rk3[1] + rk4[1]) / 6);
+  // printf("current h sign: %d\n", printsign(h));
+  // printf("sign of coefficients x (%d,%d,%d,%d)\n", printsign(rk1[0]), printsign(rk2[0]), printsign(rk3[0]), printsign(rk4[0]));
+  // printf("sign of coefficients y (%d,%d,%d,%d)\n", printsign(rk1[1]), printsign(rk2[1]), printsign(rk3[1]), printsign(rk4[1]));
+
+  std::array<Type, 2> result = {next_x, next_y};
+  return result;
+}
+
+
 std::vector<std::array<double, 2>> trajectory(double *X_original,const std::array<double, 2>& initial_x, const double time_step, const int DH,const int DW, const std::unordered_map<int, critical_point_t>& critical_points_0, int &count_limit,int &count_found, int &count_not_found, int &count_out_bound, std::vector<int>& index, std::vector<double>& config, std::vector<record_t>& record){
   std::vector<std::array<double, 2>> result;
   int flag = 0;
@@ -604,7 +660,6 @@ std::vector<std::array<double, 2>> trajectory(double *X_original,const std::arra
   std::array<double, 2> current_x = initial_x;
 
   if(!inside(current_x, DH, DW)){
-    //printf("out of bound!\n");
     count_out_bound ++;
     return result;
   }
@@ -621,15 +676,24 @@ std::vector<std::array<double, 2>> trajectory(double *X_original,const std::arra
       break;
     }
     if(!inside(current_x, DH, DW)){
-      //printf("out of bound!\n");
       count_out_bound ++;
       flag = 1;
       break;
     }
     double current_v[2] = {0};
+    //printf("current_x: (%f, %f)\n", current_x[0], current_x[1]);
     interp2d(current_x.data(), current_v);
+    //printf("current_v: (%f, %f)\n", current_v[0], current_v[1]);
     int current_offset = get_cell_offset(current_x.data(), DW, DH);
-    std::array<double, 2> RK4result = RK4(current_x.data(), current_v, time_step);
+    //std::array<double, 2> RK4result = RK4(current_x.data(), current_v, time_step);
+    std::array<double, 2> RK4result = newRK4(current_x.data(), current_v, time_step, DH, DW);
+
+    //printf("RK4result: (%f, %f)\n", RK4result[0], RK4result[1]);
+    // double temp_v[2] = {0};
+    // interp2d(RK4result.data(), temp_v);
+    // printf("current time_step: %f\n", time_step);
+    // printf("temp_v: (%f, %f)\n", temp_v[0], temp_v[1]);
+
     if (current_offset != orginal_offset){
       //moved to another cell
         auto surrounding_cell = get_surrounding_cell(current_offset, DW, DH);
@@ -671,32 +735,6 @@ std::vector<std::array<double, 2>> trajectory(double *X_original,const std::arra
           }
         }
     }
-  /*
-    //early stop
-    //check if diff between current_x and RK4result is small enough
-    if ((fabs(RK4result[0] - current_x[0]) < 1e-3 && fabs(RK4result[1] - current_x[1]) < 1e-3) || (fabs(current_v[0]) < 1e-3 && fabs(current_v[1]) < 1e-3)){
-      auto it = critical_points_0.find(current_offset);
-      if (it != critical_points_0.end() && it->second.type != SADDLE) {
-      flag = 1;
-      count_found ++;
-      //printf("found cp in critical_points_0! start position: (%f, %f), current position: (%f, %f), #iteration: %d\n", initial_x[0],initial_x[1],current_x[0],current_x[1], length);
-      //printf("start_id: %d, current_id: %d\n", orginal_offset,get_cell_offset(current_x.data(), DW, DH));
-      double temp_v[2] = {0};
-      interp2d(initial_x.data(), temp_v);
-      //printf("start_values: (%f, %f), current_values: (%f, %f)\n", temp_v[0],temp_v[1],current_v[0],current_v[1]);
-      break;
-      }
-      else{
-        //printf("not found cp in critical_points_0! start position: (%f, %f), current position: (%f, %f), #iteration: %d\n", initial_x[0],initial_x[1],current_x[0],current_x[1], length);
-        //printf("start_id: %d, current_id: %d\n", orginal_offset,get_cell_offset(current_x.data(), DW, DH));
-        double temp_v[2] = {0};
-        interp2d(initial_x.data(), temp_v);
-        //printf("start_values: (%f, %f), current_values: (%f, %f)\n", temp_v[0],temp_v[1],current_v[0],current_v[1]);
-        count_not_found ++;
-        break;  
-      }
-    }
-  */
     current_x = RK4result;
     result.push_back(current_x);
     length++;
@@ -708,18 +746,18 @@ std::vector<std::array<double, 2>> trajectory(double *X_original,const std::arra
     count_not_found ++;
     printf("not found after %d iteration\n",length);
     printf("start_id: %d, current_id: %d\n", orginal_offset,get_cell_offset(current_x.data(), DW, DH));
-    double temp_v[2] = {0};
-    interp2d(initial_x.data(), temp_v);
-    double current_v[2] = {0};
-    interp2d(current_x.data(), current_v);
-    printf("start_values: (%f, %f), current_values: (%f, %f)\n", temp_v[0],temp_v[1],current_v[0],current_v[1]);
-    printf("start_position: (%f, %f), current_position: (%f, %f)\n", initial_x[0],initial_x[1],current_x[0],current_x[1]);
+    // double temp_v[2] = {0};
+    // interp2d(initial_x.data(), temp_v);
+    // double current_v[2] = {0};
+    // interp2d(current_x.data(), current_v);
+    // printf("start_values: (%f, %f), current_values: (%f, %f)\n", temp_v[0],temp_v[1],current_v[0],current_v[1]);
+    // printf("start_position: (%f, %f), current_position: (%f, %f)\n", initial_x[0],initial_x[1],current_x[0],current_x[1]);
   }
   index.push_back(length);
 
   return result;
 }
-
+/*
 std::vector<std::array<double, 2>> simulate_motion(const std::array<double, 2>& initial_x, const double time_step, const int num_steps,const int DH,const int DW, const std::unordered_map<int, critical_point_t>& critical_points_0) {
   //x is the position, v is the velocity, h is the step size, n is the number of iterations
   std::vector<std::array<double, 2>> result;
@@ -771,6 +809,8 @@ std::vector<std::array<double, 2>> simulate_motion(const std::array<double, 2>& 
   return result;
 }
 
+*/
+
 
 int main(int argc, char **argv){
   size_t num = 0;
@@ -817,14 +857,84 @@ int main(int argc, char **argv){
     auto cp = it->second;
     if (cp.type == SADDLE) sad_count ++;
     it ++;
+    //print if coordinates is around 1587,314
+
+    // if (cp.x[0] > 1586 && cp.x[0] < 1588 && cp.x[1] > 313 && cp.x[1] < 315){
+    //   int count_reach_limit = 0;
+    //   int count_found = 0;
+    //   int count_not_found = 0;
+    //   int count_out_bound = 0;
+    //   std::vector<int> myindex;
+    //   printf("cp: (%f, %f), type: %s\n", cp.x[0], cp.x[1], get_critical_point_type_string(cp.type).c_str());
+    //   //cp: (1587.301997, 314.571846), type: SADDLE
+    //   printf("eig_vec: (%f, %f), (%f, %f)\n", cp.eig_vec[0][0], cp.eig_vec[0][1], cp.eig_vec[1][0], cp.eig_vec[1][1]);
+    //   std::vector<std::array<double,2>> X_all_direction;  
+    //   double eps = 0.1;
+    //   double h = 0.01;
+    //   X_all_direction.push_back({cp.x[0] + eps*cp.eig_vec[0][0], cp.x[1] + eps*cp.eig_vec[0][1]}); //+
+    //   X_all_direction.push_back({cp.x[0] - eps*cp.eig_vec[0][0], cp.x[1] - eps*cp.eig_vec[0][1]}); //+
+    //   X_all_direction.push_back({cp.x[0] + eps*cp.eig_vec[1][0], cp.x[1] + eps*cp.eig_vec[1][1]}); //-
+    //   X_all_direction.push_back({cp.x[0] - eps*cp.eig_vec[1][0], cp.x[1] - eps*cp.eig_vec[1][1]});  //-
+    //   double lambda[3];
+    //   double values[2];
+    //   std::vector<std::vector<double>> config;
+    //   config.push_back({cp.eig_vec[0][0], cp.eig_vec[0][1],1});
+    //   config.push_back({cp.eig_vec[0][0], cp.eig_vec[0][1],-1});
+    //   config.push_back({cp.eig_vec[1][0], cp.eig_vec[1][1],1});
+    //   config.push_back({cp.eig_vec[1][0], cp.eig_vec[1][1],-1});
+    //   for (int i = 0; i < 4; i ++) {
+    //     std::array<double, 2> X_start;
+        
+    //     std::vector<std::array<double, 2>> result_return;
+    //     X_start = X_all_direction[i];
+    //     //check if inside
+    //     if (inside(X_start,DH, DW)){
+    //      for (int j = 0; j < 2; j ++){
+    //         printf("i/j (%d,%d)\n", i,j);
+    //         std::vector<std::array<double, 2>> result_return;
+    //         if (j == 0){
+    //           result_return = trajectory(cp.x,X_start, h,DH,DW, critical_points_0,count_reach_limit,count_found,count_not_found,count_out_bound,myindex,config[i],record);
+    //         }
+    //         else{
+    //         result_return = trajectory(cp.x,X_start, -h,DH,DW, critical_points_0,count_reach_limit,count_found,count_not_found,count_out_bound,myindex,config[i],record);
+    //         }
+    //         for (int k = 0; k < result_return.size(); k ++){
+    //           printf("result_return: (%f, %f)\n", result_return[k][0], result_return[k][1]);
+    //         }
+    //      }
+    //     }
+    //     else{
+    //       printf("X_start: (%f, %f) is out of bound\n", X_start[0], X_start[1]);
+    //     }
+    //   }
+      
+    // }
+  
   }
   printf("saddle points size: %d\n", sad_count);
   free(u);
   free(v);
 
+  //exit(0);
+
+
+  // double test[3][2] = {
+  //   {1587, 314},
+  //   {1587, 315},
+  //   {1588, 315}};
+  // double test_coord[2] = {1587.3,314.572};
+  // double test_inter[2] = {0};
+  // interp2d(test_coord, test_inter);
+  // printf("interpolated value at cp: (%f, %f)\n", test_inter[0], test_inter[1]);
+  // double test_coord2[2] = {1587.35,314.484};
+  // double test_inter2[2] = {0};
+  // interp2d(test_coord2, test_inter2);
+  // printf("interpolated value at cp+eps*eig: (%f, %f)\n", test_inter2[0], test_inter2[1]);
+  // printf("grad at (1587,314): (%f, %f)\n", grad(0, 1587, 314), grad(1, 1587, 314));
+
  
 
-  int num_steps = 1000;
+  int num_steps = 10;
   double h = atof(argv[5]);
   // double h = 0.1;
   double eps = atof(argv[6]);
@@ -857,12 +967,9 @@ int main(int argc, char **argv){
       double values[2];
       std::vector<std::vector<double>> config;
       config.push_back({cp.eig_vec[0][0], cp.eig_vec[0][1],1});
-      config.push_back({cp.eig_vec[0][0], cp.eig_vec[0][1],-1});
-      config.push_back({cp.eig_vec[1][0], cp.eig_vec[1][1],1});
+      config.push_back({cp.eig_vec[0][0], cp.eig_vec[0][1],1});
       config.push_back({cp.eig_vec[1][0], cp.eig_vec[1][1],-1});
-
-
-
+      config.push_back({cp.eig_vec[1][0], cp.eig_vec[1][1],-1});
       for (int i = 0; i < 4; i ++) {
         std::array<double, 2> X_start;
         std::vector<std::array<double, 2>> result_return;
@@ -871,21 +978,22 @@ int main(int argc, char **argv){
         if (inside(X_start,DH, DW)){
           //result_return = simulate_motion(X_start, h, num_steps,DH,DW, critical_points_0);
           
-          if(i == 0 || i ==2){
-
+          if(i == 0 || i ==1){
             //result_return = trajectory(X_start, h,DH,DW, critical_points_0);
             //result_return = simulate_motion(X_start, h, num_steps,DH,DW, critical_points_0);
             //printf("config: %f, %f, %f\n", config[i][0],config[i][1],config[i][2]);
             result_return = trajectory(cp.x,X_start, h,DH,DW, critical_points_0,count_reach_limit,count_found,count_not_found,count_out_bound,myindex,config[i],record);
+            tracepoints.push_back(result_return);
           }
           else{
             //result_return = trajectory(X_start, -h,DH,DW, critical_points_0);
             //result_return = simulate_motion(X_start, -h, num_steps,DH,DW, critical_points_0);
             //printf("config: %f, %f, %f\n", config[i][0],config[i][1],config[i][2]);
             result_return = trajectory(cp.x,X_start, -h,DH,DW, critical_points_0,count_reach_limit,count_found,count_not_found,count_out_bound,myindex,config[i],record);
+            tracepoints.push_back(result_return);
           }
         //printf("tracepoints size: %ld\n", result_return.size());
-        tracepoints.push_back(result_return);
+        
         }
       }
     }
@@ -906,6 +1014,7 @@ int main(int argc, char **argv){
   std::string filename = argv[7];
   std::string filename2 = argv[8];
   std::string filename3 = argv[9];
+  std::string filename4 = argv[10];
 
   // if no filename provided, no write file
   if (filename.empty() && filename2.empty() && filename3.empty()){
@@ -939,7 +1048,7 @@ int main(int argc, char **argv){
 
     //write critical points to file
     std::string cp_prefix = "../data/position";
-    record_criticalpoints(cp_prefix, critical_points_0);
+    record_criticalpoints(filename4, critical_points_0);
 
 
 
