@@ -1,3 +1,5 @@
+#include <interp.h>
+#include <utilsIO.h>
 #include <ftk/numeric/print.hh>
 #include <ftk/numeric/cross_product.hh>
 #include <ftk/numeric/vector_norm.hh>
@@ -38,87 +40,6 @@ std::mutex mutex;
 size_t global_count = 0;
 
 
-
-
-// struct critical_point_t {
-// double mu[3]; // interpolation coefficients
-// double x[2]; // the coordinates of the critical points
-// double v;
-// int type;
-// size_t simplex_id;
-// critical_point_t(){}
-// critical_point_t(const double * mu_, const double * x_, const double v_, const int t_){
-//     for(int i=0; i<3; i++) mu[i] = mu_[i];
-//     for(int i=0; i<2; i++) x[i] = x_[i];
-//     v = v_;
-//     type = t_;
-// }
-// };
-
-double triarea(double a, double b, double c)
-
-{
-
-    double s = (a + b + c)/2.0;
-
-    double area=sqrt(fabs(s*(s-a)*(s-b)*(s-c)));
-
-    return area;     
-
-}
-
-double dist(double x0, double y0, double z0, double x1, double y1, double z1)
-
-{
-
-    double a = x1 - x0;	  
-
-    double b = y1 - y0;
-
-    double c = z1 - z0;
-
-    return sqrt(a*a + b*b + c*c);
-
-}
-
-void barycent2d(double *p0, double *p1, double *p2, const double *v, double *lambda )
-{
-
-	double x0 = p0[0], y0 = p0[1], z0 = 0;
-	double x1 = p1[0], y1 = p1[1], z1 = 0;
-	double x2 = p2[0], y2 = p2[1], z2 = 0;
-	double vx = v[0], vy = v[1], vz = 0;
-
-    // compute the area of the big triangle
-
-    double a = dist(x0, y0, z0, x1, y1, z1);
-    double b = dist(x1, y1, z1, x2, y2, z2);
-    double c = dist(x2, y2, z2, x0, y0, z0);
-
-    double totalarea = triarea(a, b, c);
-
-	
-
-    // compute the distances from the outer vertices to the inner vertex
-
-    double length0 = dist(x0, y0, z0, vx, vy, vz);	  
-
-    double length1 = dist(x1, y1, z1, vx, vy, vz);	  
-
-    double length2 = dist(x2, y2, z2, vx, vy, vz);	  
-
-    
-
-    // divide the area of each small triangle by the area of the big triangle
-
-    lambda[0] = triarea(b, length1, length2)/totalarea;
-
-    lambda[1] = triarea(c, length0, length2)/totalarea;
-
-    lambda[2] = triarea(a, length0, length1)/totalarea;	  
-
-}
-
 typedef struct critical_point_t{
   double x[2];
   double eig_vec[2][2];
@@ -153,21 +74,6 @@ typedef struct critical_point_t{
   critical_point_t(){}
 }critical_point_t;
 
-typedef struct record_t{
-  double sid_start;
-  double sid_end;
-  double dir;
-  double eig_vector_x;
-  double eig_vector_y;
-  record_t(double sid_start_, double sid_end_, double dir_, double eig_vector_x_, double eig_vector_y_){
-    sid_start = sid_start_;
-    sid_end = sid_end_;
-    dir = dir_;
-    eig_vector_x = eig_vector_x_;
-    eig_vector_y = eig_vector_y_;
-  }
-  record_t(){}
-}record_t;
 
 struct PairHash {
     size_t operator()(const std::pair<int, int>& p) const {
@@ -208,13 +114,6 @@ std::string get_critical_point_type_string(int type){
       return "INVALID";
   }
 }
-
-
-std::unordered_map<int, bool> flags;
-bool original = true;
-
-
-
 
 
 void refill_gradient(int id,const int DH,const int DW, const float* grad_tmp){
@@ -346,47 +245,7 @@ compute_critical_points(const T * U, const T * V, int r1, int r2, uint64_t vecto
   return critical_points; 
 }
 
-template<typename Type>
-Type * readfile(const char * file, size_t& num){
-  std::ifstream fin(file, std::ios::binary);
-  if(!fin){
-        std::cout << " Error, Couldn't find the file" << "\n";
-        return 0;
-    }
-    fin.seekg(0, std::ios::end);
-    const size_t num_elements = fin.tellg() / sizeof(Type);
-    fin.seekg(0, std::ios::beg);
-    Type * data = (Type *) malloc(num_elements*sizeof(Type));
-  fin.read(reinterpret_cast<char*>(&data[0]), num_elements*sizeof(Type));
-  fin.close();
-  num = num_elements;
-  return data;
-}
 
-template<typename Type>
-void writefile(const char * file, Type * data, size_t num_elements){
-  std::ofstream fout(file, std::ios::binary);
-  fout.write(reinterpret_cast<const char*>(&data[0]), num_elements*sizeof(Type));
-  fout.close();
-}
-
-void writeRecordsToBinaryFile(const std::vector<record_t>& records, const std::string& filename) {
-    std::ofstream outfile(filename, std::ios::binary);
-    if (!outfile) {
-        std::cerr << "Unable to open file for writing." << std::endl;
-        return;
-    }
-
-    for (const auto& record : records) {
-        outfile.write(reinterpret_cast<const char*>(&record.sid_start), sizeof(record.sid_start));
-        outfile.write(reinterpret_cast<const char*>(&record.sid_end), sizeof(record.sid_end));
-        outfile.write(reinterpret_cast<const char*>(&record.dir), sizeof(record.dir));
-        outfile.write(reinterpret_cast<const char*>(&record.eig_vector_x), sizeof(record.eig_vector_x));
-        outfile.write(reinterpret_cast<const char*>(&record.eig_vector_y), sizeof(record.eig_vector_y));
-    }
-
-    outfile.close();
-}
 
 template<typename Type>
 std::array<Type, 2> RK4(const Type * x, const Type * v, const Type h){
@@ -545,54 +404,6 @@ inline bool check_result(const double error, const double *v){
 }
 
 
-
-void interp2d(const double p[2], double v[2]){
-  double X[3][2];
-  double V[3][2];
-  int x0 = floor(p[0]);
-  int y0 = floor(p[1]);
-  float x_ex = p[0] - x0;
-  float y_ex = p[1] - y0;
-  int upper =1;
-  if (y_ex > x_ex){
-    upper = 1;
-  }
-  else{
-    upper = 0;
-  }
-  if (upper == 1){
-      X[0][0] = x0;
-      X[0][1] = y0;
-      X[1][0] = x0;
-      X[1][1] = y0+1;
-      X[2][0] = x0+1;
-      X[2][1] = y0+1;
-      for (int i =0;i <2;i++){
-        V[0][i] = grad(i, x0, y0);
-        V[1][i] = grad(i, x0, y0+1);
-        V[2][i] = grad(i, x0+1, y0+1);
-      }
-    }
-  else{
-    X[0][0] = x0;
-    X[0][1] = y0;
-    X[1][0] = x0+1;
-    X[1][1] = y0;
-    X[2][0] = x0+1;
-    X[2][1] = y0+1;
-    for (int i =0;i <2;i++){
-      V[0][i] = grad(i, x0, y0);
-      V[1][i] = grad(i, x0+1, y0);
-      V[2][i] = grad(i, x0+1, y0+1);
-    }
-  }
-  double lambda[3];
-  barycent2d(X[0], X[1], X[2], p, lambda);
-  v[0] = lambda[0]*V[0][0] + lambda[1]*V[1][0] + lambda[2]*V[2][0];
-  v[1] = lambda[0]*V[0][1] + lambda[1]*V[1][1] + lambda[2]*V[2][1];
-
-}
-
 inline int printsign(double value){
   if (value > 0){
     return 1;
@@ -613,28 +424,28 @@ std::array<Type, 2> newRK4(const Type * x, const Type * v,  Type h, const int DH
   if(!inside(p1, DH, DW)){
     return std::array<Type, 2>{x[0], x[1]};
   }
-  interp2d(p1, rk1);
+  interp2d(p1, rk1,grad);
   
   double rk2[2] = {0};
   const double p2[] = {x[0] + 0.5 * h * rk1[0], x[1] + 0.5 * h * rk1[1]};
   if (!inside(p2, DH, DW)){
     return std::array<Type, 2>{p1[0], p1[1]};
   }
-  interp2d(p2, rk2);
+  interp2d(p2, rk2,grad);
   
   double rk3[2] = {0};
   const double p3[] = {x[0] + 0.5 * h * rk2[0], x[1] + 0.5 * h * rk2[1]};
   if (!inside(p3, DH, DW)){
     return std::array<Type, 2>{p2[0], p2[1]};
   }
-  interp2d(p3, rk3);
+  interp2d(p3, rk3,grad);
   
   double rk4[2] = {0};
   const double p4[] = {x[0] + h * rk3[0], x[1] + h * rk3[1]};
   if (!inside(p4, DH, DW)){
     return std::array<Type, 2>{p3[0], p3[1]};
   }
-  interp2d(p4, rk4);
+  interp2d(p4, rk4,grad);
   
   Type next_x = x[0] + h * (rk1[0] + 2 * rk2[0] + 2 * rk3[0] + rk4[0]) / 6;
   Type next_y = x[1] + h * (rk1[1] + 2 * rk2[1] + 2 * rk3[1] + rk4[1]) / 6;
@@ -669,7 +480,7 @@ std::vector<std::array<double, 2>> trajectory(double *X_original,const std::arra
   }
 
   while (flag == 0){
-    if (length == 1000) {
+    if (length == 2000) {
       //printf("reach max length!\n");
       count_limit ++;
       flag = 1;
@@ -682,7 +493,7 @@ std::vector<std::array<double, 2>> trajectory(double *X_original,const std::arra
     }
     double current_v[2] = {0};
     //printf("current_x: (%f, %f)\n", current_x[0], current_x[1]);
-    interp2d(current_x.data(), current_v);
+    interp2d(current_x.data(), current_v,grad);
     //printf("current_v: (%f, %f)\n", current_v[0], current_v[1]);
     int current_offset = get_cell_offset(current_x.data(), DW, DH);
     //std::array<double, 2> RK4result = RK4(current_x.data(), current_v, time_step);
@@ -719,6 +530,7 @@ std::vector<std::array<double, 2>> trajectory(double *X_original,const std::arra
                 record.push_back(r);
 
                 // break;
+                //printf("true cp: (%f, %f)\n", cp.x[0], cp.x[1]);
                 std::array<double, 2> true_cp = {cp.x[0], cp.x[1]};
                 result.push_back(true_cp);
                 length++;
@@ -757,59 +569,7 @@ std::vector<std::array<double, 2>> trajectory(double *X_original,const std::arra
 
   return result;
 }
-/*
-std::vector<std::array<double, 2>> simulate_motion(const std::array<double, 2>& initial_x, const double time_step, const int num_steps,const int DH,const int DW, const std::unordered_map<int, critical_point_t>& critical_points_0) {
-  //x is the position, v is the velocity, h is the step size, n is the number of iterations
-  std::vector<std::array<double, 2>> result;
-  // result.push_back(initial_x);
-  std::array<double, 2> current_x = initial_x;
-  // std::array<double, 2> current_v;
-  // current_v[0] = grad(0, initial_x[0], initial_x[1]);
-  // current_v[1] = grad(1, initial_x[0], initial_x[1]);
-  int flag = 0;
-  for(int i=0; i<num_steps; i++){
-    result.push_back(current_x);
-    if (inside(current_x, DH, DW)){
-      double current_v[2] = {0};
-      interp2d(current_x.data(), current_v);
-      std::array<double, 2> RK4result = RK4(current_x.data(), current_v, time_step);
-      
-      // for(const auto& p:critical_points_0){
-      //   // need check each RK4result is non-saddle cp
-      //   auto cp = p.second;
-      //   if (cp.type != SADDLE) {
-      //     double error = 1e-3;
-      //     if (fabs(RK4result[0] - cp.x[0]) < error && fabs(RK4result[1] - cp.x[1]) < error){
-      //       //printf("reach critical point!\n");
-      //       flag = 1;
-      //       break;
-      //     }
-      //   }
-      // }
-      current_x = RK4result;
-    }
-    else{
-      // printf("out of bound!\n");
-      break; // dont need break
-      }
-    if (flag == 1){
-      break;
-    }
-  }
-  
-  if (flag == 0){
-    //printf("not reach critical point when hit max iteration\n");
-  }
-  if (result.size() < num_steps){
-    for (int i = result.size(); i < num_steps; i ++) {
-      result.push_back(result.back());
-    }
-  }
 
-  return result;
-}
-
-*/
 
 
 int main(int argc, char **argv){
