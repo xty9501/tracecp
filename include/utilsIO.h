@@ -1,3 +1,12 @@
+#include <cstddef>
+#include <vector>   // 对于 std::vector
+#include <string>   // 对于 std::string
+#include <array>
+#include <fstream>
+
+using Array2D = std::array<double, 2>;
+using Vector2D = std::vector<std::vector<Array2D>>;
+
 typedef struct record_t{
   double sid_start;
   double sid_end;
@@ -21,3 +30,8 @@ template<typename Type>
 Type * readfile(const char * file, size_t& num);
 
 void writeRecordsToBinaryFile(const std::vector<record_t>& records, const std::string& filename);
+
+void write_tracepoints(const Vector2D& data, const std::string& filename);
+
+
+Vector2D read_tracepoints(const std::string& filename);

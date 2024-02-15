@@ -1,7 +1,7 @@
 #include "math.h"
 #include "interp.h"
 #include "ftk/ndarray.hh"
-void interp2d(const double p[2], double v[2],ftk::ndarray<double> &grad){
+void interp2d(const double p[2], double v[2],const ftk::ndarray<double> &grad){
   double X[3][2];
   double V[3][2];
   int x0 = floor(p[0]);
