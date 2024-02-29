@@ -11,6 +11,10 @@ find_package(FTK REQUIRED HINTS "/Users/mingzexia/Documents/Github/ftk/install/"
 # find_path(ZSTD_INCLUDE_DIR NAMES zstd.h HINTS "/opt/homebrew/Cellar/zstd/1.5.5/include")
 find_library(ZSTD_LIBRARY NAMES zstd HINTS "/opt/homebrew/Cellar/zstd/1.5.5/lib")
 
+find_package(Eigen3 REQUIRED)
+include_directories(${EIGEN3_INCLUDE_DIR})
+message(STATUS "Eigen3 include dir: ${EIGEN3_INCLUDE_DIR}")
+
 # include_directories (${FTK_INCLUDE_DIR})
 include_directories("/Users/mingzexia/Documents/Github/ftk/install/include/ftk/")
 include_directories ("/Users/mingzexia/Documents/Github/tracecp/include")

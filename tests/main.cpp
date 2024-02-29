@@ -8,6 +8,8 @@
 #include <ftk/numeric/inverse_linear_interpolation_solver.hh>
 #include <ftk/numeric/inverse_bilinear_interpolation_solver.hh>
 #include <ftk/numeric/gradient.hh>
+#include <ftk/numeric/matrix_multiplication.hh>
+#include <ftk/numeric/matrix_inverse.hh>
 #include <ftk/numeric/clamp.hh>
 #include <ftk/numeric/eigen_solver2.hh>
 #include <ftk/algorithms/cca.hh>
@@ -17,6 +19,7 @@
 #include "ftk/numeric/critical_point_type.hh"
 #include "ftk/numeric/critical_point_test.hh"
 #include <chrono>
+
 
 // #include <hypermesh/ndarray.hh>
 // #include <hypermesh/regular_simplex_mesh.hh>
@@ -285,7 +288,7 @@ inline bool file_exists(const std::string& filename) {
 
 template<typename Container>
 bool inside(const Container& x, int DH, int DW) {
-  if (x[0] <0 || x[0] > DW-2 || x[1] < 0 || x[1] > DH-2) return false;
+  if (x[0] <=0 || x[0] > DW-1 || x[1] <= 0 || x[1] > DH-1) return false;
   return true;
 }
 
@@ -431,7 +434,7 @@ inline std::vector<int> get_surrounding_cell(const int cell_offset,const std::ar
 
 inline bool check_result(const double error, const double *v){
   if (fabs(v[0]) < error && fabs(v[1]) < error){
-    printf("v[0]: %f, v[1]: %f\n", v[0], v[1]);
+    //printf("v[0]: %f, v[1]: %f\n", v[0], v[1]);
     return true;
   }
   else{
@@ -487,7 +490,8 @@ std::array<Type, 2> newRK4(const Type * x, const Type * v, const ftk::ndarray<do
   }
 
   if(!inside(p1, DH, DW)){
-    return std::array<Type, 2>{x[0], x[1]};
+    //return std::array<Type, 2>{x[0], x[1]};
+    return std::array<Type, 2>{-1, -1};
   }
   interp2d(p1, rk1,data);
   coords = get_three_offsets(p1, DW, DH);
@@ -498,7 +502,8 @@ std::array<Type, 2> newRK4(const Type * x, const Type * v, const ftk::ndarray<do
   double rk2[2] = {0};
   const double p2[] = {x[0] + 0.5 * h * rk1[0], x[1] + 0.5 * h * rk1[1]};
   if (!inside(p2, DH, DW)){
-    return std::array<Type, 2>{p1[0], p1[1]};
+    //return std::array<Type, 2>{p1[0], p1[1]};
+    return std::array<Type, 2>{-1, -1};
   }
   interp2d(p2, rk2,data);
   coords = get_three_offsets(p2, DW, DH);
@@ -509,7 +514,8 @@ std::array<Type, 2> newRK4(const Type * x, const Type * v, const ftk::ndarray<do
   double rk3[2] = {0};
   const double p3[] = {x[0] + 0.5 * h * rk2[0], x[1] + 0.5 * h * rk2[1]};
   if (!inside(p3, DH, DW)){
-    return std::array<Type, 2>{p2[0], p2[1]};
+    //return std::array<Type, 2>{p2[0], p2[1]};
+    return std::array<Type, 2>{-1, -1};
   }
   interp2d(p3, rk3,data);
   coords = get_three_offsets(p3, DW, DH);
@@ -520,7 +526,8 @@ std::array<Type, 2> newRK4(const Type * x, const Type * v, const ftk::ndarray<do
   double rk4[2] = {0};
   const double p4[] = {x[0] + h * rk3[0], x[1] + h * rk3[1]};
   if (!inside(p4, DH, DW)){
-    return std::array<Type, 2>{p3[0], p3[1]};
+    //return std::array<Type, 2>{p3[0], p3[1]};
+    return std::array<Type, 2>{-1, -1};
   }
   interp2d(p4, rk4,data);
   coords = get_three_offsets(p4, DW, DH);
@@ -536,7 +543,8 @@ std::array<Type, 2> newRK4(const Type * x, const Type * v, const ftk::ndarray<do
   // printf("sign of coefficients x (%d,%d,%d,%d)\n", printsign(rk1[0]), printsign(rk2[0]), printsign(rk3[0]), printsign(rk4[0]));
   // printf("sign of coefficients y (%d,%d,%d,%d)\n", printsign(rk1[1]), printsign(rk2[1]), printsign(rk3[1]), printsign(rk4[1]));
   if (!inside(std::array<Type, 2>{next_x, next_y}, DH, DW)){
-    return std::array<Type, 2>{p4[0], p4[1]};
+    //return std::array<Type, 2>{p4[0], p4[1]};
+    return std::array<Type, 2>{-1, -1};
   }
   std::array<Type, 2> result = {next_x, next_y};
   coords = get_three_offsets(result, DW, DH);
@@ -570,6 +578,10 @@ std::vector<std::array<double, 2>> trajectory(double *X_original,const std::arra
 
   if(!inside(current_x, DH, DW)){
     //count_out_bound ++;
+    flag = -1;
+    result.push_back({-1, -1});
+    length ++;
+    index.push_back(length);
     return result;
   }
   else{
@@ -581,6 +593,8 @@ std::vector<std::array<double, 2>> trajectory(double *X_original,const std::arra
     if(!inside(current_x, DH, DW)){
       //count_out_bound ++;
       flag = -1;
+      result.push_back({-1, -1});
+      length ++;
       break;
     }
     if (length == 2000) {
@@ -597,9 +611,11 @@ std::vector<std::array<double, 2>> trajectory(double *X_original,const std::arra
     //int current_offset = get_cell_offset(current_x.data(), DW, DH);    
 
     std::array<double, 2> RK4result = newRK4(current_x.data(), current_v, data, time_step, DH, DW,lossless_index);
-    if (!inside(RK4result, DH, DW)){
+    if (RK4result[0] == -1 && RK4result[1] == -1){
       //count_out_bound ++;
       flag = -1;
+      result.push_back({-1, -1});
+      length ++;
       break;
     }
 
@@ -915,6 +931,61 @@ void check_start_end(const std::vector<std::vector<std::array<double, 2>>>& trac
   printf("end point different count: %d / %zu\n", count_end_diff, tracepoints1.size());
 
 }
+
+void check_two_traj (std::vector<std::vector<std::array<double, 2>>>& tracepoints1,const std::vector<std::vector<std::array<double, 2>>>& tracepoints2, std::unordered_map<int, critical_point_t>& critical_points_ori, std::unordered_map<int, critical_point_t>& critical_points_out, const int DW, const int DH){
+  // define reaching cp if the distance between critical point is less than 1e-3
+  int count_reach_limit = 0;
+  int count_found = 0;
+  int count_out_bound = 0;
+  for (auto t1:tracepoints1){
+    if (t1.size() == 2000){
+      count_reach_limit ++;
+    }
+    //check last element
+    else if (t1.back()[0] <= 0 || t1.back()[0] >= DW-1 || t1.back()[1] <= 0 || t1.back()[1] >= DH-1){
+      count_out_bound ++; //should be 0 since we have checked the boundary, if hit  boundary, then return the last point inside the boundary
+    }
+    else{
+      for (auto cp:critical_points_ori){
+        if (fabs(t1.back()[0] - cp.second.x[0]) < 1e-3 && fabs(t1.back()[1] - cp.second.x[1]) < 1e-3){
+          count_found ++;
+          break;
+        }
+      }
+    }
+  }
+  printf("*******original data:*********\n");
+  printf("total trajectory: %ld\n", tracepoints1.size());
+  printf("reach limit(2000): %d\n", count_reach_limit);
+  printf("found cp: %d\n", count_found);
+  printf("out of bound: %d\n", count_out_bound);
+
+  count_reach_limit = 0;
+  count_found = 0;
+  count_out_bound = 0;
+  for (auto t2:tracepoints2){
+    if (t2.size() == 2000){
+      count_reach_limit ++;
+    }
+    //check last element
+    else if (t2.back()[0] <= 0 || t2.back()[0] >= DW-1 || t2.back()[1] <= 0 || t2.back()[1] >= DH-1){
+      count_out_bound ++;
+    }
+    else{
+      for (auto cp:critical_points_out){
+        if (fabs(t2.back()[0] - cp.second.x[0]) < 1e-3 && fabs(t2.back()[1] - cp.second.x[1]) < 1e-3){
+          count_found ++;
+          break;
+        }
+      }
+    }
+  }
+  printf("*******decompressed data:*********\n");
+  printf("total trajectory: %ld\n", tracepoints2.size());
+  printf("reach limit(2000): %d\n", count_reach_limit);
+  printf("found cp: %d\n", count_found);
+  printf("out of bound: %d\n", count_out_bound);
+}
  
 
 
@@ -1089,43 +1160,44 @@ int main(int argc, char **argv){
   printf("orginal Done..\n");
 
   // for decompressed data  
-  for(const auto& p:critical_points_out){
-    auto cp = p.second;
-    if (cp.type == SADDLE){
-      global_count ++;
-      std::vector<std::array<double,2>> X_all_direction;  
-      X_all_direction.push_back({cp.x[0] + eps*cp.eig_vec[0][0], cp.x[1] + eps*cp.eig_vec[0][1]});
-      X_all_direction.push_back({cp.x[0] - eps*cp.eig_vec[0][0], cp.x[1] - eps*cp.eig_vec[0][1]});
-      X_all_direction.push_back({cp.x[0] + eps*cp.eig_vec[1][0], cp.x[1] + eps*cp.eig_vec[1][1]});
-      X_all_direction.push_back({cp.x[0] - eps*cp.eig_vec[1][0], cp.x[1] - eps*cp.eig_vec[1][1]});                              
-      double lambda[3];
-      double values[2];
-      std::vector<std::vector<double>> config;
-      config.push_back({cp.eig_vec[0][0], cp.eig_vec[0][1],1});
-      config.push_back({cp.eig_vec[0][0], cp.eig_vec[0][1],1});
-      config.push_back({cp.eig_vec[1][0], cp.eig_vec[1][1],-1});
-      config.push_back({cp.eig_vec[1][0], cp.eig_vec[1][1],-1});
-      for (int i = 0; i < 4; i ++) {
-        std::array<double, 2> X_start;
-        std::vector<std::array<double, 2>> result_return;
-        X_start = X_all_direction[i];
-        //check if inside
-        if (inside(X_start,DH, DW)){
-          if(i == 0 || i ==1){
-            result_return = trajectory(cp.x,X_start, h,DH,DW, critical_points_out,grad_out,myindex_out,config[i],record_out,lossless_index_out);
-            tracepoints_out.push_back(result_return);
+  if (test_flag == "test"){
+    for(const auto& p:critical_points_out){
+      auto cp = p.second;
+      if (cp.type == SADDLE){
+        global_count ++;
+        std::vector<std::array<double,2>> X_all_direction;  
+        X_all_direction.push_back({cp.x[0] + eps*cp.eig_vec[0][0], cp.x[1] + eps*cp.eig_vec[0][1]});
+        X_all_direction.push_back({cp.x[0] - eps*cp.eig_vec[0][0], cp.x[1] - eps*cp.eig_vec[0][1]});
+        X_all_direction.push_back({cp.x[0] + eps*cp.eig_vec[1][0], cp.x[1] + eps*cp.eig_vec[1][1]});
+        X_all_direction.push_back({cp.x[0] - eps*cp.eig_vec[1][0], cp.x[1] - eps*cp.eig_vec[1][1]});                              
+        double lambda[3];
+        double values[2];
+        std::vector<std::vector<double>> config;
+        config.push_back({cp.eig_vec[0][0], cp.eig_vec[0][1],1});
+        config.push_back({cp.eig_vec[0][0], cp.eig_vec[0][1],1});
+        config.push_back({cp.eig_vec[1][0], cp.eig_vec[1][1],-1});
+        config.push_back({cp.eig_vec[1][0], cp.eig_vec[1][1],-1});
+        for (int i = 0; i < 4; i ++) {
+          std::array<double, 2> X_start;
+          std::vector<std::array<double, 2>> result_return;
+          X_start = X_all_direction[i];
+          //check if inside
+          if (inside(X_start,DH, DW)){
+            if(i == 0 || i ==1){
+              result_return = trajectory(cp.x,X_start, h,DH,DW, critical_points_out,grad_out,myindex_out,config[i],record_out,lossless_index_out);
+              tracepoints_out.push_back(result_return);
+            }
+            else{
+              result_return = trajectory(cp.x,X_start, -h,DH,DW, critical_points_out,grad_out,myindex_out,config[i],record_out,lossless_index_out);
+              tracepoints_out.push_back(result_return);
+            }
+          //printf("tracepoints size: %ld\n", result_return.size());
+          
           }
-          else{
-            result_return = trajectory(cp.x,X_start, -h,DH,DW, critical_points_out,grad_out,myindex_out,config[i],record_out,lossless_index_out);
-            tracepoints_out.push_back(result_return);
-          }
-        //printf("tracepoints size: %ld\n", result_return.size());
-        
         }
       }
     }
   }
-
 
   printf("tracepoints size: %ld\n", tracepoints.size());
   printf("tracepoints_out size: %ld\n", tracepoints_out.size());
@@ -1212,7 +1284,8 @@ int main(int argc, char **argv){
       //   count ++;
       // }
     }
-    check_start_end(tracepoints, tracepoints_out, DW, DH);
+    //check_start_end(tracepoints, tracepoints_out, DW, DH);
+    check_two_traj(tracepoints, tracepoints_out, critical_points_0, critical_points_out, DW, DH);
     printf("test done\n");
     exit(0);
   
