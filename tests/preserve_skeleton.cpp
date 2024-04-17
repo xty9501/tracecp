@@ -383,7 +383,8 @@ int main(int argc, char **argv){
     //正常压缩
     size_t result_size = 0;
     unsigned char * result = NULL;
-    result = sz_compress_cp_preserve_sos_2d_online_fp(U, V, DH,DW, result_size, false, max_eb);
+    //result = sz_compress_cp_preserve_sos_2d_online_fp(U, V, DH,DW, result_size, false, max_eb); // use cpsz-sos
+    result = sz_compress_cp_preserve_2d_online(U, V, DH,DW, result_size, false, max_eb); // use cpsz
     unsigned char * result_after_lossless = NULL;
     size_t lossless_outsize = sz_lossless_compress(ZSTD_COMPRESSOR, 3, result, result_size, &result_after_lossless);
     cout << "Compressed size(original) = " << lossless_outsize << ", ratio = " << (2*num_elements*sizeof(float)) * 1.0/lossless_outsize << endl;
@@ -393,7 +394,8 @@ int main(int argc, char **argv){
     size_t lossless_output = sz_lossless_decompress(ZSTD_COMPRESSOR, result_after_lossless, lossless_outsize, &result, result_size);
     float * dec_U = NULL;
     float * dec_V = NULL;
-    sz_decompress_cp_preserve_2d_online_fp<float>(result, DH,DW, dec_U, dec_V);
+    // sz_decompress_cp_preserve_2d_online_fp<float>(result, DH,DW, dec_U, dec_V); // use cpsz-sos
+    sz_decompress_cp_preserve_2d_online<float>(result, DH,DW, dec_U, dec_V); // use cpsz
     printf("verifying...\n");
     verify(U, dec_U, num_elements);
 
@@ -424,9 +426,10 @@ int main(int argc, char **argv){
     size_t result_size_test =0;
     unsigned char * result_test = NULL;
     // lossless trajectory压缩
-    result_test = compress_lossless_index(U, V, lossless_index_map, DH,DW, result_size_test, false, max_eb);
+    //result_test = compress_lossless_index(U, V, lossless_index_map, DH,DW, result_size_test, false, max_eb); //cpsz-sos
+    result_test = sz_compress_cp_preserve_2d_online(U, V, DH,DW, result_size_test, false, max_eb,lossless_index_map); //cpsz
     unsigned char * result_after_lossless_test = NULL;
-    size_t lossless_outsize_test = sz_lossless_compress(ZSTD_COMPRESSOR, 3, result_test, result_size_test, &result_after_lossless_test);
+    size_t lossless_outsize_test = sz_lossless_compress(ZSTD_COMPRESSOR, 3, result_test, result_size_test, &result_after_lossless_test); 
     cout << "Compressed size(lossless store trajectory) = " << lossless_outsize_test << ", ratio = " << (2*num_elements*sizeof(float)) * 1.0/lossless_outsize_test << endl;
     printf("result_size = %zu, result_size_test = %zu\n", result_size, result_size_test);
     // lossless trajectory压缩后的数据解压
@@ -434,7 +437,8 @@ int main(int argc, char **argv){
     size_t lossless_output_test = sz_lossless_decompress(ZSTD_COMPRESSOR, result_after_lossless_test, lossless_outsize_test, &result_test, result_size_test);
     float * dec_U_test = NULL;
     float * dec_V_test = NULL;
-    sz_decompress_cp_preserve_2d_online_fp<float>(result_test, DH,DW, dec_U_test, dec_V_test);
+    //sz_decompress_cp_preserve_2d_online_fp<float>(result_test, DH,DW, dec_U_test, dec_V_test); //use cpsz-sos
+    sz_decompress_cp_preserve_2d_online<float>(result_test, DH,DW, dec_U_test, dec_V_test); //use cpsz
     printf("verifying...\n");
     verify(U, dec_U_test, num_elements);
 
@@ -452,7 +456,27 @@ int main(int argc, char **argv){
     free(V);
     }
     
+    else if (option == "new_method"){
+      size_t result_size = 0;
+      printf("************\n");
+      //read index_need_lossless.bin
+      size_t *lossless_index = NULL;
+      size_t lossless_index_size = 0;
+      lossless_index = readfile<size_t>("../small_data/index_need_lossless.bin", lossless_index_size);
+      printf("number of index need to lossless = %ld\n", lossless_index_size);
+      //convert to unordered_map
+      std::unordered_map<size_t, size_t> lossless_index_map;
+      for (int i = 0; i < lossless_index_size; i++){
+          lossless_index_map[lossless_index[i]] = i;
+      }
 
+      //read traj_cells.bin
+      std::vector<std::vector<size_t>> traj_cells = readVectorOfVector<size_t>("../small_data/traj_cells.bin");
+      
+
+
+
+    }
     else {
       printf("option only support normal and lossless_trajectory\n");
     }

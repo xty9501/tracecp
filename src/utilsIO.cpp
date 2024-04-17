@@ -86,6 +86,28 @@ void writefile(const char * file, Type * data, size_t num_elements){
   fout.close();
 }
 
+//write trajectory to file  
+int write_trajectory(const std::vector<std::vector<std::array<double, 2>>>& traj, const std::string& filename) {
+      //write tracepoints to file
+  std::ofstream file(filename, std::ios::out | std::ios::binary);
+    if (!file.is_open()) {
+        std::cerr << "Failed to open file for writing." << std::endl;
+        return 1;
+    }
+    int count = 0;
+    std::cout << traj.size() <<std::endl;
+    for (const auto& row : traj) {
+        for (const auto& point : row) {
+            file.write(reinterpret_cast<const char*>(point.data()), point.size() * sizeof(double));
+            count ++;
+        }
+    }
+    printf("Successfully write trajectory to file, total points: %d\n",count);
+    file.close();
+    return 0;
+}
+
+
 void writeRecordsToBinaryFile(const std::vector<record_t>& records, const std::string& filename) {
     std::ofstream outfile(filename, std::ios::binary);
     if (!outfile) {
@@ -113,4 +135,47 @@ template void writefile<double>(const char* file, double* data, unsigned long nu
 template void writefile<int>(const char* file, int* data, unsigned long num_elements);
 template void writefile<size_t>(const char* file, size_t* data, unsigned long num_elements);
 template void writefile<float>(const char* file, float* data, unsigned long num_elements);
+
+template<typename Type>
+void writeVectorOfVector(const std::vector<std::vector<Type>>& vec, const std::string& filename) {
+    std::ofstream outFile(filename, std::ios::binary);
+    if (!outFile) {
+        throw std::runtime_error("Cannot open file for writing.");
+    }
+
+    for (const auto& innerVec : vec) {
+        // 首先写入内部vector的大小
+        size_t size = innerVec.size();
+        outFile.write(reinterpret_cast<const char*>(&size), sizeof(size));
+        // 然后写入内部vector的数据
+        outFile.write(reinterpret_cast<const char*>(innerVec.data()), size * sizeof(Type));
+    }
+    outFile.close();
+}
+
+template void writeVectorOfVector<size_t>(const std::vector<std::vector<size_t>>& vec, const std::string& filename);
+
+template<typename Type>
+std::vector<std::vector<Type>> readVectorOfVector(const std::string& filename) {
+    std::vector<std::vector<Type>> vec;
+    std::ifstream inFile(filename, std::ios::binary);
+    if (!inFile) {
+        throw std::runtime_error("Cannot open file for reading.");
+    }
+
+    while (!inFile.eof()) {
+        size_t size;
+        // 首先读取内部vector的大小
+        inFile.read(reinterpret_cast<char*>(&size), sizeof(size));
+        if (inFile.eof()) break; // 防止文件末尾的额外读取
+        std::vector<Type> innerVec(size);
+        // 然后读取内部vector的数据
+        inFile.read(reinterpret_cast<char*>(innerVec.data()), size * sizeof(Type));
+        vec.push_back(innerVec);
+    }
+    inFile.close();
+    return vec;
+}
+
+template std::vector<std::vector<size_t>> readVectorOfVector<size_t>(const std::string& filename);
 

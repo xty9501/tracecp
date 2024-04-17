@@ -23,9 +23,12 @@ set(EXECUTABLE_OUTPUT_PATH /Users/mingzexia/Documents/Github/tracecp/)
 
 
 file(GLOB SOURCES "src/*.cpp")
-add_executable(test ../tests/main.cpp src/interp.cpp src/utilsIO.cpp)
+add_executable(test ${SOURCES} ../tests/main.cpp src/cp.cpp src/advect.cpp ) 
 # add_executable(test ${SOURCES} tests/main.cpp)
-add_executable(test2 ${SOURCES} tests/preserve_skeleton.cpp)
+# add_executable(test2 ${SOURCES} tests/preserve_skeleton.cpp)
+
+add_executable(single_traj ${SOURCES} tests/single_traj.cpp src/interp.cpp src/utilsIO.cpp include/advect.hpp include/utils.hpp include/cp.hpp)
 # 链接FTK库
 target_link_libraries(test FTK::libftk ${ZSTD_LIBRARY})
-target_link_libraries(test2 FTK::libftk ${ZSTD_LIBRARY})
+# target_link_libraries(test2 FTK::libftk ${ZSTD_LIBRARY})
+target_link_libraries(single_traj FTK::libftk ${ZSTD_LIBRARY})
