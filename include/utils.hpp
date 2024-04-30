@@ -14,7 +14,7 @@ bool inside(const Container& x, int DH, int DW) {
 inline bool is_upper(const std::array<double, 2> x){
   double x_ex = x[0] - floor(x[0]);
   double y_ex = x[1] - floor(x[1]);
-  if (y_ex >= x_ex){
+  if (y_ex >x_ex){
     return true;
   }
   else{
@@ -22,10 +22,10 @@ inline bool is_upper(const std::array<double, 2> x){
   }
 }
 
-inline int get_cell_offset(const double *x, const int DW, const int DH){
+inline size_t get_cell_offset(const double *x, const int DW, const int DH){
   int x0 = floor(x[0]);
   int y0 = floor(x[1]);
-  int cell_offset = 2*(y0 * (DW-1) + x0);
+  size_t cell_offset = 2*(y0 * (DW-1) + x0);
   if (!is_upper({x[0], x[1]})){
     cell_offset += 1;
   }

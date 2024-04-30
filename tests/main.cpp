@@ -80,7 +80,7 @@ double calculateEDR2D(const std::vector<std::array<double, 2>>& seq1, const std:
     return dp[len1][len2];
 }
 
-// void refill_gradient(int id,const int DH,const int DW, const float* grad_tmp, ftk::ndarray<double>& grad){
+// void refill_gradient(int id,const int DH,const int DW, const float* grad_tmp, ftk::ndarray<float>& grad){
 //   const float * grad_tmp_pos = grad_tmp;
 //   for (int i = 0; i < DH; i ++) {
 //     for (int j = 0; j < DW; j ++) {
@@ -646,17 +646,7 @@ inline std::set<size_t> convert_simplexID_to_offset(const std::set<size_t>& simp
   return result;
 }
 
-inline std::set<size_t> get_all_simplex_ID(const std::vector<std::array<double, 2>>& tracepoints, const int DW, const int DH){
-  //潜在的bug: 如果velcoity很大，可能会跳过cell
-  std::set<size_t> result;
-  for (const auto& coord:tracepoints){
-    //ignore the points on boundary
-    //if (coord[0] <= 1.0 || coord[0] >= DW-2.0 || coord[1] <= 1.0 || coord[1] >= DH-2.0) continue; //这是之前的坑，晚点补上
-    auto cell_offset = get_cell_offset(coord.data(), DW, DH); 
-    result.insert(cell_offset);
-  }
-  return result;
-}
+
 
 inline std::set<size_t>findIntersectingTriangle(std::array<double, 2> p, std::array<double, 2> q, const int DW, const int DH){
   std::set<size_t> result;
@@ -760,14 +750,7 @@ void difftrajectory(const std::vector<std::vector<std::array<double, 2>>>& trace
 
 }
 
-void baseline(const std::vector<std::vector<std::array<double, 2>>>& true_traj,const std::vector<std::vector<std::array<double, 2>>>& tracepoints2, const int DW, const int DH, std::set<size_t>& diff_offset_index){
-  for (size_t i =0 ; i < true_traj.size(); ++i){
-    const auto& t1 = true_traj[i]; 
-    auto t1_simplexs = get_all_simplex_ID(t1, DW, DH);
-    auto offests = convert_simplexID_to_offset(t1_simplexs, DW, DH);
-    diff_offset_index.insert(offests.begin(), offests.end());
-  }
-}
+
 
 void check_two_traj_start_end_cell(const std::vector<std::vector<std::array<double, 2>>>& tracepoints1,const std::vector<std::vector<std::array<double, 2>>>& tracepoints2,std::unordered_map<int, critical_point_t>& critical_points_ori, std::unordered_map<int, critical_point_t>& critical_points_out, const int DW, const int DH){
   //check if start and end point is the same
@@ -1118,12 +1101,12 @@ void check_and_write_two_traj_detail(std::vector<std::vector<std::array<double, 
 //     current_pwr_eb = 0;
 //     printf("CURRENT ITERATION: %d, CURRENT_EB: %f\n", NUM_ITER, current_pwr_eb);
 //     //get grad for original data
-//     ftk::ndarray<double> grad_ori;
+//     ftk::ndarray<float> grad_ori;
 //     grad_ori.reshape({2, static_cast<unsigned long>(r2), static_cast<unsigned long>(r1)});
 //     refill_gradient(0, r1, r2, U, grad_ori);
 //     refill_gradient(1, r1, r2, V, grad_ori);
 //     //get grad for decompressed data
-//     ftk::ndarray<double> grad_dec;
+//     ftk::ndarray<float> grad_dec;
 //     grad_dec.reshape({2, static_cast<unsigned long>(r2), static_cast<unsigned long>(r1)});
 //     refill_gradient(0, r1, r2, dec_U, grad_dec);
 //     refill_gradient(1, r1, r2, dec_V, grad_dec);
@@ -1288,6 +1271,129 @@ void check_and_write_two_traj_detail(std::vector<std::vector<std::array<double, 
 //   }
 // }
 
+template<typename T>
+void write_current_state_data(std::string file_path, const T * U, const T * V, T *dec_U, T *dec_V, std::vector<std::vector<std::array<double, 2>>> &trajs_dec,std::vector<int> &index_dec, size_t r1, size_t r2, int NUM_ITER){
+  
+  // write decompress traj
+  std::string dec_traj_file = file_path + "dec_traj_iteration_" + std::to_string(NUM_ITER) + ".bin" + ".out";
+  write_trajectory(trajs_dec, dec_traj_file.c_str());
+  printf("Successfully write decompressed trajectory to file, total trajectory: %ld\n",trajs_dec.size());
+  //write decompress index
+  std::string index_file = file_path + "index_iteration_" + std::to_string(NUM_ITER) + ".bin" + ".out";
+  writefile(index_file.c_str(), index_dec.data(), index_dec.size());
+  printf("Successfully write orginal index to file, total index: %ld\n",index_dec.size());
+
+  //write dec data
+  std::string decU_file = file_path + "dec_u_iteration_" + std::to_string(NUM_ITER) + ".bin" + ".out";
+  writefile(decU_file.c_str(), dec_U, r1*r2);
+  std::string decV_file = file_path + "dec_v_iteration_" + std::to_string(NUM_ITER) + ".bin" + ".out";
+  writefile(decV_file.c_str(), dec_V, r1*r2);
+}
+
+void find_fix_index_end(int &end_fix_index,std::vector<std::array<double, 2>> t1,std::vector<std::array<double, 2>> t2,ftk::ndarray<float> &grad_ori, int DW, int DH, traj_config t_config, std::set<size_t> &all_vertex_for_all_diff_traj, size_t i, std::unordered_map<int, critical_point_t>& critical_points_ori){
+    int start_fix_index = 0;
+    if(t1[0][0] != t2[0][0] || t1[0][1] != t2[0][1] || t1[1][0] != t2[1][0] || t1[1][1] != t2[1][1]){
+      printf("start point(cp) or seed is different!!!\n");
+      exit(0);
+    }
+    for (size_t j = 0; j < t1.size(); ++j){
+      auto p1 = t1[j];
+      auto p2 = t2[j];
+      if (p1[0] > 0 && p2[0] > 0){
+        double dist = sqrt(pow(p1[0] - p2[0], 2) + pow(p1[1] - p2[1], 2));
+        if (dist > 1.4142){
+          start_fix_index = 0;
+          end_fix_index = j;
+          //end_fix_index = t1.size() - 1;
+          break;
+        }
+      }
+    }
+    if (end_fix_index != 0){
+      printf("trajectory %ld goes wrong, start_fix_at_index: %d, end_fix_at_index: %d\n", i, start_fix_index, end_fix_index);
+      printf("traj go different ori: %f, %f, dec: %f, %f, dist: %f\n", t1[end_fix_index][0], t1[end_fix_index][1], t2[end_fix_index][0], t2[end_fix_index][1], sqrt(pow(t1[end_fix_index][0] - t2[end_fix_index][0], 2) + pow(t1[end_fix_index][1] - t2[end_fix_index][1], 2)));
+      printf("orginal start point: (%f, %f),seed point:(%f,%f), original end point: (%f, %f),length: %zu\n", t1[0][0], t1[0][1],t1[1][0],t1[1][1], t1.back()[0], t1.back()[1], t1.size());
+      printf("decomp start point: (%f, %f), seed point(%f,%f), decomp end point: (%f, %f),length: %zu\n", t2[0][0], t2[0][1], t2[1][0],t2[1][1],t2.back()[0], t2.back()[1], t2.size());
+      printf("add vertexs from coord (%f, %f) to (%f, %f)\n", t1[start_fix_index][0], t1[start_fix_index][1], t1[end_fix_index][0], t1[end_fix_index][1]);
+      // add vertexs at start_fix_index, end at end_fix_index
+
+      /*
+      for (int j = 1; j <= end_fix_index; ++j){
+        auto p = t1[j];
+        double current_v[2] = {0};
+        interp2d(p.data(),current_v,grad_ori);
+        auto offsets = vertex_for_each_RK4(p.data(), current_v,grad_ori, t_config.h,DH, DW);
+        //auto offsets = get_three_offsets(p.data(), DW, DH);
+        for (auto o:offsets){
+          all_vertex_for_all_diff_traj.insert(o);
+          // if (i == 9311){
+          //   int temp_x = o % DW;
+          //   int temp_y = o / DW;
+          //   printf("add vertex: (%d, %d)\n", temp_x, temp_y);
+          // }
+
+        }
+      }
+      */
+
+      int num = 0;
+      auto cp_coord = t1[0]; //cp
+      auto current_X = t1[1]; //seed
+      int flag = 0;
+      //check t1[1] is cp or not
+      for(auto p:critical_points_ori){
+        if (p.second.type == SADDLE && p.second.x[0] == cp_coord[0] && p.second.x[1] == cp_coord[1]){
+          //cp_coord is cp
+          flag = 1;
+          break;
+        }
+      }
+      if (flag == 0){
+        printf("second element of original trajectory is not cp!!!\n");
+        exit(0);  
+      }
+
+      auto offsets_cp = get_three_offsets(cp_coord.data(), DW, DH);
+      auto offsets_seed = get_three_offsets(current_X.data(), DW, DH);
+      for (auto o:offsets_cp){
+        all_vertex_for_all_diff_traj.insert(o);
+      }
+      for (auto o:offsets_seed){
+        all_vertex_for_all_diff_traj.insert(o);
+      }
+
+      std::set<size_t> temp_vertexs;
+      std::vector<int> temp_index;
+      
+      int direction;
+      if((i %4) == 0 || (i % 4) == 1){
+        direction = 1;
+      }
+      else{
+        direction = -1;
+      }
+      auto temp_trajs_pos = trajectory(cp_coord.data(), current_X, direction * t_config.h, end_fix_index, DH, DW, critical_points_ori, grad_ori,temp_index, temp_vertexs);
+      //这里如果用trajectory需要知道他的方向，这里暂时两个方向都加上
+      //auto temp_traj_neg = trajectory(cp_coord.data(), current_X, -t_config.h, end_fix_index, DH, DW, critical_points_ori, grad_ori,temp_index, temp_vertexs);
+      for (auto o:temp_vertexs){
+        all_vertex_for_all_diff_traj.insert(o);
+      }
+      
+      // while(num < end_fix_index){
+      //   std::set<size_t> temp_vertex;
+      //   double current_v[2] = {0};
+      //   interp2d(current_X.data(), current_v,grad_ori);
+      //   //std::array<Type, 2> newRK4(const Type * x, const Type * v, const ftk::ndarray<float> &data,  Type h, const int DH, const int DW,std::set<size_t>& lossless_index)
+      //   std::array<double, 2> temp_result = newRK4(current_X.data(),current_v,grad_ori,t_config.h, DH, DW, temp_vertex);
+      //   current_X = temp_result;
+      //   num++;
+      //   for (auto o:temp_vertex){
+      //     all_vertex_for_all_diff_traj.insert(o);
+      //   }
+      // }
+    }
+}
+
 
 template<typename T>
 void
@@ -1298,6 +1404,11 @@ fix_traj(const T * U, const T * V,size_t r1, size_t r2, double max_pwr_eb,traj_c
   std::set<size_t> all_vertex_for_all_diff_traj;
   int NUM_ITER = 0;
   const int MAX_ITER = 10;
+  //std::set<size_t> current_diff_traj_id;
+  std::unordered_map<size_t,int> current_diff_traj_id;
+  //std::set<size_t> last_diff_traj_id;
+  std::unordered_map<size_t,int> last_diff_traj_id;
+  
   while (!stop)
   {
 
@@ -1317,16 +1428,23 @@ fix_traj(const T * U, const T * V,size_t r1, size_t r2, double max_pwr_eb,traj_c
   float * dec_U = NULL;
   float * dec_V = NULL;
   sz_decompress_cp_preserve_2d_online<float>(result, r1,r2, dec_U, dec_V); // use cpsz
+
+  //把dec_U, dec_V里对应all_vertex_for_all_diff_traj的点的值都设为相应的U,V的值
+  // for (auto o:all_vertex_for_all_diff_traj){
+  //   dec_U[o] = U[o];
+  //   dec_V[o] = V[o];
+  // }
+
   // print compression ratio
   printf("Compressed size(original) = %zu, ratio = %f, all_vertex_need_record_size = %zu\n", lossless_outsize, (2*r1*r2*sizeof(float)) * 1.0/lossless_outsize, all_vertex_for_all_diff_traj.size());
 
   //get grad for original data
-  ftk::ndarray<double> grad_ori;
+  ftk::ndarray<float> grad_ori;
   grad_ori.reshape({2, static_cast<unsigned long>(r2), static_cast<unsigned long>(r1)});
   refill_gradient(0, r1, r2, U, grad_ori);
   refill_gradient(1, r1, r2, V, grad_ori);
   //get grad for decompressed data
-  ftk::ndarray<double> grad_dec;
+  ftk::ndarray<float> grad_dec;
   grad_dec.reshape({2, static_cast<unsigned long>(r2), static_cast<unsigned long>(r1)});
   refill_gradient(0, r1, r2, dec_U, grad_dec);
   refill_gradient(1, r1, r2, dec_V, grad_dec);
@@ -1334,6 +1452,25 @@ fix_traj(const T * U, const T * V,size_t r1, size_t r2, double max_pwr_eb,traj_c
   auto critical_points_ori = compute_critical_points(U, V, r1, r2);
   //get cp for decompressed data
   auto critical_points_dec = compute_critical_points(dec_U, dec_V, r1, r2);
+
+  //check if dec_U and grad_dec are correct
+  //for loop for r1 and for loop for r2
+  for (int i = 0; i < r1; i++){
+    for (int j = 0; j < r2; j++){
+      //get dec_U and grad_dec(0, i, j)
+      double dec_U_val = dec_U[i*r2+j];
+      double grad_dec_U_val = grad_dec(0, j, i);
+      double dec_V_val = dec_V[i*r2+j];
+      double grad_dec_V_val = grad_dec(1, j, i);
+      if (dec_U_val != grad_dec_U_val || dec_V_val != grad_dec_V_val){
+        printf("Dec_U/Dec_V and grad_dec are not correct!!!\n");
+        printf("may need check refill_gradient function\n");
+        printf("dec_U: %f, grad_dec_U: %f, dec_V: %f, grad_dec_V: %f\n", dec_U_val, grad_dec_U_val, dec_V_val, grad_dec_V_val);
+        exit(0);
+      }
+    }
+  }
+
 
 
   // print out cp size and saddle size
@@ -1352,11 +1489,25 @@ fix_traj(const T * U, const T * V,size_t r1, size_t r2, double max_pwr_eb,traj_c
   }
   printf("saddle_ori_count: %ld, saddle_dec_count: %ld\n", saddle_ori_count, saddle_dec_count);
 
+  // check if critical_points_ori and critical_points_dec are same
+  for (auto p:critical_points_ori){
+    auto cp_ori = p.second;
+    auto cp_dec = critical_points_dec[p.first];
+    if (cp_ori.type != cp_dec.type || cp_ori.x[0] != cp_dec.x[0] || cp_ori.x[1] != cp_dec.x[1] || cp_ori.eig_vec[0][0] != cp_dec.eig_vec[0][0] || cp_ori.eig_vec[0][1] != cp_dec.eig_vec[0][1] || cp_ori.eig_vec[1][0] != cp_dec.eig_vec[1][0] || cp_ori.eig_vec[1][1] != cp_dec.eig_vec[1][1]){
+      printf("critical_points_ori and critical_points_dec are not same!!!\n");
+      //print diff
+      printf("ori: type: %d, x: (%f, %f), eig_vec: (%f, %f), (%f, %f)\n", cp_ori.type, cp_ori.x[0], cp_ori.x[1], cp_ori.eig_vec[0][0], cp_ori.eig_vec[0][1], cp_ori.eig_vec[1][0], cp_ori.eig_vec[1][1]);
+      printf("dec: type: %d, x: (%f, %f), eig_vec: (%f, %f), (%f, %f)\n", cp_dec.type, cp_dec.x[0], cp_dec.x[1], cp_dec.eig_vec[0][0], cp_dec.eig_vec[0][1], cp_dec.eig_vec[1][0], cp_dec.eig_vec[1][1]);
+      exit(0);
+    }
+  }
+
+
   //get trajectory for original data
   std::vector<std::vector<std::array<double, 2>>> trajs_ori;
   std::vector<int> index_ori;
   std::set<size_t> vertex_ori;
-  std::unordered_map<size_t,std::vector<size_t>> vertex_ori_map;
+  // std::unordered_map<size_t,std::vector<size_t>> vertex_ori_map;
   for(const auto& p:critical_points_ori){
     auto cp = p.second;
     if (cp.type == SADDLE){
@@ -1421,13 +1572,14 @@ fix_traj(const T * U, const T * V,size_t r1, size_t r2, double max_pwr_eb,traj_c
         X_start = X_all_direction[i];
         //check if inside
         if (inside(X_start,DH, DW)){
+          double pos[2] = {cp.x[0], cp.x[1]};
           //printf("processing (%f,%f)\n", X_start[0], X_start[1]);
           if(i == 0 || i ==1){
-            result_return = trajectory(cp.x,X_start, t_config.h,t_config.max_length,DH,DW, critical_points_dec,grad_dec,index_dec,vertex_dec);
+            result_return = trajectory(pos,X_start, t_config.h,t_config.max_length,DH,DW, critical_points_dec,grad_dec,index_dec,vertex_dec);
             trajs_dec.push_back(result_return);
           }
           else{
-            result_return = trajectory(cp.x,X_start, -t_config.h,t_config.max_length,DH,DW, critical_points_dec,grad_dec,index_dec,vertex_dec);
+            result_return = trajectory(pos,X_start, -t_config.h,t_config.max_length,DH,DW, critical_points_dec,grad_dec,index_dec,vertex_dec);
             trajs_dec.push_back(result_return);   
           }
         }
@@ -1435,29 +1587,9 @@ fix_traj(const T * U, const T * V,size_t r1, size_t r2, double max_pwr_eb,traj_c
     }
   }
 
-  // {
-  // // write decompress traj
-  // write_trajectory(trajs_dec, "../small_data/iteration_" + std::to_string(NUM_ITER) + ".bin" + ".out");
-  // printf("Successfully write decompressed trajectory to file, total trajectory: %ld\n",trajs_dec.size());
-  // //write decompress index
-  // std::string index_file = "../small_data/index_iteration_" + std::to_string(NUM_ITER) + ".bin" + ".out";
-  // writefile(index_file.c_str(), index_dec.data(), index_dec.size());
-  // printf("Successfully write orginal index to file, total index: %ld\n",index_dec.size());
 
-  // //write dec data
-  // std::string decU_file = "../small_data/dec_u_iteration_" + std::to_string(NUM_ITER) + ".bin" + ".out";
-  // writefile(decU_file.c_str(), dec_U, r1*r2);
-  // std::string decV_file = "../small_data/dec_v_iteration_" + std::to_string(NUM_ITER) + ".bin" + ".out";
-  // writefile(decV_file.c_str(), dec_V, r1*r2);
-  // }
 
-  //clean up
-  {
-  //all_vertex_for_all_diff_traj.clear();// clear all_vertex_for_all_diff_traj
-  free(dec_U);
-  free(dec_V);
-  free(result);
-  }
+
   //compare the trajectory, and get all vertex for all different trajectories
   int ori_out_reach_limit = 0; // same
   int dec_not_found_count = 0; // decompressed not found cp
@@ -1471,12 +1603,10 @@ fix_traj(const T * U, const T * V,size_t r1, size_t r2, double max_pwr_eb,traj_c
     auto t2 = trajs_dec[i];
     if (t1.size() != t_config.max_length && t1.back()[0] != -1){
       // original data found cp
-      if (t2.size() >= t_config.max_length || t2.back()[0] == -1){
+      if (t2.size() == t_config.max_length || t2.back()[0] == -1){
         // decompressed data not found cp
-        if(get_cell_offset(t1.back().data(), DW, DH) != get_cell_offset(t2.back().data(), DW, DH)){
-          //end point is the same cell
-          dec_not_found_count ++;
-        }
+        dec_not_found_count ++;
+
       }
       else{
         if (get_cell_offset(t1.back().data(), DW, DH) != get_cell_offset(t2.back().data(), DW, DH)){
@@ -1495,101 +1625,56 @@ fix_traj(const T * U, const T * V,size_t r1, size_t r2, double max_pwr_eb,traj_c
     printf("ori_out_or_reach_limit: %d, dec_not_found_count: %d, dec_found_wrong_cp_count: %d\n", ori_out_reach_limit, dec_not_found_count, dec_found_wrong_cp_count);
     printf("current_pwr_eb: %f\n", current_pwr_eb);
     stop = true;
+    write_current_state_data("/Users/mingzexia/Documents/Github/tracecp/data/", U, V, dec_U, dec_V, trajs_dec, index_dec, r1, r2, NUM_ITER);
 
+  }
+  write_current_state_data("/Users/mingzexia/Documents/Github/tracecp/data/", U, V, dec_U, dec_V, trajs_dec, index_dec, r1, r2, NUM_ITER);
+  
+  if (NUM_ITER == 0){
+    // wrtie original traj when first iteration
+    std::string file_path = "/Users/mingzexia/Documents/Github/tracecp/data/";
+    std::string ori_traj_file = file_path + "ori_traj.bin";
+    write_trajectory(trajs_ori, ori_traj_file.c_str());
+    printf("Successfully write original trajs");
+    //write original index
+    std::string index_file = file_path + "index_ori_traj.bin";
+    writefile(index_file.c_str(), index_ori.data(), index_ori.size());
+    printf("Successfully write orginal index to file, total index: %ld\n",index_ori.size());
+  }
+
+  //clean up
+  {
+  //all_vertex_for_all_diff_traj.clear();// clear all_vertex_for_all_diff_traj
+  current_diff_traj_id.clear();
+  // free(dec_U);
+  // free(dec_V);
+  free(result);
   }
 
   //尝试按照比较距离来判断是不是跑偏了，然后添加到all_vertex_for_all_diff_traj
   for(size_t i=0;i < trajs_ori.size(); ++i){
+  //for(size_t i=9310;i < 9312; ++i){
     auto t1 = trajs_ori[i];
     auto t2 = trajs_dec[i];
     if (t1.size() != t_config.max_length && t1.back()[0] != -1){
       // original data found cp
-      if (t2.size() >= t_config.max_length-1 || t2.back()[0] == -1){
+      if (t2.size() == t_config.max_length || t2.back()[0] == -1){
         // decompressed data not found cp
-        //遍历每一个点，然后计算距离，如果距离大于某个值，就把这个点对应的3个vertex加入到all_vertex_for_all_diff_traj(因为遍历没停，所以是后面1/3的所有点)
-          int start_fix_index = 0;
-          int end_fix_index = 0;
-          for (size_t j = 0; j < t1.size(); ++j){
-            auto p1 = t1[j];
-            auto p2 = t2[j];
-            if (p1[0] > 0 && p2[0] > 0){
-              double dist = sqrt(pow(p1[0] - p2[0], 2) + pow(p1[1] - p2[1], 2));
-              if (dist > 1.4142){
-                //往前1/3处开始修改
-                // start_fix_index = static_cast<int>(floor(j*2/3));
-                // start_fix_index = start_fix_index < 0 ? 0 : start_fix_index;
-                // end_fix_index = j;
-                // break;
-                //or 直接从头fix？
-                start_fix_index = 0;
-                end_fix_index = j;
-                break;
-              }
-            }
-          }
-          if (end_fix_index != 0){
-            printf("decomp not found cp\n");
-            printf("trajectory %ld goes wrong, start_fix_at_index: %d, end_fix_at_index: %d\n", i, start_fix_index, end_fix_index);
-            printf("orginal start point: (%f, %f),seed point:(%f,%f), original end point: (%f, %f)\n", t1[0][0], t1[0][1],t1[1][0],t1[1][1], t1.back()[0], t1.back()[1]);
-            printf("decomp start point: (%f, %f), seed point(%f,%f), decomp end point: (%f, %f)\n", t2[0][0], t2[0][1], t2[1][0],t2[1][1],t2.back()[0], t2.back()[1]);
-            printf("add vertexs from coord (%f, %f) to (%f, %f)\n", t1[start_fix_index][0], t1[start_fix_index][1], t1[end_fix_index][0], t1[end_fix_index][1]);
-            // add vertexs at start_fix_index, end at end_fix_index
-            for (int j = start_fix_index; j <= end_fix_index; ++j){
-              auto p = t1[j];
-              double current_v[2] = {0};
-              interp2d(p.data(),current_v,grad_ori);
-              auto offsets = vertex_for_each_RK4(p.data(), current_v,grad_ori, t_config.h,DH, DW);
-              //auto offsets = get_three_offsets(p.data(), DW, DH);
-              for (auto o:offsets){
-                all_vertex_for_all_diff_traj.insert(o);
-              }
-            }
-          }
-
+        printf("decomp not found cp\n");
+        // int end_fix_index = 0;
+        int end_fix_index = t1.size() - 1;
+        find_fix_index_end(end_fix_index,t1,t2,grad_ori,DW,DH,t_config,all_vertex_for_all_diff_traj,i,critical_points_ori);
+        current_diff_traj_id[i] = end_fix_index;
             
       }
       else{
         if (get_cell_offset(t1.back().data(), DW, DH) != get_cell_offset(t2.back().data(), DW, DH)){
           // both found cp but different
-          //dec_found_wrong_cp_count ++;
-          int start_fix_index = 0;
-          int end_fix_index = 0;
-          for (size_t j = 0; j < t1.size(); ++j){
-            auto p1 = t1[j];
-            auto p2 = t2[j];
-            if (p1[0] > 0 && p2[0] > 0){
-              double dist = sqrt(pow(p1[0] - p2[0], 2) + pow(p1[1] - p2[1], 2));
-              if (dist > 1.4142){
-                //往前1/3处开始修改
-                // start_fix_index = static_cast<int>(floor(j*2/3));
-                // start_fix_index = start_fix_index < 0 ? 0 : start_fix_index;
-                // end_fix_index = j;
-                // break;
-                //or 直接从头fix？
-                start_fix_index = 0;
-                end_fix_index = j;
-                break;
-              }
-            }
-          }
-          if (end_fix_index != 0){
-            printf("decomp found wrong cp\n");
-            printf("trajectory %ld goes wrong, start_fix_at_index: %d, end_fix_at_index: %d\n", i, start_fix_index, end_fix_index);
-            printf("orginal start point: (%f, %f),seed point:(%f,%f), original end point: (%f, %f)\n", t1[0][0], t1[0][1],t1[1][0],t1[1][1], t1.back()[0], t1.back()[1]);
-            printf("decomp start point: (%f, %f), seed point(%f,%f), decomp end point: (%f, %f)\n", t2[0][0], t2[0][1], t2[1][0],t2[1][1],t2.back()[0], t2.back()[1]);
-            printf("add vertexs from coord (%f, %f) to (%f, %f)\n", t1[start_fix_index][0], t1[start_fix_index][1], t1[end_fix_index][0], t1[end_fix_index][1]);
-            // add vertexs at start_fix_index, end at end_fix_index
-            for (int j = start_fix_index; j <= end_fix_index; ++j){
-              auto p = t1[j];
-              double current_v[2] = {0};
-              interp2d(p.data(),current_v,grad_ori);
-              auto offsets = vertex_for_each_RK4(p.data(), current_v,grad_ori, t_config.h,DH, DW);
-              //auto offsets = get_three_offsets(p.data(), DW, DH);
-              for (auto o:offsets){
-                all_vertex_for_all_diff_traj.insert(o);
-              }
-            }
-          }
+          printf("decomp found wrong cp\n");
+          // int end_fix_index = 0;
+          int end_fix_index = t1.size() - 1;
+          find_fix_index_end(end_fix_index,t1,t2,grad_ori,DW,DH,t_config,all_vertex_for_all_diff_traj,i,critical_points_ori);
+          current_diff_traj_id[i] = end_fix_index;
 
           
         }
@@ -1597,6 +1682,75 @@ fix_traj(const T * U, const T * V,size_t r1, size_t r2, double max_pwr_eb,traj_c
     }
   }
   
+  //if current_diff_traj_id is the same as last_diff_traj_id, then add all vertex for all different trajectories
+  // if(current_diff_traj_id == last_diff_traj_id && current_diff_traj_id.size() != 0){
+  //   printf("current_diff_traj_id is the same as last_diff_traj_id\n");
+  //   for (auto i:current_diff_traj_id){
+  //     auto t1 = trajs_ori[i];
+  //     for (size_t j = 1; j < t1.size(); ++j){ //start from 1, since 0 is cp
+  //       auto p = t1[j];
+  //       double current_v[2] = {0};
+  //       interp2d(p.data(),current_v,grad_ori);
+  //       auto offsets = vertex_for_each_RK4(p.data(), current_v,grad_ori, t_config.h,DH, DW);
+  //       for (auto o:offsets){
+  //         all_vertex_for_all_diff_traj.insert(o);
+  //       }
+  //     }
+  //   }
+  // }
+
+  //if(current_diff_traj_id == last_diff_traj_id && current_diff_traj_id.size() != 0){
+  if(1==1){
+    //if last_diff_traj_id has 9311
+    for (auto i:last_diff_traj_id){
+      auto traj_ind = i.first;
+      auto end_fix_index = i.second;
+      printf("last_diff_traj_id: %ld, end_fix_index %d\n", traj_ind, end_fix_index);
+      auto t1 = trajs_ori[traj_ind];
+      auto t2 = trajs_dec[traj_ind];
+      for (size_t j = 0; j < end_fix_index-1; ++j){
+        auto p1 = t1[j];
+        auto p2 = t2[j];
+        if (p1 != p2){
+          printf("point diff at index: %ld, ori: (%f, %f), dec: (%f, %f)\n", j, p1[0], p1[1], p2[0], p2[1]);
+          //print the V[3][2] from dec_u and u
+          if (is_upper(p1)){
+            int x = floor(p1[0]);
+            int y = floor(p1[1]);
+            printf("ori: %f, dec: %f\n", U[y*DW+x], dec_U[y*DW+x]);
+            printf("ori: %f, dec: %f\n", grad_ori(0, x, y), grad_dec(0, x, y));
+
+            printf("ori: %f, dec: %f\n", U[(y+1)*DW+x], dec_U[(y+1)*DW+x]);
+            printf("ori: %f, dec: %f\n", grad_ori(0, x, y+1), grad_dec(0, x, y+1));
+
+            printf("ori: %f, dec: %f\n", U[(y+1)*DW+x+1], dec_U[(y+1)*DW+x+1]);
+            printf("ori: %f, dec: %f\n", grad_ori(0, x+1, y+1), grad_dec(0, x+1, y+1));
+
+          }
+          else{
+            int x = floor(p1[0]);
+            int y = floor(p1[1]);
+            printf("ori: %f, dec: %f\n", U[y*DW+x], dec_U[y*DW+x]);
+            printf("ori: %f, dec: %f\n", grad_ori(0, x, y), grad_dec(0, x, y));
+
+            printf("ori: %f, dec: %f\n", U[y*DW+x+1], dec_U[y*DW+x+1]);
+            printf("ori: %f, dec: %f\n", grad_ori(0, x+1, y), grad_dec(0, x+1, y));
+
+            printf("ori: %f, dec: %f\n", U[(y+1)*DW+x+1], dec_U[(y+1)*DW+x+1]);
+            printf("ori: %f, dec: %f\n", grad_ori(0, x+1, y+1), grad_dec(0, x+1, y+1));
+          }
+        }
+        
+        // else{
+        //   printf("point same at index: %ld, ori: (%f, %f), dec: (%f, %f)\n", j, p1[0], p1[1], p2[0], p2[1]);
+        // }
+      }
+    }
+    //printf("CONVERGE\n");
+    //exit(0);
+  }
+
+
   //std::set_difference(vertex_ori.begin(), vertex_ori.end(), vertex_dec.begin(), vertex_dec.end(), std::inserter(all_vertex_for_all_diff_traj, all_vertex_for_all_diff_traj.begin()));
 
   // 把所有ori的vertex加入到all_vertex_for_all_diff_traj ,即lossless all original trajectories's vertex
@@ -1638,15 +1792,29 @@ fix_traj(const T * U, const T * V,size_t r1, size_t r2, double max_pwr_eb,traj_c
   printf("current iteration: %d, all_vertex_for_all_diff_traj size: %ld,ori_out_or_reach_limit: %d, dec_not_found_count: %d, dec_found_wrong_cp_count: %d\n", NUM_ITER, all_vertex_for_all_diff_traj.size(), ori_out_reach_limit, dec_not_found_count, dec_found_wrong_cp_count);
  
   NUM_ITER ++;
+
+  printf("last_diff_traj_id size: %ld, current_diff_traj_id size: %ld\n", last_diff_traj_id.size(), current_diff_traj_id.size());
+  //print current_diff_traj_id
+  for (auto i:current_diff_traj_id){
+    printf("current_diff_traj_id: %ld, end_fix_index %d\n", i.first, i.second);
+  }
+  last_diff_traj_id.clear();
+  last_diff_traj_id = current_diff_traj_id;
   
+  grad_dec.reset();
+  grad_ori.reset();
+  free(dec_U);
+  free(dec_V);
+  printf("######################\n\n");
+
   }
 }
 
 
 
 int main(int argc, char **argv){
-  ftk::ndarray<double> grad; //grad是三纬，第一个纬度是2，代表着u或者v，第二个纬度是DH，第三个纬度是DW
-  ftk::ndarray<double> grad_out;
+  ftk::ndarray<float> grad; //grad是三纬，第一个纬度是2，代表着u或者v，第二个纬度是DH，第三个纬度是DW
+  ftk::ndarray<float> grad_out;
   size_t num = 0;
   float * u = readfile<float>(argv[1], num);
   float * v = readfile<float>(argv[2], num);

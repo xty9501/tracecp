@@ -23,7 +23,7 @@ std::string get_critical_point_type_string(int type){
   }
 }
 
-void refill_gradient(int id,const int DH,const int DW, const float* grad_tmp, ftk::ndarray<double>& grad){
+void refill_gradient(int id,const int DH,const int DW, const float* grad_tmp, ftk::ndarray<float>& grad){
   const float * grad_tmp_pos = grad_tmp;
   for (int i = 0; i < DH; i ++) {
     for (int j = 0; j < DW; j ++) {

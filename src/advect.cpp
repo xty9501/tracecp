@@ -9,10 +9,10 @@
 
 
 template<typename Type>
-std::array<Type, 2> newRK4(const Type * x, const Type * v, const ftk::ndarray<double> &data,  Type h, const int DH, const int DW,std::set<size_t>& lossless_index) {
+std::array<Type, 2> newRK4(const Type * x, const Type * v, const ftk::ndarray<float> &data,  Type h, const int DH, const int DW,std::set<size_t>& lossless_index) {
   // x and y are positions, and h is the step size
   double rk1[2] = {0};
-  const double p1[] = {x[0], x[1]};
+  const double p1[2] = {x[0], x[1]};
 
   auto coords = get_three_offsets(x, DW, DH);
   for (auto offset:coords){
@@ -30,7 +30,7 @@ std::array<Type, 2> newRK4(const Type * x, const Type * v, const ftk::ndarray<do
   }
   
   double rk2[2] = {0};
-  const double p2[] = {x[0] + 0.5 * h * rk1[0], x[1] + 0.5 * h * rk1[1]};
+  const double p2[2] = {x[0] + 0.5 * h * rk1[0], x[1] + 0.5 * h * rk1[1]};
   if (!inside(p2, DH, DW)){
     //return std::array<Type, 2>{p1[0], p1[1]};
     return std::array<Type, 2>{-1, -1};
@@ -42,7 +42,7 @@ std::array<Type, 2> newRK4(const Type * x, const Type * v, const ftk::ndarray<do
   }
   
   double rk3[2] = {0};
-  const double p3[] = {x[0] + 0.5 * h * rk2[0], x[1] + 0.5 * h * rk2[1]};
+  const double p3[2] = {x[0] + 0.5 * h * rk2[0], x[1] + 0.5 * h * rk2[1]};
   if (!inside(p3, DH, DW)){
     //return std::array<Type, 2>{p2[0], p2[1]};
     return std::array<Type, 2>{-1, -1};
@@ -54,7 +54,7 @@ std::array<Type, 2> newRK4(const Type * x, const Type * v, const ftk::ndarray<do
   }
   
   double rk4[2] = {0};
-  const double p4[] = {x[0] + h * rk3[0], x[1] + h * rk3[1]};
+  const double p4[2] = {x[0] + h * rk3[0], x[1] + h * rk3[1]};
   if (!inside(p4, DH, DW)){
     //return std::array<Type, 2>{p3[0], p3[1]};
     return std::array<Type, 2>{-1, -1};
@@ -65,8 +65,8 @@ std::array<Type, 2> newRK4(const Type * x, const Type * v, const ftk::ndarray<do
     lossless_index.insert(offset);
   }
   
-  Type next_x = x[0] + h * (rk1[0] + 2 * rk2[0] + 2 * rk3[0] + rk4[0]) / 6;
-  Type next_y = x[1] + h * (rk1[1] + 2 * rk2[1] + 2 * rk3[1] + rk4[1]) / 6;
+  Type next_x = x[0] + h * (rk1[0] + 2 * rk2[0] + 2 * rk3[0] + rk4[0]) / 6.0;
+  Type next_y = x[1] + h * (rk1[1] + 2 * rk2[1] + 2 * rk3[1] + rk4[1]) / 6.0;
   // printf("shift: (%f, %f)\n", next_x - x[0], next_y - x[1]);
   // printf("coefficients: (%f,%f)\n",(rk1[0] + 2 * rk2[0] + 2 * rk3[0] + rk4[0]) / 6, (rk1[1] + 2 * rk2[1] + 2 * rk3[1] + rk4[1]) / 6);
   // printf("current h sign: %d\n", printsign(h));
@@ -86,7 +86,7 @@ std::array<Type, 2> newRK4(const Type * x, const Type * v, const ftk::ndarray<do
 
 //overload newRK4 function
 template<typename Type>
-std::array<Type, 2> newRK4(const Type * x, const Type * v, const ftk::ndarray<double> &data,  Type h, const int DH, const int DW) {
+std::array<Type, 2> newRK4(const Type * x, const Type * v, const ftk::ndarray<float> &data,  Type h, const int DH, const int DW) {
   // x and y are positions, and h is the step size
   double rk1[2] = {0};
   const double p1[] = {x[0], x[1]};
@@ -144,7 +144,7 @@ std::array<Type, 2> newRK4(const Type * x, const Type * v, const ftk::ndarray<do
 }
 
 template<typename Type>
-std::set<size_t> vertex_for_each_RK4(const Type *x, const Type *v, const ftk::ndarray<double> &data, double h, const int DH, const int DW) {
+std::set<size_t> vertex_for_each_RK4(const Type *x, const Type *v, const ftk::ndarray<float> &data, double h, const int DH, const int DW) {
   std::set<size_t> result_set;
   double rk1[2] = {0};
   const double p1[] = {x[0], x[1]};
@@ -219,11 +219,11 @@ std::set<size_t> vertex_for_each_RK4(const Type *x, const Type *v, const ftk::nd
   return result_set;
 }
 
-template std::set<unsigned long> vertex_for_each_RK4<double>(double const*, double const*, ftk::ndarray<double> const&, double, int, int);
+template std::set<unsigned long> vertex_for_each_RK4<double>(double const*, double const*, ftk::ndarray<float> const&, double, int, int);
 
 
 template<typename Type>
-std::array<Type, 2> rkf45(const Type * x, const Type * v, const ftk::ndarray<double> &data,  Type h, const int DH, const int DW,std::set<size_t>& lossless_index,double tolerance) {
+std::array<Type, 2> rkf45(const Type * x, const Type * v, const ftk::ndarray<float> &data,  Type h, const int DH, const int DW,std::set<size_t>& lossless_index,double tolerance) {
   //The Runge-Kutta-Fehlberg method
 
   double error = 0.0;
@@ -333,7 +333,7 @@ std::array<Type, 2> rkf45(const Type * x, const Type * v, const ftk::ndarray<dou
 
 }
 
-std::vector<std::array<double, 2>> trajectory(double *X_original,const std::array<double, 2>& initial_x, const double time_step, const int DH,const int DW, const std::unordered_map<int, critical_point_t>& critical_points, ftk::ndarray<double>& data  ,std::vector<int>& index, std::vector<double>& config, std::vector<record_t>& record,std::set<size_t>& lossless_index){
+std::vector<std::array<double, 2>> trajectory(double *X_original,const std::array<double, 2>& initial_x, const double time_step, const int DH,const int DW, const std::unordered_map<int, critical_point_t>& critical_points, ftk::ndarray<float>& data  ,std::vector<int>& index, std::vector<double>& config, std::vector<record_t>& record,std::set<size_t>& lossless_index){
   std::vector<std::array<double, 2>> result;
   int flag = 0; // 1 means found, -1 means out of bound， 0 means reach max length
   int length = 0;
@@ -347,11 +347,11 @@ std::vector<std::array<double, 2>> trajectory(double *X_original,const std::arra
   current_x[1] = initial_x[1];
 
   //add original and initial_x position's offset
-  auto ori_offset = get_three_offsets(X_original, DW, DH);
+  auto ori_offset = get_three_offsets(X_original, DW, DH); //add cp offset
   for (auto offset:ori_offset){
     lossless_index.insert(offset);
   }
-  auto ini_offset = get_three_offsets(initial_x, DW, DH);
+  auto ini_offset = get_three_offsets(initial_x, DW, DH); //add seed offset
   for (auto offset:ini_offset){
     lossless_index.insert(offset);
   }
@@ -476,7 +476,7 @@ std::vector<std::array<double, 2>> trajectory(double *X_original,const std::arra
 }
 
 
-std::vector<std::array<double, 2>> trajectory(double *X_original,const std::array<double, 2>& initial_x, const double time_step, const int max_length, const int DH,const int DW, const std::unordered_map<int, critical_point_t>& critical_points, ftk::ndarray<double>& data  ,std::vector<int>& index){
+std::vector<std::array<double, 2>> trajectory(double *X_original,const std::array<double, 2>& initial_x, const double time_step, const int max_length, const int DH,const int DW, const std::unordered_map<int, critical_point_t>& critical_points, ftk::ndarray<float>& data  ,std::vector<int>& index){
   std::vector<std::array<double, 2>> result;
   int flag = 0; // 1 means found, -1 means out of bound， 0 means reach max length
   int length = 0;
@@ -578,7 +578,7 @@ std::vector<std::array<double, 2>> trajectory(double *X_original,const std::arra
 }
 
 
-std::vector<std::array<double, 2>> trajectory(double *X_original,const std::array<double, 2>& initial_x, const double time_step, const int max_length, const int DH,const int DW, const std::unordered_map<int, critical_point_t>& critical_points, ftk::ndarray<double>& data  ,std::vector<int>& index,std::set<size_t>& lossless_index){
+std::vector<std::array<double, 2>> trajectory(double *X_original,const std::array<double, 2>& initial_x, const double time_step, const int max_length, const int DH,const int DW, const std::unordered_map<int, critical_point_t>& critical_points, ftk::ndarray<float>& data  ,std::vector<int>& index,std::set<size_t>& lossless_index){
   std::vector<std::array<double, 2>> result;
   int flag = 0; // 1 means found, -1 means out of bound， 0 means reach max length
   int length = 0;

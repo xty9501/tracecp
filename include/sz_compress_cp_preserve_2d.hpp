@@ -33,7 +33,7 @@ compress_lossless_index(const T_data * U, const T_data * V, const std::unordered
 
 template<typename T>
 unsigned char *
-sz_compress_cp_preserve_2d_fix(const T * U, const T * V, size_t r1, size_t r2, size_t& compressed_size, bool transpose=false, double max_pwr_eb=0.1, double modified_eb = 0.05,const std::set<size_t> &index_need_to_fix = {});
+sz_compress_cp_preserve_2d_fix(const T * U, const T * V, size_t r1, size_t r2, size_t& compressed_size, bool transpose=false, double max_pwr_eb = 0.01, double modified_eb = 0,const std::set<size_t> &index_need_to_fix = {});
 
 
 #endif

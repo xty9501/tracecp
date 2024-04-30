@@ -821,29 +821,31 @@ sz_compress_cp_preserve_2d_fix(const T * U, const T * V, size_t r1, size_t r2, s
 		for(int j=0; j<r2; j++){
 			size_t vertex_index = i * r2 + j;
 			double required_eb;
-			// if(index_need_to_fix.find(vertex_index) != index_need_to_fix.end()){
-			// 	required_eb = modified_eb;
-			// }
-			required_eb = max_pwr_eb;
-			// derive eb given six adjacent triangles
-			for(int k=0; k<6; k++){
-				bool in_mesh = true;
-				for(int p=0; p<2; p++){
-					// reserved order!
-					if(!(in_range(i + index_offset[k][p][1], (int)r1) && in_range(j + index_offset[k][p][0], (int)r2))){
-						in_mesh = false;
-						break;
+			if(index_need_to_fix.find(vertex_index) != index_need_to_fix.end()){
+				required_eb = modified_eb;
+			}
+			else{
+				required_eb = max_pwr_eb;
+				// derive eb given six adjacent triangles
+				for(int k=0; k<6; k++){
+					bool in_mesh = true;
+					for(int p=0; p<2; p++){
+						// reserved order!
+						if(!(in_range(i + index_offset[k][p][1], (int)r1) && in_range(j + index_offset[k][p][0], (int)r2))){
+							in_mesh = false;
+							break;
+						}
 					}
-				}
-				if(in_mesh){
-					required_eb = MINF(required_eb, derive_cp_eb_for_positions_online(cur_U_pos[offsets[k]], cur_U_pos[offsets[k+1]], cur_U_pos[0],
-						cur_V_pos[offsets[k]], cur_V_pos[offsets[k+1]], cur_V_pos[0], inv_C[k]));
+					if(in_mesh){
+						required_eb = MINF(required_eb, derive_cp_eb_for_positions_online(cur_U_pos[offsets[k]], cur_U_pos[offsets[k+1]], cur_U_pos[0],
+							cur_V_pos[offsets[k]], cur_V_pos[offsets[k+1]], cur_V_pos[0], inv_C[k]));
+					}
 				}
 			}
 
-			if(index_need_to_fix.find(vertex_index) != index_need_to_fix.end()){
-				required_eb = MINF(required_eb, modified_eb);
-			}
+			// if(index_need_to_fix.find(vertex_index) != index_need_to_fix.end()){
+			// 	required_eb = MINF(required_eb, modified_eb);
+			// }
 
 			if(required_eb > 0){
 				bool unpred_flag = false;
@@ -940,9 +942,9 @@ template
 unsigned char *
 sz_compress_cp_preserve_2d_fix(const float * U, const float * V, size_t r1, size_t r2, size_t& compressed_size, bool transpose, double max_pwr_eb,double modified_eb,const std::set<size_t> &index_need_to_fix);
 
-template
-unsigned char *
-sz_compress_cp_preserve_2d_fix(const double * U, const double * V, size_t r1, size_t r2, size_t& compressed_size, bool transpose, double max_pwr_eb,double modified_eb,const std::set<size_t> &index_need_to_fix);
+// template
+// unsigned char *
+// sz_compress_cp_preserve_2d_fix(const double * U, const double * V, size_t r1, size_t r2, size_t& compressed_size, bool transpose, double max_pwr_eb,double modified_eb,const std::set<size_t> &index_need_to_fix);
 
 
 // template<typename T>

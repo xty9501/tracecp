@@ -92,7 +92,7 @@ typedef struct critical_point_t{
 
 std::string get_critical_point_type_string(int type);
 
-void refill_gradient(int id,const int DH,const int DW, const float* grad_tmp, ftk::ndarray<double>& grad);
+void refill_gradient(int id,const int DH,const int DW, const float* grad_tmp, ftk::ndarray<float>& grad);
 
 template<typename T>
 static void 

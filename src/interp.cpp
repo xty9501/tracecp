@@ -1,13 +1,13 @@
 #include "math.h"
 #include "interp.h"
 #include "ftk/ndarray.hh"
-void interp2d(const double p[2], double v[2],const ftk::ndarray<double> &grad){
+void interp2d(const double p[2], double *v,const ftk::ndarray<float> &grad){
   double X[3][2];
   double V[3][2];
   int x0 = floor(p[0]);
   int y0 = floor(p[1]);
-  float x_ex = p[0] - x0;
-  float y_ex = p[1] - y0;
+  double x_ex = p[0] - x0;
+  double y_ex = p[1] - y0;
   int upper =1;
   if (y_ex > x_ex){
     upper = 1;
