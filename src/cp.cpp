@@ -32,6 +32,17 @@ void refill_gradient(int id,const int DH,const int DW, const float* grad_tmp, ft
   }
 }
 
+void refill_gradient_3d(int id, const int DH, const int DW, const int DD, const float* grad_tmp, ftk::ndarray<float>& grad){
+  const float * grad_tmp_pos = grad_tmp;
+  for (int i = 0; i < DH; i ++) {
+    for (int j = 0; j < DW; j ++) {
+      for (int k = 0; k < DD; k ++) {
+        grad(id, k, j, i) = *(grad_tmp_pos ++);
+      }
+    }
+  }
+}
+
 template<typename T>
 static void 
 check_simplex_seq_saddle(const T v[3][2], const double X[3][2], const int indices[3], int i, int j, int simplex_id, std::unordered_map<int, critical_point_t>& critical_points){

@@ -51,6 +51,38 @@ convertIntArray2ByteArray_fast_1b_to_result_sz(const unsigned char* intArray, si
 	}
 }
 
+void convertByteArray2IntArray_fast_1b_sz(size_t intArrayLength, const unsigned char *&compressed_pos, size_t byteArrayLength, unsigned char *intArray)
+    { // num_elements is intArrayLength,compresed_pos is reading bytes, byteArrayLength is nume_elements/8.ceil, intArray is output(bit map)
+	  
+        if (intArrayLength > byteArrayLength * 8)
+        {
+            printf("Error: intArrayLength > byteArrayLength*8\n");
+            printf("intArrayLength=%zu, byteArrayLength = %zu", intArrayLength, byteArrayLength);
+            exit(0);
+        }
+        size_t n = 0, i;
+        int tmp;
+        for (i = 0; i < byteArrayLength - 1; i++)
+        {
+            tmp = *(compressed_pos++);
+            intArray[n++] = (tmp & 0x80) >> 7;
+            intArray[n++] = (tmp & 0x40) >> 6;
+            intArray[n++] = (tmp & 0x20) >> 5;
+            intArray[n++] = (tmp & 0x10) >> 4;
+            intArray[n++] = (tmp & 0x08) >> 3;
+            intArray[n++] = (tmp & 0x04) >> 2;
+            intArray[n++] = (tmp & 0x02) >> 1;
+            intArray[n++] = (tmp & 0x01) >> 0;
+        }
+        tmp = *(compressed_pos++);
+        for (int i = 0; n < intArrayLength; n++, i++)
+        {
+            intArray[n] = (tmp & (1 << (7 - i))) >> (7 - i);
+        }
+    }
+
+
+
 HuffmanTree *
 build_Huffman_tree(size_t state_num, const int * type, size_t num_elements){
 	HuffmanTree * huffman = createHuffmanTree(state_num);

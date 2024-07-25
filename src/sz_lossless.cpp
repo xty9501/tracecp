@@ -18,7 +18,7 @@ unsigned long sz_lossless_compress(int losslessCompressor, int level, unsigned c
 		if(dataLength < 100) 
 			estimatedCompressedSize = 200;
 		else
-			estimatedCompressedSize = dataLength*1.2;
+			estimatedCompressedSize = dataLength*2;
 		*compressBytes = (unsigned char*)malloc(estimatedCompressedSize);
 		outSize = ZSTD_compress(*compressBytes, estimatedCompressedSize, data, dataLength, level); //default setting of level is 3
 		break;

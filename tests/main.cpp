@@ -37,6 +37,8 @@
 #include <fstream>
 #include <utility>
 #include <set>
+#include <list>
+#include <set>
 
 
 #include "sz_cp_preserve_utils.hpp"
@@ -45,6 +47,16 @@
 #include "sz_lossless.hpp"
 #include <iostream> 
 #include <algorithm>
+
+std::array<double, 2> findLastNonNegativeOne(const std::vector<std::array<double, 2>>& vec) {
+    for (auto it = vec.rbegin(); it != vec.rend(); ++it) {
+        if ((*it)[0] != -1 || (*it)[1] != -1) {
+            return *it;
+        }
+    }
+    // 如果没有找到非 (-1, -1) 的点，可以返回一个特定的值，例如 {-1, -1}
+    return {-1, -1};
+}
 
 double euclideanDistance(const std::array<double, 2>& p1, const std::array<double, 2>& p2) {
     return std::sqrt(std::pow(p1[0] - p2[0], 2) + std::pow(p1[1] - p2[1], 2));
@@ -95,7 +107,7 @@ typedef struct traj_config{
   int max_length; 
 } traj_config;
 
-traj_config t_config = {0.05, 0.01, 2000};
+
 
 template<typename Type>
 void verify(Type * ori_data, Type * data, size_t num_elements){
@@ -390,6 +402,7 @@ inline bool file_exists(const std::string& filename) {
     std::ifstream f(filename.c_str());
     return f.good();
 }
+
 
 
 // template<typename Container>
@@ -1290,7 +1303,7 @@ void write_current_state_data(std::string file_path, const T * U, const T * V, T
   writefile(decV_file.c_str(), dec_V, r1*r2);
 }
 
-void find_fix_index_end(int &end_fix_index,std::vector<std::array<double, 2>> t1,std::vector<std::array<double, 2>> t2,ftk::ndarray<float> &grad_ori, int DW, int DH, traj_config t_config, std::set<size_t> &all_vertex_for_all_diff_traj, size_t i, std::unordered_map<int, critical_point_t>& critical_points_ori){
+void find_fix_index_end(int &end_fix_index,std::vector<std::array<double, 2>> t1,std::vector<std::array<double, 2>> t2,ftk::ndarray<float> &grad_ori, int DW, int DH, traj_config t_config,double threshold, std::set<size_t> &all_vertex_for_all_diff_traj, size_t i, std::unordered_map<int, critical_point_t>& critical_points_ori){
     int start_fix_index = 0;
     if(t1[0][0] != t2[0][0] || t1[0][1] != t2[0][1] || t1[1][0] != t2[1][0] || t1[1][1] != t2[1][1]){
       printf("start point(cp) or seed is different!!!\n");
@@ -1301,7 +1314,7 @@ void find_fix_index_end(int &end_fix_index,std::vector<std::array<double, 2>> t1
       auto p2 = t2[j];
       if (p1[0] > 0 && p2[0] > 0){
         double dist = sqrt(pow(p1[0] - p2[0], 2) + pow(p1[1] - p2[1], 2));
-        if (dist > 1.4142){
+        if (dist > threshold){
           start_fix_index = 0;
           end_fix_index = j;
           //end_fix_index = t1.size() - 1;
@@ -1365,78 +1378,64 @@ void find_fix_index_end(int &end_fix_index,std::vector<std::array<double, 2>> t1
       std::set<size_t> temp_vertexs;
       std::vector<int> temp_index;
       
-      int direction;
+      double direction;
       if((i %4) == 0 || (i % 4) == 1){
         direction = 1;
       }
       else{
         direction = -1;
       }
-      auto temp_trajs_pos = trajectory(cp_coord.data(), current_X, direction * t_config.h, end_fix_index, DH, DW, critical_points_ori, grad_ori,temp_index, temp_vertexs);
+      std::unordered_map<size_t, std::set<int>> temp_map;
+      auto temp_trajs_pos = trajectory(cp_coord.data(), current_X, direction * t_config.h, end_fix_index, DH, DW, critical_points_ori, grad_ori,temp_index, temp_vertexs,temp_map,i);
+      // 这里为了计算需要lossless的点，根据cp重新计算了rk4，看看能不能简化？
       //这里如果用trajectory需要知道他的方向，这里暂时两个方向都加上
       //auto temp_traj_neg = trajectory(cp_coord.data(), current_X, -t_config.h, end_fix_index, DH, DW, critical_points_ori, grad_ori,temp_index, temp_vertexs);
       for (auto o:temp_vertexs){
         all_vertex_for_all_diff_traj.insert(o);
       }
       
-      // while(num < end_fix_index){
-      //   std::set<size_t> temp_vertex;
-      //   double current_v[2] = {0};
-      //   interp2d(current_X.data(), current_v,grad_ori);
-      //   //std::array<Type, 2> newRK4(const Type * x, const Type * v, const ftk::ndarray<float> &data,  Type h, const int DH, const int DW,std::set<size_t>& lossless_index)
-      //   std::array<double, 2> temp_result = newRK4(current_X.data(),current_v,grad_ori,t_config.h, DH, DW, temp_vertex);
-      //   current_X = temp_result;
-      //   num++;
-      //   for (auto o:temp_vertex){
-      //     all_vertex_for_all_diff_traj.insert(o);
-      //   }
-      // }
     }
 }
 
 
 template<typename T>
 void
-fix_traj(const T * U, const T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_config){
+fix_traj(const T * U, const T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_config, int obj = 0){
+  int global_start_trahID_need_fix;
+  int check = 0;
   int DW = r2;
   int DH = r1;
   bool stop = false;
   std::set<size_t> all_vertex_for_all_diff_traj;
   int NUM_ITER = 0;
-  const int MAX_ITER = 10;
+  const int MAX_ITER = 2000;
+  std::unordered_map<size_t, double> trajID_direction_map;
   //std::set<size_t> current_diff_traj_id;
-  std::unordered_map<size_t,int> current_diff_traj_id;
+  // std::unordered_map<size_t,int> current_diff_traj_id;
   //std::set<size_t> last_diff_traj_id;
-  std::unordered_map<size_t,int> last_diff_traj_id;
+  // std::unordered_map<size_t,int> last_diff_traj_id;
   
-  while (!stop)
-  {
-
-  if (NUM_ITER >= MAX_ITER) break;
-  
-  
-  //double current_pwr_eb = max_pwr_eb / pow(2, NUM_ITER);
-  double current_pwr_eb = 0;
-  printf("CURRENT ITERATION: %d, current_pwr_eb: %f\n", NUM_ITER, current_pwr_eb);
-  // first get decompressed data
   size_t result_size = 0;
   unsigned char * result = NULL;
-  result = sz_compress_cp_preserve_2d_fix(U, V, r1, r2, result_size, false, max_pwr_eb, current_pwr_eb, all_vertex_for_all_diff_traj);
+  double current_pwr_eb = 0;
+  result = sz_compress_cp_preserve_2d_fix(U, V, r1, r2, result_size, false, max_pwr_eb, current_pwr_eb);
   unsigned char * result_after_lossless = NULL;
   size_t lossless_outsize = sz_lossless_compress(ZSTD_COMPRESSOR, 3, result, result_size, &result_after_lossless);
   size_t lossless_output = sz_lossless_decompress(ZSTD_COMPRESSOR, result_after_lossless, lossless_outsize, &result, result_size);
   float * dec_U = NULL;
   float * dec_V = NULL;
   sz_decompress_cp_preserve_2d_online<float>(result, r1,r2, dec_U, dec_V); // use cpsz
+  // calculate compression ratio
+  printf("BEGIN Compressed size(original) = %zu, ratio = %f\n", lossless_outsize, (2*r1*r2*sizeof(float)) * 1.0/lossless_outsize);
 
-  //把dec_U, dec_V里对应all_vertex_for_all_diff_traj的点的值都设为相应的U,V的值
-  // for (auto o:all_vertex_for_all_diff_traj){
-  //   dec_U[o] = U[o];
-  //   dec_V[o] = V[o];
-  // }
+  // init a unordered_map, key is the index of cell, value is an array which contains the index of trajectory that goes through this cell
+  std::unordered_map<size_t, std::set<int>> cellID_trajIDs_map_ori;
+  std::unordered_map<size_t, std::set<int>> cellID_trajIDs_map_dec;
 
-  // print compression ratio
-  printf("Compressed size(original) = %zu, ratio = %f, all_vertex_need_record_size = %zu\n", lossless_outsize, (2*r1*r2*sizeof(float)) * 1.0/lossless_outsize, all_vertex_for_all_diff_traj.size());
+  //get cp for original data
+  auto critical_points_ori = compute_critical_points(U, V, r1, r2);
+  //get cp for decompressed data
+  auto critical_points_dec = compute_critical_points(dec_U, dec_V, r1, r2);
 
   //get grad for original data
   ftk::ndarray<float> grad_ori;
@@ -1448,66 +1447,856 @@ fix_traj(const T * U, const T * V,size_t r1, size_t r2, double max_pwr_eb,traj_c
   grad_dec.reshape({2, static_cast<unsigned long>(r2), static_cast<unsigned long>(r1)});
   refill_gradient(0, r1, r2, dec_U, grad_dec);
   refill_gradient(1, r1, r2, dec_V, grad_dec);
-  //get cp for original data
-  auto critical_points_ori = compute_critical_points(U, V, r1, r2);
-  //get cp for decompressed data
-  auto critical_points_dec = compute_critical_points(dec_U, dec_V, r1, r2);
 
-  //check if dec_U and grad_dec are correct
-  //for loop for r1 and for loop for r2
-  for (int i = 0; i < r1; i++){
-    for (int j = 0; j < r2; j++){
-      //get dec_U and grad_dec(0, i, j)
-      double dec_U_val = dec_U[i*r2+j];
-      double grad_dec_U_val = grad_dec(0, j, i);
-      double dec_V_val = dec_V[i*r2+j];
-      double grad_dec_V_val = grad_dec(1, j, i);
-      if (dec_U_val != grad_dec_U_val || dec_V_val != grad_dec_V_val){
-        printf("Dec_U/Dec_V and grad_dec are not correct!!!\n");
-        printf("may need check refill_gradient function\n");
-        printf("dec_U: %f, grad_dec_U: %f, dec_V: %f, grad_dec_V: %f\n", dec_U_val, grad_dec_U_val, dec_V_val, grad_dec_V_val);
-        exit(0);
-      }
-    }
-  }
-
-
-
-  // print out cp size and saddle size
-  printf("critical_points_ori size: %ld, critical_points_dec size: %ld\n", critical_points_ori.size(), critical_points_dec.size());
-  size_t saddle_ori_count = 0;
-  size_t saddle_dec_count = 0;
-  for (auto p:critical_points_ori){
-    if (p.second.type == SADDLE){
-      saddle_ori_count ++;
-    }
-  }
-  for (auto p:critical_points_dec){
-    if (p.second.type == SADDLE){
-      saddle_dec_count ++;
-    }
-  }
-  printf("saddle_ori_count: %ld, saddle_dec_count: %ld\n", saddle_ori_count, saddle_dec_count);
-
-  // check if critical_points_ori and critical_points_dec are same
-  for (auto p:critical_points_ori){
-    auto cp_ori = p.second;
-    auto cp_dec = critical_points_dec[p.first];
-    if (cp_ori.type != cp_dec.type || cp_ori.x[0] != cp_dec.x[0] || cp_ori.x[1] != cp_dec.x[1] || cp_ori.eig_vec[0][0] != cp_dec.eig_vec[0][0] || cp_ori.eig_vec[0][1] != cp_dec.eig_vec[0][1] || cp_ori.eig_vec[1][0] != cp_dec.eig_vec[1][0] || cp_ori.eig_vec[1][1] != cp_dec.eig_vec[1][1]){
-      printf("critical_points_ori and critical_points_dec are not same!!!\n");
-      //print diff
-      printf("ori: type: %d, x: (%f, %f), eig_vec: (%f, %f), (%f, %f)\n", cp_ori.type, cp_ori.x[0], cp_ori.x[1], cp_ori.eig_vec[0][0], cp_ori.eig_vec[0][1], cp_ori.eig_vec[1][0], cp_ori.eig_vec[1][1]);
-      printf("dec: type: %d, x: (%f, %f), eig_vec: (%f, %f), (%f, %f)\n", cp_dec.type, cp_dec.x[0], cp_dec.x[1], cp_dec.eig_vec[0][0], cp_dec.eig_vec[0][1], cp_dec.eig_vec[1][0], cp_dec.eig_vec[1][1]);
-      exit(0);
-    }
-  }
-
-
+  printf("first time calculate trajectory\n");
+  //*************先计算一次整体的traj_ori 和traj_dec,后续只需增量修改*************
   //get trajectory for original data
   std::vector<std::vector<std::array<double, 2>>> trajs_ori;
   std::vector<int> index_ori;
   std::set<size_t> vertex_ori;
   // std::unordered_map<size_t,std::vector<size_t>> vertex_ori_map;
+  printf("calculating trajectory for original data...\n");
+  // 统计耗时
+  auto start = std::chrono::high_resolution_clock::now();
+  size_t ori_saddle_count = 0;
+  for(const auto& p:critical_points_ori){
+    auto cp = p.second;
+    if (cp.type == SADDLE){
+      ori_saddle_count ++;
+      std::vector<std::array<double,2>> X_all_direction;  
+      X_all_direction.push_back({cp.x[0] + t_config.eps*cp.eig_vec[0][0], cp.x[1] + t_config.eps*cp.eig_vec[0][1]});
+      X_all_direction.push_back({cp.x[0] - t_config.eps*cp.eig_vec[0][0], cp.x[1] - t_config.eps*cp.eig_vec[0][1]});
+      X_all_direction.push_back({cp.x[0] + t_config.eps*cp.eig_vec[1][0], cp.x[1] + t_config.eps*cp.eig_vec[1][1]});
+      X_all_direction.push_back({cp.x[0] - t_config.eps*cp.eig_vec[1][0], cp.x[1] - t_config.eps*cp.eig_vec[1][1]});                              
+      double lambda[3];
+      double values[2];
+      std::vector<std::vector<double>> config;
+      config.push_back({cp.eig_vec[0][0], cp.eig_vec[0][1],1});
+      config.push_back({cp.eig_vec[0][0], cp.eig_vec[0][1],1});
+      config.push_back({cp.eig_vec[1][0], cp.eig_vec[1][1],-1});
+      config.push_back({cp.eig_vec[1][0], cp.eig_vec[1][1],-1});
+
+      auto eigvec = cp.eig_vec;
+      auto eigval = cp.eig;
+      auto pt = cp.x;
+      std::array<std::array<double, 3>, 4> directions;//first is direction(1 or -1), next 2 are seed point
+      for (int i = 0; i < 2; i++){
+              if (eigval[i].real() > 0){
+                directions[i][0] = 1;
+                directions[i][1] = t_config.eps * eigvec[i][0] + pt[0];
+                directions[i][2] = t_config.eps * eigvec[i][1] + pt[1];
+                directions[i+2][0] = -1;
+                directions[i+2][1] = -1 * t_config.eps * eigvec[i][0] + pt[0];
+                directions[i+2][2] = -1 * t_config.eps * eigvec[i][1] + pt[1];
+              }
+              else{
+                directions[i][0] = -1;
+                directions[i][1] = t_config.eps * eigvec[i][0] + pt[0];
+                directions[i][2] = t_config.eps * eigvec[i][1] + pt[1];
+                directions[i+2][0] = 1;
+                directions[i+2][1] = -1 * t_config.eps * eigvec[i][0] + pt[0];
+                directions[i+2][2] = -1 * t_config.eps * eigvec[i][1] + pt[1];
+              }
+      }
+
+
+      for (int i = 0; i < 4; i ++) {
+        std::array<double, 2> X_start;
+        std::vector<std::array<double, 2>> result_return;
+        X_start = X_all_direction[i];
+        //check if inside
+        if (inside(X_start,DH, DW)){
+          //printf("processing (%f,%f)\n", X_start[0], X_start[1]);
+          double pos[2] = {cp.x[0], cp.x[1]};
+          size_t current_traj_index = trajs_ori.size();
+          // if(i == 0 || i ==1){
+          //   result_return = trajectory(pos, X_start, t_config.h,t_config.max_length,DH,DW, critical_points_ori,grad_ori,index_ori,vertex_ori,cellID_trajIDs_map_ori,current_traj_index);
+          //   trajs_ori.push_back(result_return);
+          // }
+          // else{
+          //   result_return = trajectory(pos,X_start, -t_config.h,t_config.max_length,DH,DW, critical_points_ori,grad_ori,index_ori,vertex_ori,cellID_trajIDs_map_ori,current_traj_index);
+          //   trajs_ori.push_back(result_return);
+          // }
+          std::array<double, 2> seed = {directions[i][1], directions[i][2]};
+          result_return = trajectory(pos, seed, directions[i][0] * t_config.h, t_config.max_length, DH, DW, critical_points_ori, grad_ori, index_ori, vertex_ori, cellID_trajIDs_map_ori, current_traj_index);
+          trajs_ori.push_back(result_return);
+          trajID_direction_map[current_traj_index] = directions[i][0];
+        }
+      }
+    }
+  }  
+  auto end = std::chrono::high_resolution_clock::now();
+  std::chrono::duration<double> elapsed = end - start;
+  printf("Time for original trajectory calculation: %f\n", elapsed.count()); 
+  printf("ori_saddle_count: %ld\n", ori_saddle_count);
+
+  //printf("trajID= 28020 ori traj: first point: (%f, %f), last point: (%f, %f)\n", trajs_ori[28020][0][0], trajs_ori[28020][0][1], trajs_ori[28020].back()[0], trajs_ori[28020].back()[1]);
+  
+  //get trajectory for decompressed data
+  std::vector<std::vector<std::array<double, 2>>> trajs_dec;
+  std::vector<int> index_dec;
+  std::set<size_t> vertex_dec;
+  printf("calculating trajectory for decompressed data...\n");
+  start = std::chrono::high_resolution_clock::now();
+  size_t dec_saddle_count = 0;
+  for(const auto& p:critical_points_dec){
+    auto cp = p.second;
+    if (cp.type == SADDLE){
+      dec_saddle_count ++;
+      std::vector<std::array<double,2>> X_all_direction;  
+      X_all_direction.push_back({cp.x[0] + t_config.eps*cp.eig_vec[0][0], cp.x[1] + t_config.eps*cp.eig_vec[0][1]});
+      X_all_direction.push_back({cp.x[0] - t_config.eps*cp.eig_vec[0][0], cp.x[1] - t_config.eps*cp.eig_vec[0][1]});
+      X_all_direction.push_back({cp.x[0] + t_config.eps*cp.eig_vec[1][0], cp.x[1] + t_config.eps*cp.eig_vec[1][1]});
+      X_all_direction.push_back({cp.x[0] - t_config.eps*cp.eig_vec[1][0], cp.x[1] - t_config.eps*cp.eig_vec[1][1]});                              
+      double lambda[3];
+      double values[2];
+      std::vector<std::vector<double>> config;
+      config.push_back({cp.eig_vec[0][0], cp.eig_vec[0][1],1});
+      config.push_back({cp.eig_vec[0][0], cp.eig_vec[0][1],1});
+      config.push_back({cp.eig_vec[1][0], cp.eig_vec[1][1],-1});
+      config.push_back({cp.eig_vec[1][0], cp.eig_vec[1][1],-1});
+
+      auto eigvec = cp.eig_vec;
+      auto eigval = cp.eig;
+      auto pt = cp.x;
+      std::array<std::array<double, 3>, 4> directions;//first is direction(1 or -1), next 2 are seed point
+      for (int i = 0; i < 2; i++){
+              if (eigval[i].real() > 0){
+                directions[i][0] = 1;
+                directions[i][1] = t_config.eps * eigvec[i][0] + pt[0];
+                directions[i][2] = t_config.eps * eigvec[i][1] + pt[1];
+                directions[i+2][0] = -1;
+                directions[i+2][1] = -1 * t_config.eps * eigvec[i][0] + pt[0];
+                directions[i+2][2] = -1 * t_config.eps * eigvec[i][1] + pt[1];
+              }
+              else{
+                directions[i][0] = -1;
+                directions[i][1] = t_config.eps * eigvec[i][0] + pt[0];
+                directions[i][2] = t_config.eps * eigvec[i][1] + pt[1];
+                directions[i+2][0] = 1;
+                directions[i+2][1] = -1 * t_config.eps * eigvec[i][0] + pt[0];
+                directions[i+2][2] = -1 * t_config.eps * eigvec[i][1] + pt[1];
+              }
+      }
+
+      for (int i = 0; i < 4; i ++) {
+        std::array<double, 2> X_start;
+        std::vector<std::array<double, 2>> result_return;
+        X_start = X_all_direction[i];
+        //check if inside
+        if (inside(X_start,DH, DW)){
+          double pos[2] = {cp.x[0], cp.x[1]};
+          //printf("processing (%f,%f)\n", X_start[0], X_start[1]);
+          size_t current_traj_index = trajs_dec.size();
+          // if(i == 0 || i ==1){
+          //   result_return = trajectory(pos,X_start, t_config.h,t_config.max_length,DH,DW, critical_points_dec,grad_dec,index_dec,vertex_dec,cellID_trajIDs_map_dec,current_traj_index);
+          //   trajs_dec.push_back(result_return);
+          // }
+          // else{
+          //   result_return = trajectory(pos,X_start, -t_config.h,t_config.max_length,DH,DW, critical_points_dec,grad_dec,index_dec,vertex_dec,cellID_trajIDs_map_dec,current_traj_index);
+          //   trajs_dec.push_back(result_return);   
+          // }
+          std::array<double, 2> seed = {directions[i][1], directions[i][2]};
+          result_return = trajectory(pos, seed, directions[i][0]* t_config.h, t_config.max_length, DH, DW, critical_points_dec, grad_dec, index_dec, vertex_dec, cellID_trajIDs_map_dec, current_traj_index);
+          trajs_dec.push_back(result_return);
+        }
+      }
+    }
+  }
+
+  //printf("trajID= 28020 dec traj: first point: (%f, %f), last point: (%f, %f)\n", trajs_dec[28020][0][0], trajs_dec[28020][0][1], trajs_dec[28020].back()[0], trajs_dec[28020].back()[1]);
+
+  end = std::chrono::high_resolution_clock::now();
+  elapsed = end - start;
+  printf("Time for decompressed trajectory calculation: %f\n", elapsed.count());
+  printf("dec_saddle_count: %ld\n", dec_saddle_count);
+  // 计算哪里有问题
+  //compare the trajectory, and get all vertex for all different trajectories
+  // int both_reach_limit = 0; // both reach limit
+  // int both_outside = 0; // both outside
+  // int correct = 0; // both correct
+  // int wrong = 0;
+  std::set<size_t> trajID_need_fix;
+
+  /*
+  get initial status of trajID_need_fix
+  */
+  // for(size_t i=0;i < trajs_ori.size(); ++i){
+  //   auto t1 = trajs_ori[i];
+  //   auto t2 = trajs_dec[i];
+  //   bool cond1 = get_cell_offset(t1.back().data(), DW, DH) == get_cell_offset(t2.back().data(), DW, DH);
+  //   bool cond2 = t1.size() == t_config.max_length;
+  //   bool cond3 = t2.size() == t_config.max_length;
+  //   bool cond4 = t1.back()[0] == -1;
+  //   bool cond5 = t2.back()[0] == -1;
+  //   bool cond6 = sqrt(pow(t1.back()[0] - t2.back()[0], 2) + pow(t1.back()[1] - t2.back()[1], 2)) < 20;
+  //   if (cond4 && cond5){ // both outside
+  //     both_outside ++;
+  //   }
+  //   // else if (cond2 && cond3 && cond6){ // both reach limit
+  //   else if (cond2 && cond3){ // both reach limit
+  //     both_reach_limit ++;
+  //   }
+  //   else {
+  //     if (!cond1){
+  //       wrong ++;
+  //       trajID_need_fix.insert(i);
+  //     }
+  //     else{
+  //       correct ++;
+  //     }
+  //   }
+  // }
+
+  switch(obj){
+    case 0:
+      for(size_t i =0; i< trajs_ori.size(); ++i){
+        auto t1 = trajs_ori[i];
+        auto t2 = trajs_dec[i];
+        bool cond1 = get_cell_offset(t1.back().data(), DW, DH) == get_cell_offset(t2.back().data(), DW, DH);
+        bool cond2 = t1.size() == t_config.max_length;
+        if (!cond2 && !cond1){ //ori 找到了cp，但是dec和ori不一致
+          trajID_need_fix.insert(i);
+        }
+      }
+      break;
+    case 1:
+      for(size_t i=0;i<trajs_ori.size(); ++i){
+        auto t1 = trajs_ori[i];
+        auto t2 = trajs_dec[i];
+        bool cond2 = t1.size() == t_config.max_length;
+        bool cond3 = t2.size() == t_config.max_length;
+        bool cond4 = t1.back()[0] == -1;
+        bool cond5 = t2.back()[0] == -1;
+        if(!cond2 && !cond4){ //inside and not reach max, ie found cp
+          std::array<double, 2>  ori_last_inside = findLastNonNegativeOne(t1);
+          std::array<double, 2>  dec_last_inside = findLastNonNegativeOne(t2);
+          if (get_cell_offset(ori_last_inside.data(), DW, DH) != get_cell_offset(dec_last_inside.data(), DW, DH)){
+            trajID_need_fix.insert(i);
+        
+          }
+
+        }
+        else if (cond2){ //original reach limit
+          //找到dec最后一个非(-1,-1)的点
+          std::array<double, 2>  dec_last_inside = findLastNonNegativeOne(t2);
+          if (get_cell_offset(t1.back().data(), DW, DH) != get_cell_offset(dec_last_inside.data(), DW, DH)){
+            trajID_need_fix.insert(i);
+          }
+        }
+        else if (cond4){// original outside
+          //遍历找到t1最后一个非(-1,-1)的点
+          std::array<double, 2>  ori_last_inside = findLastNonNegativeOne(t1);
+          std::array<double, 2>  dec_last_inside = findLastNonNegativeOne(t2);
+          if (get_cell_offset(ori_last_inside.data(), DW, DH) != get_cell_offset(dec_last_inside.data(), DW, DH)){
+            trajID_need_fix.insert(i);
+          }
+        }
+      }
+      break;
+    case 2:
+      //  original | dec
+      //  outside  | outside (could go different direction)
+      //  max_iter | max_iter (could be different)
+      //  reach cp | reach same cp
+      for(size_t i=0;i<trajs_ori.size(); ++i){
+        auto t1 = trajs_ori[i];
+        auto t2 = trajs_dec[i];
+        bool cond2 = t1.size() == t_config.max_length;
+        bool cond3 = t2.size() == t_config.max_length;
+        bool cond4 = t1.back()[0] == -1;
+        bool cond5 = t2.back()[0] == -1;
+        if (cond4){
+          if(!cond5){
+            trajID_need_fix.insert(i);
+          }
+        }
+        else if(cond2){
+          if (!cond3){
+            trajID_need_fix.insert(i);
+          }
+        }
+        else if (!cond2 && !cond4){
+          std::array<double, 2>  ori_last_inside = findLastNonNegativeOne(t1);
+          std::array<double, 2>  dec_last_inside = findLastNonNegativeOne(t2);
+          if (get_cell_offset(ori_last_inside.data(), DW, DH) != get_cell_offset(dec_last_inside.data(), DW, DH)){
+            trajID_need_fix.insert(i);
+          }
+        }
+      }
+  }
+
+  // printf("wrong traj need to fix at begining %d\n", trajID_need_fix.size());
+  // std::cout << "Press any key to continue..." << std::endl;
+  // std::cin.get(); // 等待用户输入任意按键
+
+  if(trajID_need_fix.size() == 0){
+    printf("All trajectories are the same!!!\n");
+    return;
+  }
+  else{
+    printf("using objecitve %d\n", obj);
+    printf("trajID_need_fix size: %d\n",trajID_need_fix.size());
+    printf("start fixing trajectory...\n\n");
+    global_start_trahID_need_fix = trajID_need_fix.size();
+  }
+
+  // std::vector<size_t>::iterator it = trajID_need_fix.begin();
+  auto start_total = std::chrono::high_resolution_clock::now();
+  // while (it != trajID_need_fix.end()){
+  while (!trajID_need_fix.empty()){
+    // size_t current_trajID = *it;
+    size_t current_trajID = *trajID_need_fix.begin();
+    if (NUM_ITER >= MAX_ITER) break;
+    //把dec_U, dec_V里对应all_vertex_for_all_diff_traj的点的值都设为相应的U,V的值
+    for (auto o:all_vertex_for_all_diff_traj){
+      dec_U[o] = U[o];
+      dec_V[o] = V[o];
+    }
+    //update grad_ori
+    // ftk::ndarray<float> grad_ori;
+    // grad_ori.reshape({2, static_cast<unsigned long>(r2), static_cast<unsigned long>(r1)});
+    // refill_gradient(0, r1, r2, U, grad_ori);
+    // refill_gradient(1, r1, r2, V, grad_ori);
+    //update grad_dec
+    ftk::ndarray<float> grad_dec;
+    grad_dec.reshape({2, static_cast<unsigned long>(r2), static_cast<unsigned long>(r1)});
+    refill_gradient(0, r1, r2, dec_U, grad_dec);
+    refill_gradient(1, r1, r2, dec_V, grad_dec);
+
+    printf("CURRENT ITERATION: %d, current_pwr_eb: %f,# of traj need to fix: %zu vertex size %zu\n", NUM_ITER, current_pwr_eb,trajID_need_fix.size(), all_vertex_for_all_diff_traj.size());
+    
+    //calculate trajID = 28020 for ori and dec
+    // std::vector<int> temp_28020_index;
+    // auto traj28020_ori = trajectory( trajs_ori[28020][0].data(), trajs_ori[28020][1], t_config.h, t_config.max_length, DH, DW, critical_points_ori, grad_ori,temp_28020_index);
+    // auto traj28020_dec = trajectory( trajs_dec[28020][0].data(), trajs_dec[28020][1], t_config.h, t_config.max_length, DH, DW, critical_points_dec, grad_dec,temp_28020_index);
+    // printf("iter: %d, trajID = 28020, ori traj: first point: (%f, %f), second point: (%f, %f), last point: (%f, %f)\n", NUM_ITER, traj28020_ori[0][0], traj28020_ori[0][1], traj28020_ori[1][0], traj28020_ori[1][1], traj28020_ori.back()[0], traj28020_ori.back()[1]);
+    // printf("iter: %d, trajID = 28020, dec traj: first point: (%f, %f), second point: (%f, %f), last point: (%f, %f)\n", NUM_ITER, traj28020_dec[0][0], traj28020_dec[0][1], traj28020_dec[1][0], traj28020_dec[1][1], traj28020_dec.back()[0], traj28020_dec.back()[1]);
+
+
+    // print compression ratio
+    printf("Compressed size(original) = %zu, ratio = %f, all_vertex_need_record_size = %zu\n", lossless_outsize, (2*r1*r2*sizeof(float)) * 1.0/lossless_outsize, all_vertex_for_all_diff_traj.size());
+    // timer
+    auto start = std::chrono::high_resolution_clock::now();
+
+    if (check == 1){
+      //check if dec_U and grad_dec are correct
+      //for loop for r1 and for loop for r2
+      for (int i = 0; i < r1; i++){
+        for (int j = 0; j < r2; j++){
+          //get dec_U and grad_dec(0, i, j)
+          double dec_U_val = dec_U[i*r2+j];
+          double grad_dec_U_val = grad_dec(0, j, i);
+          double dec_V_val = dec_V[i*r2+j];
+          double grad_dec_V_val = grad_dec(1, j, i);
+          if (dec_U_val != grad_dec_U_val || dec_V_val != grad_dec_V_val){
+            printf("Dec_U/Dec_V and grad_dec are not correct!!!\n");
+            printf("may need check refill_gradient function\n");
+            printf("dec_U: %f, grad_dec_U: %f, dec_V: %f, grad_dec_V: %f\n", dec_U_val, grad_dec_U_val, dec_V_val, grad_dec_V_val);
+            exit(0);
+          }
+        }
+      }
+    }
+    if (check == 1){
+      // check and print out cp size and saddle size
+      printf("critical_points_ori size: %ld, critical_points_dec size: %ld\n", critical_points_ori.size(), critical_points_dec.size());
+      size_t saddle_ori_count = 0;
+      size_t saddle_dec_count = 0;
+      for (auto p:critical_points_ori){
+        if (p.second.type == SADDLE){
+          saddle_ori_count ++;
+        }
+      }
+      for (auto p:critical_points_dec){
+        if (p.second.type == SADDLE){
+          saddle_dec_count ++;
+        }
+      }
+      printf("saddle_ori_count: %ld, saddle_dec_count: %ld\n", saddle_ori_count, saddle_dec_count);
+    }
+    if (check == 1){
+      // check if critical_points_ori and critical_points_dec are same
+      for (auto p:critical_points_ori){
+        auto cp_ori = p.second;
+        auto cp_dec = critical_points_dec[p.first];
+        if (cp_ori.type != cp_dec.type || cp_ori.x[0] != cp_dec.x[0] || cp_ori.x[1] != cp_dec.x[1] || cp_ori.eig_vec[0][0] != cp_dec.eig_vec[0][0] || cp_ori.eig_vec[0][1] != cp_dec.eig_vec[0][1] || cp_ori.eig_vec[1][0] != cp_dec.eig_vec[1][0] || cp_ori.eig_vec[1][1] != cp_dec.eig_vec[1][1]){
+          printf("critical_points_ori and critical_points_dec are not same!!!\n");
+          //print diff
+          printf("ori: type: %d, x: (%f, %f), eig_vec: (%f, %f), (%f, %f)\n", cp_ori.type, cp_ori.x[0], cp_ori.x[1], cp_ori.eig_vec[0][0], cp_ori.eig_vec[0][1], cp_ori.eig_vec[1][0], cp_ori.eig_vec[1][1]);
+          printf("dec: type: %d, x: (%f, %f), eig_vec: (%f, %f), (%f, %f)\n", cp_dec.type, cp_dec.x[0], cp_dec.x[1], cp_dec.eig_vec[0][0], cp_dec.eig_vec[0][1], cp_dec.eig_vec[1][0], cp_dec.eig_vec[1][1]);
+          exit(0);
+        }
+      }
+    }
+
+    // fix trajectory here
+    // 首先根据trajs_ori和trajs_dec计算出哪些trajID有问题（trajID_need_fix）
+    //for each trajID_need_fix，找到他们需要fix的终止点（end_fix_index，即需要几次rk4）
+    //for each trajID_need_fix，重跑RK4(用原始数据)，直到end_fix_index，然后把经过点加入到all_vertex_for_all_diff_traj，同时统计经过的cell(用dec数据)
+    bool success = false;
+    auto t1 = trajs_ori[current_trajID];
+    auto t2 = trajs_dec[current_trajID];
+    int start_fix_index = 0;
+    int end_fix_index = t1.size() - 1;
+    double threshold = 1.4142;
+    int num_try = 0;
+    printf("current process trajID: %ld\n", current_trajID);
+    printf("t1 last: (%f, %f), t2 last: (%f, %f)\n", t1.back()[0], t1.back()[1], t2.back()[0], t2.back()[1]);
+    printf("t1 size: %d, t2 size: %d\n", t1.size(), t2.size());
+    int max_index = std::min(t1.size(), t2.size());
+    while (success == false)
+    {
+      num_try++;
+      std::set<size_t> passed_cellID;
+      int changed = 0;
+      //找到一次修正的终止点
+      for (size_t j = start_fix_index; j < t1.size(); ++j){
+      //for (size_t j = start_fix_index; j < max_index; ++j){
+        auto p1 = t1[j];
+        auto p2 = t2[j];
+        if (p1[0] > 0 && p2[0] > 0){
+          double dist = sqrt(pow(p1[0] - p2[0], 2) + pow(p1[1] - p2[1], 2));
+          //auto p1_offset = get_cell_offset(p1.data(), DW, DH);
+          //auto p2_offset = get_cell_offset(p2.data(), DW, DH);
+          if ((dist > threshold)){
+            end_fix_index = j;
+            //end_fix_index = t1.size() - 1;
+            changed = 1;
+            break;
+          }
+        }
+      }
+      if (changed == 0){
+        end_fix_index = t1.size();
+      }
+      //int direction = ((current_trajID % 4) == 0 || (current_trajID % 4) == 1) ? 1 : -1;
+      double direction = trajID_direction_map[current_trajID];
+      printf("trajID: %ld, end_fix_index: %d, last element t1: (%f, %f), last element t2: (%f, %f), t1_size : %d\n", current_trajID, end_fix_index, t1.back()[0], t1.back()[1], t2.back()[0], t2.back()[1],t1.size());
+      std::vector<int> temp_index;
+      std::unordered_map<size_t, std::set<int>> temp_cellID_trajIDs_map;//需要临时的一个map统计修正的traj经过那些cellID
+      std::set<size_t> temp_vertexID;//临时变量记录经过的vertexID
+      std::unordered_map<size_t,double> rollback_dec_u;
+      std::unordered_map<size_t,double> rollback_dec_v;
+      //计算一次rk4直到终止点，统计经过的cellID，然后替换数据
+      auto temp_trajs_ori = trajectory(t1[0].data(), t1[1], direction * t_config.h, end_fix_index, DH, DW, critical_points_ori, grad_ori,temp_index, temp_vertexID,temp_cellID_trajIDs_map,current_trajID);
+      // for (auto o:temp_cellID_trajIDs_map){
+      //   passed_cellID.insert(o.first);
+      // }
+      //save dec_u, dec_v to rollback_dec_u and rollback_dec_v
+      for (auto o:temp_vertexID){
+        rollback_dec_u[o] = dec_U[o];
+        rollback_dec_v[o] = dec_V[o];
+        all_vertex_for_all_diff_traj.insert(o);
+      }
+
+      for (auto o:temp_vertexID){ // 更新dec_U, dec_V
+        dec_U[o] = U[o];
+        dec_V[o] = V[o];
+      }
+      //更新ftk::ndarray<float> grad_dec
+      grad_dec.reset();
+      grad_dec.reshape({2, static_cast<unsigned long>(r2), static_cast<unsigned long>(r1)});
+      refill_gradient(0, r1, r2, dec_U, grad_dec);
+      refill_gradient(1, r1, r2, dec_V, grad_dec);
+
+      //检查是不是修正成功
+      std::unordered_map<size_t, std::set<int>> temp_cellID_trajIDs_map_dec;
+      std::set<size_t> temp_var;
+      //auto temp_trajs_check = trajectory(t2[0].data(), t2[1], direction * t_config.h, t_config.max_length, DH, DW, critical_points_dec, grad_dec,temp_index, temp_var,temp_cellID_trajIDs_map_dec,current_trajID);
+      auto temp_trajs_check = trajectory(t2[0].data(), t2[1], direction * t_config.h, t_config.max_length, DH, DW, critical_points_dec, grad_dec,temp_index, temp_var,temp_cellID_trajIDs_map_dec,current_trajID);
+      printf("t1_size = %d, temp_trajs_check size = %d\n", t1.size(), temp_trajs_check.size());
+      //success = (get_cell_offset(findLastNonNegativeOne(t1).data(), DW, DH) == get_cell_offset(findLastNonNegativeOne(temp_trajs_check).data(), DW, DH));
+      switch (obj)
+      {
+        case 0:
+          success = (get_cell_offset(findLastNonNegativeOne(t1).data(), DW, DH) == get_cell_offset(findLastNonNegativeOne(temp_trajs_check).data(), DW, DH));
+          break;
+        case 1:
+          success = (get_cell_offset(findLastNonNegativeOne(t1).data(), DW, DH) == get_cell_offset(findLastNonNegativeOne(temp_trajs_check).data(), DW, DH));
+          break;
+        case 2:
+          if (t1.size() == t_config.max_length){
+            success = (temp_trajs_check.size() == t_config.max_length);
+          }
+          else if (t1.back()[0] == -1){
+            success = (temp_trajs_check.back()[0] == -1);
+          }
+          else if (t1.size() != t_config.max_length && t1.back()[0] != -1){
+            success = (get_cell_offset(findLastNonNegativeOne(t1).data(), DW, DH) == get_cell_offset(findLastNonNegativeOne(temp_trajs_check).data(), DW, DH));
+          }
+          break;
+      }
+      //success = (get_cell_offset(findLastNonNegativeOne(temp_trajs_ori).data(), DW, DH) == get_cell_offset(findLastNonNegativeOne(temp_trajs_check).data(), DW, DH));
+      // if (get_cell_offset(t1.back().data(), DW, DH) == get_cell_offset(temp_trajs_check.back().data(), DW, DH)){
+      if (success){
+        success = true; //修正成功
+        trajs_dec[current_trajID] = temp_trajs_check; //替换数据
+        printf("Trajectory %ld is fixed!, with end_fix_index: %d\n", current_trajID, end_fix_index);
+        printf("temp_trajs_ori second: (%f, %f), temp_trajs_ori last: (%f, %f)\n", temp_trajs_ori[1][0], temp_trajs_ori[1][1], temp_trajs_ori.back()[0], temp_trajs_ori.back()[1]);
+        printf("temp_trajs_check second: (%f, %f), temp_trajs_check last: (%f, %f)\n", temp_trajs_check[1][0], temp_trajs_check[1][1], temp_trajs_check.back()[0], temp_trajs_check.back()[1]);
+        printf("temp_trajs_ori size: %d, temp_trajs_check size %d \n",temp_trajs_ori.size(),temp_trajs_check.size());
+        printf("t1 second: (%f, %f), t1 last: (%f, %f)\n", t1[1][0], t1[1][1], t1.back()[0], t1.back()[1]);
+        printf("t2 second: (%f, %f), t2 last: (%f, %f)\n", t2[1][0], t2[1][1], t2.back()[0], t2.back()[1]);
+        // //temp_cellID_trajIDs_map加到cellID_trajIDs_map_dec里
+        // for (auto k:temp_cellID_trajIDs_map_dec){
+        //   for (auto v:k.second){
+        //     cellID_trajIDs_map_dec[k.first].insert(v);
+        //   }
+        // }
+        //把经过的cellID搞出来
+        for (auto o:temp_cellID_trajIDs_map_dec){
+          passed_cellID.insert(o.first);
+        }
+        for (auto o:temp_cellID_trajIDs_map){
+          passed_cellID.insert(o.first);
+        }
+        
+        printf("passed_cellID size: %ld\n", passed_cellID.size());
+        //找出这些cellID里经过的所有trajID（可能会有其他的traj经过这些cell）把这些trajID也算一遍RK4（替换后的数据）
+        std::set<size_t> passed_trajID;
+        for (auto m:passed_cellID){
+          auto trajIDs = cellID_trajIDs_map_ori[m];
+          auto trajIDs_dec = cellID_trajIDs_map_dec[m]; //dec的也需要加进去？ YES
+          passed_trajID.insert(trajIDs.begin(), trajIDs.end());
+          passed_trajID.insert(trajIDs_dec.begin(), trajIDs_dec.end());
+        }
+        printf("passed_trajID size: %ld\n", passed_trajID.size());
+        int remove_count = 0;
+        int add_count = 0;
+        for (auto j:passed_trajID){
+          if (j == current_trajID){
+            continue;
+          }
+          auto t1 = trajs_ori[j];
+          auto t2 = trajs_dec[j];
+          double direction = trajID_direction_map[j];
+          std::vector<int> temp_index;
+          std::set<size_t> temp_vertexs;
+          auto temp_trajs_dec = trajectory(t2[0].data(), t2[1], direction * t_config.h, t_config.max_length, DH, DW, critical_points_dec, grad_dec,temp_index, temp_vertexs,cellID_trajIDs_map_dec,j);
+          auto temp_last = temp_trajs_dec.back();
+          auto last_t1 = t1.back();
+          //check this two points are the same or not
+          // 如果这些trajID结束是一致的，就不用管（更新map？）
+          // bool cond1 = get_cell_offset(.back().data(), DW, DH) == get_cell_offset(t1.back().data(), DW, DH);
+          bool cond2 = t1.size() == t_config.max_length;
+          bool cond3 = temp_trajs_dec.size() == t_config.max_length;
+          bool cond4 = last_t1[0] == -1;
+          bool cond5 = temp_last[0] == -1;
+          switch (obj)
+          {
+          case 0:
+            if (!cond2 && !cond4){//original found cp
+              std::array<double, 2> ori_last_inside = findLastNonNegativeOne(t1);
+              std::array<double, 2> dec_last_inside = findLastNonNegativeOne(temp_trajs_dec);
+              if (get_cell_offset(ori_last_inside.data(), DW, DH) != get_cell_offset(dec_last_inside.data(), DW, DH)){
+                trajID_need_fix.insert(j);
+                trajs_dec[j] = temp_trajs_dec;
+                add_count ++;
+              }
+            }
+            else{
+              trajID_need_fix.erase(j);
+              remove_count ++;
+              }
+            break;
+          
+          case 1:
+            if (cond4){// original outside
+              //遍历找到t1最后一个非(-1,-1)的点
+              std::array<double, 2>  ori_last_inside = findLastNonNegativeOne(t1);
+              std::array<double, 2>  dec_last_inside = findLastNonNegativeOne(temp_trajs_dec);
+              if (get_cell_offset(ori_last_inside.data(), DW, DH) != get_cell_offset(dec_last_inside.data(), DW, DH)){
+                trajID_need_fix.insert(j);
+                add_count ++;
+              }
+              else{
+                trajID_need_fix.erase(j);
+                remove_count ++;
+              
+              }
+            }
+            else if (cond2){ //original reach limit
+              //找到dec最后一个非(-1,-1)的点
+              std::array<double, 2>  dec_last_inside = findLastNonNegativeOne(temp_trajs_dec);
+              if (get_cell_offset(t1.back().data(), DW, DH) != get_cell_offset(dec_last_inside.data(), DW, DH)){
+                trajID_need_fix.insert(j);
+                add_count ++;
+              }
+              else{
+                trajID_need_fix.erase(j);
+                remove_count ++;
+              }
+            }
+            else if(!cond2 && !cond4){ //inside and not reach max, ie found cp
+              //找到dec最后一个非(-1,-1)的点
+              std::array<double, 2>  ori_last_inside = findLastNonNegativeOne(t1);
+              std::array<double, 2>  dec_last_inside = findLastNonNegativeOne(temp_trajs_dec);
+              if (get_cell_offset(ori_last_inside.data(), DW, DH) != get_cell_offset(dec_last_inside.data(), DW, DH)){
+                trajID_need_fix.insert(j);
+                add_count ++;
+              }
+              else{
+                trajID_need_fix.erase(j);
+                remove_count ++;
+              }
+            }
+            break;
+
+          case 2:
+            if (cond4){
+              if(!cond5){
+                trajID_need_fix.insert(j);
+                add_count ++;
+              }
+              else{
+                trajID_need_fix.erase(j);
+                remove_count ++;
+              }
+            }
+            else if(cond2){
+              if (!cond3){
+                trajID_need_fix.insert(j);
+                add_count ++;
+              }
+              else{
+                trajID_need_fix.erase(j);
+                remove_count ++;
+              }
+            }
+            else if (!cond2 && !cond4){
+              std::array<double, 2>  ori_last_inside = findLastNonNegativeOne(t1);
+              std::array<double, 2>  dec_last_inside = findLastNonNegativeOne(temp_trajs_dec);
+              if (get_cell_offset(ori_last_inside.data(), DW, DH) != get_cell_offset(dec_last_inside.data(), DW, DH)){
+                trajID_need_fix.insert(j);
+                add_count ++;
+              }
+              else{
+                trajID_need_fix.erase(j);
+                remove_count ++;
+              }
+            }
+            break;
+          }
+          // bool cond1 = get_cell_offset(temp_trajs_dec.back().data(), DW, DH) == get_cell_offset(t1.back().data(), DW, DH);
+          // bool cond2 = temp_trajs_dec.size() == t_config.max_length;
+          // bool cond3 = t1.size() == t_config.max_length;
+          // bool cond4 = temp_last[0] == -1;
+          // bool cond5 = last_t1[0] == -1;
+          // // printf("   removed trajID:");
+          // //if (cond1 || (cond2 && cond3 && cond6) || (cond4 && cond5)){
+          // if (cond1 || (cond2 && cond3) || (cond4 && cond5)){
+          //   //remove trajID from trajID_need_fix
+          //   trajID_need_fix.erase(j);
+          //   // printf(" %ld", j);
+          //   // it = trajID_need_fix.begin();
+          //   // it = trajID_need_fix.erase(it);
+          //   remove_count ++;
+          // }
+          // else{
+          //   trajID_need_fix.insert(j);
+          //   //printf("    add trajID: %ld\n", j);
+          //   trajs_dec[j] = temp_trajs_dec;
+          //   add_count ++;
+          // }
+        
+        }
+      
+      
+        printf("\nfinish process %ld trajIDs.., remove count: %d, add count %d \n", passed_trajID.size(), remove_count, add_count);
+      }
+      else{
+        // printf("Trajectory %ld is not fixed, with current end_fix_index: %d\n", current_trajID, end_fix_index);
+        // printf("temp_trajs_ori second: (%f, %f), temp_trajs_ori last: (%f, %f)\n", temp_trajs_ori[1][0], temp_trajs_ori[1][1], temp_trajs_ori.back()[0], temp_trajs_ori.back()[1]);
+        // printf("temp_trajs_check second: (%f, %f), temp_trajs_check last: (%f, %f)\n", temp_trajs_check[1][0], temp_trajs_check[1][1], temp_trajs_check.back()[0], temp_trajs_check.back()[1]);
+        // printf("temp_trajs_ori size: %d, temp_trajs_check size %d \n",temp_trajs_ori.size(),temp_trajs_check.size());
+        // printf("t1 second: (%f, %f), t1 last: (%f, %f)\n", t1[1][0], t1[1][1], t1.back()[0], t1.back()[1]);
+        // printf("t2 second: (%f, %f), t2 last: (%f, %f)\n", t2[1][0], t2[1][1], t2.back()[0], t2.back()[1]);
+        //修正不成功是不是要回退之前的更新dec_U, dec_V？
+        for (auto o:rollback_dec_u){
+          dec_U[o.first] = o.second;
+        }
+        for (auto o:rollback_dec_v){
+          dec_V[o.first] = o.second;
+          all_vertex_for_all_diff_traj.erase(o.first);
+        }
+        grad_dec.reset();
+        grad_dec.reshape({2, static_cast<unsigned long>(r2), static_cast<unsigned long>(r1)});
+        refill_gradient(0, r1, r2, dec_U, grad_dec);
+        refill_gradient(1, r1, r2, dec_V, grad_dec);
+      
+
+        if(changed == 0){
+          printf("already last element ,still not fix...\n");
+          // for (size_t j = 0; j < temp_trajs_ori.size(); j++){
+          //   printf("index: %d ori: (%f,%f), dec: (%f,%f)\n",j,temp_trajs_ori[j][0],temp_trajs_ori[j][1],temp_trajs_check[j][0],temp_trajs_check[j][1]);
+          // }
+          exit(0);
+          }
+        //start_fix_index = end_fix_index; //修正不成功，从end_fix_index开始继续修正
+        start_fix_index = end_fix_index +10;
+      }
+    }
+    //it = trajID_need_fix.begin();
+    // trajID_need_fix.pop_front();
+    //delete current_trajID from trajID_need_fix
+    trajID_need_fix.erase(current_trajID);
+
+    NUM_ITER ++;
+  }
+
+
+  // write result when finished
+  // if (dec_not_found_count == 0 && dec_found_wrong_cp_count ==0){
+  //   printf("all trajectories are the same...stop\n");
+  //   printf("ori_out_or_reach_limit: %d, dec_not_found_count: %d, dec_found_wrong_cp_count: %d\n", ori_out_reach_limit, dec_not_found_count, dec_found_wrong_cp_count);
+  //   printf("current_pwr_eb: %f\n", current_pwr_eb);
+  //   stop = true;
+  //   write_current_state_data("/Users/mingzexia/Documents/Github/tracecp/data/", U, V, dec_U, dec_V, trajs_dec, index_dec, r1, r2, NUM_ITER);
+  //   printf("starting compression...");
+  //   unsigned char * final_result = NULL;
+  //   size_t final_result_size = 0;
+  //   final_result = sz_compress_cp_preserve_2d_record_vertex(U, V, r1, r2, final_result_size, false, max_pwr_eb, all_vertex_for_all_diff_traj);
+  //   unsigned char * final_result_after_lossless = NULL;
+  //   size_t final_lossless_outsize = sz_lossless_compress(ZSTD_COMPRESSOR, 3, final_result, final_result_size, &final_result_after_lossless);
+  //   size_t final_lossless_output = sz_lossless_decompress(ZSTD_COMPRESSOR, final_result_after_lossless, final_lossless_outsize, &final_result, final_result_size);
+  //   printf("FINAL Compressed size = %zu, ratio = %f\n", final_lossless_outsize, (2*r1*r2*sizeof(float)) * 1.0/final_lossless_outsize);
+  //   free(final_result);
+  //   free(final_result_after_lossless);
+  //   exit(0);
+  // }
+  // write_current_state_data("/Users/mingzexia/Documents/Github/tracecp/data/", U, V, dec_U, dec_V, trajs_dec, index_dec, r1, r2, NUM_ITER);
+  // if (NUM_ITER == 0){
+  //   // wrtie original traj when first iteration
+  //   std::string file_path = "/Users/mingzexia/Documents/Github/tracecp/data/";
+  //   std::string ori_traj_file = file_path + "ori_traj.bin";
+  //   write_trajectory(trajs_ori, ori_traj_file.c_str());
+  //   printf("Successfully write original trajs");
+  //   //write original index
+  //   std::string index_file = file_path + "index_ori_traj.bin";
+  //   writefile(index_file.c_str(), index_ori.data(), index_ori.size());
+  //   printf("Successfully write orginal index to file, total index: %ld\n",index_ori.size());
+  // }
+
+  // grad_dec.reset();
+  // grad_ori.reset();
+  //free(dec_U);
+  //free(dec_V);
+  auto end_total = std::chrono::high_resolution_clock::now();  //timer
+  elapsed = end_total - start_total; //timer
+  printf("Time for total fix & verifaction: %f\n", elapsed.count());
+  printf("######################\n\n");
+  printf("trajID_need_fix is empty now...\n");
+  printf("current all_vertex_for_all_diff_traj size: %ld\n", all_vertex_for_all_diff_traj.size());
+
+  stop = true;
+  printf("Double check if all trajectories are fixed...\n");
+  dec_U = NULL;
+  dec_V = NULL;
+  sz_decompress_cp_preserve_2d_online<float>(result, r1,r2, dec_U, dec_V); // use cpsz
+  for (auto v:all_vertex_for_all_diff_traj){
+    dec_U[v] = U[v];
+    dec_V[v] = V[v];
+  }
+  grad_dec.reset();
+  grad_dec.reshape({2, static_cast<unsigned long>(r2), static_cast<unsigned long>(r1)});
+  refill_gradient(0, r1, r2, dec_U, grad_dec);
+  refill_gradient(1, r1, r2, dec_V, grad_dec);
+
+  for(size_t i=0;i < trajs_ori.size(); ++i){
+    auto t1 = trajs_ori[i];
+    auto t2 = trajs_dec[i];
+    bool cond1 = get_cell_offset(t1.back().data(), DW, DH) == get_cell_offset(t2.back().data(), DW, DH);
+    bool cond2 = t1.size() == t_config.max_length;
+    bool cond3 = t2.size() == t_config.max_length;
+    bool cond4 = t1.back()[0] == -1;
+    bool cond5 = t2.back()[0] == -1;
+    bool cond6 = sqrt(pow(t1.back()[0] - t2.back()[0], 2) + pow(t1.back()[1] - t2.back()[1], 2)) < 20;
+    switch (obj)
+    {
+    case 0:
+      if (!cond2 && !cond4){ //original found cp
+        auto ori_last_inside = findLastNonNegativeOne(t1);
+        auto dec_last_inside = findLastNonNegativeOne(t2);
+        if (get_cell_offset(ori_last_inside.data(), DW, DH) != get_cell_offset(dec_last_inside.data(), DW, DH)){
+          printf("trajectory %ld is not fixed!!!\n", i);
+          continue;
+        }
+      }
+      break;
+    
+    case 1:
+      if (cond4){ // original outside
+        auto ori_last_inside = findLastNonNegativeOne(t1);
+        auto dec_last_inside = findLastNonNegativeOne(t2);
+        if (get_cell_offset(ori_last_inside.data(), DW, DH) != get_cell_offset(dec_last_inside.data(), DW, DH)){
+          printf("trajectory %ld is not fixed!!!\n", i);
+          continue;
+        }
+      }
+      else if (cond2){ //original reach limit
+        auto dec_last_inside = findLastNonNegativeOne(t2);
+        if (get_cell_offset(t1.back().data(), DW, DH) != get_cell_offset(dec_last_inside.data(), DW, DH)){
+          printf("trajectory %ld is not fixed!!!\n", i);
+          continue;
+        }
+      }
+      else if(!cond2 && !cond4){ //inside and not reach max, ie found cp
+        auto ori_last_inside = findLastNonNegativeOne(t1);
+        auto dec_last_inside = findLastNonNegativeOne(t2);
+        if (get_cell_offset(ori_last_inside.data(), DW, DH) != get_cell_offset(dec_last_inside.data(), DW, DH)){
+          printf("trajectory %ld is not fixed!!!\n", i);
+          continue;
+        }
+      }
+      break;
+    }
+    // // if (cond2 && cond3 && cond6){
+    // if (cond2 && cond3){
+    //   continue;
+    // }
+    // else if (cond4 && cond5){
+    //   continue;
+    // }
+    // else{
+    //   if (!cond1){
+    //     printf("trajectory %ld is not fixed!!!\n", i);
+    //     continue;
+    //   }
+    // }
+  }
+  printf("now check all values in dec_U and dec_V are bounded\n");
+  for (size_t i = 0; i < r1; i++){
+    for (size_t j = 0; j < r2; j++){
+      if (std::abs(dec_U[i*r2+j] - U[i*r2+j] ) / U[i*r2+j] > max_pwr_eb){
+        printf("dec_U[%ld][%ld] is not bounded!!!\n", i, j);
+        break;
+      }
+      if (std::abs(dec_V[i*r2+j] - V[i*r2+j] ) / V[i*r2+j] > max_pwr_eb){
+        printf("dec_V[%ld][%ld] is not bounded!!!\n", i, j);
+        break;
+      }
+    }
+  }
+  printf("now check two ftk::ndarray<float> grad_ori and grad_dec are correct\n");
+  for (size_t i = 0; i < r1; i++){
+    for (size_t j = 0; j < r2; j++){
+      if (std::abs(grad_ori(0, j, i) - grad_dec(0, j, i)) / grad_ori(0,j,i) > max_pwr_eb){
+        printf("grad_ori(0, %ld, %ld) is not correct!!!\n", j, i);
+        break;
+      }
+      if (std::abs(grad_ori(1, j, i) - grad_dec(1, j, i)) /  grad_ori(1,j,i) > max_pwr_eb){
+        printf("grad_ori(1, %ld, %ld) is not correct!!!\n", j, i);
+        break;
+      }
+    }
+  }
+  
+
+  printf("now re-calculate RK4 using  ori\n");
+  //re-calculate RK4 using ori 可以用之前的，不用重新计算
+  std::vector<std::vector<std::array<double, 2>>> check_trajs_ori;
+  std::vector<int> check_index_ori;
   for(const auto& p:critical_points_ori){
     auto cp = p.second;
     if (cp.type == SADDLE){
@@ -1524,6 +2313,30 @@ fix_traj(const T * U, const T * V,size_t r1, size_t r2, double max_pwr_eb,traj_c
       config.push_back({cp.eig_vec[0][0], cp.eig_vec[0][1],1});
       config.push_back({cp.eig_vec[1][0], cp.eig_vec[1][1],-1});
       config.push_back({cp.eig_vec[1][0], cp.eig_vec[1][1],-1});
+
+      auto eigvec = cp.eig_vec;
+      auto eigval = cp.eig;
+      auto pt = cp.x;
+      std::array<std::array<double, 3>, 4> directions;//first is direction(1 or -1), next 2 are seed point
+      for (int i = 0; i < 2; i++){
+          if (eigval[i].real() > 0){
+            directions[i][0] = 1;
+            directions[i][1] = t_config.eps * eigvec[i][0] + pt[0];
+            directions[i][2] = t_config.eps * eigvec[i][1] + pt[1];
+            directions[i+2][0] = -1;
+            directions[i+2][1] = -1 * t_config.eps * eigvec[i][0] + pt[0];
+            directions[i+2][2] = -1 * t_config.eps * eigvec[i][1] + pt[1];
+          }
+          else{
+            directions[i][0] = -1;
+            directions[i][1] = t_config.eps * eigvec[i][0] + pt[0];
+            directions[i][2] = t_config.eps * eigvec[i][1] + pt[1];
+            directions[i+2][0] = 1;
+            directions[i+2][1] = -1 * t_config.eps * eigvec[i][0] + pt[0];
+            directions[i+2][2] = -1 * t_config.eps * eigvec[i][1] + pt[1];
+          }
+      }
+      
       for (int i = 0; i < 4; i ++) {
         std::array<double, 2> X_start;
         std::vector<std::array<double, 2>> result_return;
@@ -1532,24 +2345,26 @@ fix_traj(const T * U, const T * V,size_t r1, size_t r2, double max_pwr_eb,traj_c
         if (inside(X_start,DH, DW)){
           //printf("processing (%f,%f)\n", X_start[0], X_start[1]);
           double pos[2] = {cp.x[0], cp.x[1]};
-          if(i == 0 || i ==1){
-            result_return = trajectory(pos, X_start, t_config.h,t_config.max_length,DH,DW, critical_points_ori,grad_ori,index_ori,vertex_ori);
-            trajs_ori.push_back(result_return);
-          }
-          else{
-            result_return = trajectory(pos,X_start, -t_config.h,t_config.max_length,DH,DW, critical_points_ori,grad_ori,index_ori,vertex_ori);
-            trajs_ori.push_back(result_return);
-          }
-
+          // if(i == 0 || i ==1){ 
+          //   result_return = trajectory(pos, X_start, t_config.h,t_config.max_length,DH,DW, critical_points_ori,grad_ori,check_index_ori);
+          //   check_trajs_ori.push_back(result_return);
+          // }
+          // else{
+          //   result_return = trajectory(pos,X_start, -t_config.h,t_config.max_length,DH,DW, critical_points_ori,grad_ori,check_index_ori);
+          //   check_trajs_ori.push_back(result_return);
+          // }
+          std::array<double, 2> seed = {directions[i][1], directions[i][2]};
+          result_return = trajectory(pos, seed, directions[i][0] * t_config.h, t_config.max_length, DH, DW, critical_points_ori, grad_ori, check_index_ori);
+          check_trajs_ori.push_back(result_return);
         }
       }
     }
-  }   
-  
-  //get trajectory for decompressed data
-  std::vector<std::vector<std::array<double, 2>>> trajs_dec;
-  std::vector<int> index_dec;
-  std::set<size_t> vertex_dec;
+  }  
+
+  //re-calculate RK4 using dec
+  printf("now re-calculate RK4 using  dec\n");
+  std::vector<std::vector<std::array<double, 2>>> check_trajs_dec;
+  std::vector<int> check_index_dec;
   for(const auto& p:critical_points_dec){
     auto cp = p.second;
     if (cp.type == SADDLE){
@@ -1566,6 +2381,30 @@ fix_traj(const T * U, const T * V,size_t r1, size_t r2, double max_pwr_eb,traj_c
       config.push_back({cp.eig_vec[0][0], cp.eig_vec[0][1],1});
       config.push_back({cp.eig_vec[1][0], cp.eig_vec[1][1],-1});
       config.push_back({cp.eig_vec[1][0], cp.eig_vec[1][1],-1});
+
+      auto eigvec = cp.eig_vec;
+      auto eigval = cp.eig;
+      auto pt = cp.x;
+      std::array<std::array<double, 3>, 4> directions;//first is direction(1 or -1), next 2 are seed point
+      for (int i = 0; i < 2; i++){
+          if (eigval[i].real() > 0){
+            directions[i][0] = 1;
+            directions[i][1] = t_config.eps * eigvec[i][0] + pt[0];
+            directions[i][2] = t_config.eps * eigvec[i][1] + pt[1];
+            directions[i+2][0] = -1;
+            directions[i+2][1] = -1 * t_config.eps * eigvec[i][0] + pt[0];
+            directions[i+2][2] = -1 * t_config.eps * eigvec[i][1] + pt[1];
+          }
+          else{
+            directions[i][0] = -1;
+            directions[i][1] = t_config.eps * eigvec[i][0] + pt[0];
+            directions[i][2] = t_config.eps * eigvec[i][1] + pt[1];
+            directions[i+2][0] = 1;
+            directions[i+2][1] = -1 * t_config.eps * eigvec[i][0] + pt[0];
+            directions[i+2][2] = -1 * t_config.eps * eigvec[i][1] + pt[1];
+          }
+      }
+
       for (int i = 0; i < 4; i ++) {
         std::array<double, 2> X_start;
         std::vector<std::array<double, 2>> result_return;
@@ -1574,241 +2413,378 @@ fix_traj(const T * U, const T * V,size_t r1, size_t r2, double max_pwr_eb,traj_c
         if (inside(X_start,DH, DW)){
           double pos[2] = {cp.x[0], cp.x[1]};
           //printf("processing (%f,%f)\n", X_start[0], X_start[1]);
-          if(i == 0 || i ==1){
-            result_return = trajectory(pos,X_start, t_config.h,t_config.max_length,DH,DW, critical_points_dec,grad_dec,index_dec,vertex_dec);
-            trajs_dec.push_back(result_return);
-          }
-          else{
-            result_return = trajectory(pos,X_start, -t_config.h,t_config.max_length,DH,DW, critical_points_dec,grad_dec,index_dec,vertex_dec);
-            trajs_dec.push_back(result_return);   
-          }
-        }
-      }
-    }
-  }
-
-
-
-
-  //compare the trajectory, and get all vertex for all different trajectories
-  int ori_out_reach_limit = 0; // same
-  int dec_not_found_count = 0; // decompressed not found cp
-  int dec_found_wrong_cp_count = 0; // decompressed found wrong cp
-
-  /*
-  check if the trajectory is the same
-  */
-  for(size_t i=0;i < trajs_ori.size(); ++i){
-    auto t1 = trajs_ori[i];
-    auto t2 = trajs_dec[i];
-    if (t1.size() != t_config.max_length && t1.back()[0] != -1){
-      // original data found cp
-      if (t2.size() == t_config.max_length || t2.back()[0] == -1){
-        // decompressed data not found cp
-        dec_not_found_count ++;
-
-      }
-      else{
-        if (get_cell_offset(t1.back().data(), DW, DH) != get_cell_offset(t2.back().data(), DW, DH)){
-          // both found cp but different
-          dec_found_wrong_cp_count ++;
-        }
-      }
-    }
-    else{
-      ori_out_reach_limit ++;
-    }
-  }
-
-  if (dec_not_found_count == 0 && dec_found_wrong_cp_count ==0){
-    printf("all trajectories are the same...stop\n");
-    printf("ori_out_or_reach_limit: %d, dec_not_found_count: %d, dec_found_wrong_cp_count: %d\n", ori_out_reach_limit, dec_not_found_count, dec_found_wrong_cp_count);
-    printf("current_pwr_eb: %f\n", current_pwr_eb);
-    stop = true;
-    write_current_state_data("/Users/mingzexia/Documents/Github/tracecp/data/", U, V, dec_U, dec_V, trajs_dec, index_dec, r1, r2, NUM_ITER);
-
-  }
-  write_current_state_data("/Users/mingzexia/Documents/Github/tracecp/data/", U, V, dec_U, dec_V, trajs_dec, index_dec, r1, r2, NUM_ITER);
-  
-  if (NUM_ITER == 0){
-    // wrtie original traj when first iteration
-    std::string file_path = "/Users/mingzexia/Documents/Github/tracecp/data/";
-    std::string ori_traj_file = file_path + "ori_traj.bin";
-    write_trajectory(trajs_ori, ori_traj_file.c_str());
-    printf("Successfully write original trajs");
-    //write original index
-    std::string index_file = file_path + "index_ori_traj.bin";
-    writefile(index_file.c_str(), index_ori.data(), index_ori.size());
-    printf("Successfully write orginal index to file, total index: %ld\n",index_ori.size());
-  }
-
-  //clean up
-  {
-  //all_vertex_for_all_diff_traj.clear();// clear all_vertex_for_all_diff_traj
-  current_diff_traj_id.clear();
-  // free(dec_U);
-  // free(dec_V);
-  free(result);
-  }
-
-  //尝试按照比较距离来判断是不是跑偏了，然后添加到all_vertex_for_all_diff_traj
-  for(size_t i=0;i < trajs_ori.size(); ++i){
-  //for(size_t i=9310;i < 9312; ++i){
-    auto t1 = trajs_ori[i];
-    auto t2 = trajs_dec[i];
-    if (t1.size() != t_config.max_length && t1.back()[0] != -1){
-      // original data found cp
-      if (t2.size() == t_config.max_length || t2.back()[0] == -1){
-        // decompressed data not found cp
-        printf("decomp not found cp\n");
-        // int end_fix_index = 0;
-        int end_fix_index = t1.size() - 1;
-        find_fix_index_end(end_fix_index,t1,t2,grad_ori,DW,DH,t_config,all_vertex_for_all_diff_traj,i,critical_points_ori);
-        current_diff_traj_id[i] = end_fix_index;
-            
-      }
-      else{
-        if (get_cell_offset(t1.back().data(), DW, DH) != get_cell_offset(t2.back().data(), DW, DH)){
-          // both found cp but different
-          printf("decomp found wrong cp\n");
-          // int end_fix_index = 0;
-          int end_fix_index = t1.size() - 1;
-          find_fix_index_end(end_fix_index,t1,t2,grad_ori,DW,DH,t_config,all_vertex_for_all_diff_traj,i,critical_points_ori);
-          current_diff_traj_id[i] = end_fix_index;
-
-          
+          // if(i == 0 || i ==1){
+          //   result_return = trajectory(pos, X_start, t_config.h,t_config.max_length,DH,DW, critical_points_dec,grad_dec,check_index_dec);
+          //   check_trajs_dec.push_back(result_return);
+          //   }
+          // else{
+          //   result_return = trajectory(pos,X_start, -t_config.h,t_config.max_length,DH,DW, critical_points_dec,grad_dec,check_index_dec);
+          //   check_trajs_dec.push_back(result_return);   
+          //   }
+          std::array<double, 2> seed = {directions[i][1], directions[i][2]};
+          result_return = trajectory(pos, seed, directions[i][0] * t_config.h, t_config.max_length, DH, DW, critical_points_dec, grad_dec, check_index_dec);
+          check_trajs_dec.push_back(result_return); 
         }
       }
     }
   }
   
-  //if current_diff_traj_id is the same as last_diff_traj_id, then add all vertex for all different trajectories
-  // if(current_diff_traj_id == last_diff_traj_id && current_diff_traj_id.size() != 0){
-  //   printf("current_diff_traj_id is the same as last_diff_traj_id\n");
-  //   for (auto i:current_diff_traj_id){
-  //     auto t1 = trajs_ori[i];
-  //     for (size_t j = 1; j < t1.size(); ++j){ //start from 1, since 0 is cp
-  //       auto p = t1[j];
-  //       double current_v[2] = {0};
-  //       interp2d(p.data(),current_v,grad_ori);
-  //       auto offsets = vertex_for_each_RK4(p.data(), current_v,grad_ori, t_config.h,DH, DW);
-  //       for (auto o:offsets){
-  //         all_vertex_for_all_diff_traj.insert(o);
-  //       }
-  //     }
-  //   }
-  // }
+  //compare the trajectory
+  printf("double check if all trajectories are fixed...,total trajectory: %ld\n",check_trajs_ori.size());
+  size_t outside_count = 0;
+  size_t hit_max_iter = 0;
+  size_t wrong = 0;
+  size_t correct = 0;
+  std::set<size_t> wrong_trajID;
+  for(size_t i=0;i < check_trajs_ori.size(); ++i){
+    auto t1 = check_trajs_ori[i];
+    auto t2 = check_trajs_dec[i];
+    bool cond1 = get_cell_offset(t1.back().data(), DW, DH) == get_cell_offset(t2.back().data(), DW, DH);
+    bool cond2 = t1.size() == t_config.max_length;
+    bool cond3 = t2.size() == t_config.max_length;
+    bool cond4 = t1.back()[0] == -1;
+    bool cond5 = t2.back()[0] == -1;
+    bool cond6 = sqrt(pow(t1.back()[0] - t2.back()[0], 2) + pow(t1.back()[1] - t2.back()[1], 2)) < 20;
+    switch (obj)
+    {
+    case 0:
+      if (!cond2 && !cond4){//original found cp
+        auto ori_last_inside = findLastNonNegativeOne(t1);
+        auto dec_last_inside = findLastNonNegativeOne(t2);
+        if (get_cell_offset(ori_last_inside.data(), DW, DH) != get_cell_offset(dec_last_inside.data(), DW, DH)){
+          wrong ++;
+          wrong_trajID.insert(i);
+          printf("Trajectory %ld is wrong!!!\n", i);
+          printf("first ori:(%f,%f), second ori(%f,%f): last ori:(%f,%f)\n",t1[0][0],t1[0][1],t1[1][0],t1[1][1],t1.back()[0],t1.back()[1]);
+          printf("first dec:(%f,%f), second dec(%f,%f): last dec:(%f,%f)\n",t2[0][0],t2[0][1],t2[1][0],t2[1][1],t2.back()[0],t2.back()[1]);
+          printf("ori length: %zu, dec length: %zu\n", t1.size(), t2.size());
+          // //print all points
+          // for (size_t j = 0; j < t1.size(); j++){
+          //   printf("ori: (%d,%d), dec: (%d,%d),cell_ori: %d, cell_dec: %d\n",t1[j][0],t1[j][1],t2[j][0],t2[j][1],get_cell_offset(t1[j].data(), DW, DH),get_cell_offset(t2[j].data(), DW, DH));
+          // }
+        }
 
-  //if(current_diff_traj_id == last_diff_traj_id && current_diff_traj_id.size() != 0){
-  if(1==1){
-    //if last_diff_traj_id has 9311
-    for (auto i:last_diff_traj_id){
-      auto traj_ind = i.first;
-      auto end_fix_index = i.second;
-      printf("last_diff_traj_id: %ld, end_fix_index %d\n", traj_ind, end_fix_index);
-      auto t1 = trajs_ori[traj_ind];
-      auto t2 = trajs_dec[traj_ind];
-      for (size_t j = 0; j < end_fix_index-1; ++j){
-        auto p1 = t1[j];
-        auto p2 = t2[j];
-        if (p1 != p2){
-          printf("point diff at index: %ld, ori: (%f, %f), dec: (%f, %f)\n", j, p1[0], p1[1], p2[0], p2[1]);
-          //print the V[3][2] from dec_u and u
-          if (is_upper(p1)){
-            int x = floor(p1[0]);
-            int y = floor(p1[1]);
-            printf("ori: %f, dec: %f\n", U[y*DW+x], dec_U[y*DW+x]);
-            printf("ori: %f, dec: %f\n", grad_ori(0, x, y), grad_dec(0, x, y));
+      }
+      break;
+    
+    case 1:
+      if (cond4){ // original outside
+        auto ori_last_inside = findLastNonNegativeOne(t1);
+        auto dec_last_inside = findLastNonNegativeOne(t2);
+        if (get_cell_offset(ori_last_inside.data(), DW, DH) != get_cell_offset(dec_last_inside.data(), DW, DH)){
+          wrong ++;
+          wrong_trajID.insert(i);
+          printf("Trajectory %ld is wrong!!!\n", i);
+          printf("first ori:(%f,%f), second ori(%f,%f): last ori:(%f,%f)\n",t1[0][0],t1[0][1],t1[1][0],t1[1][1],t1.back()[0],t1.back()[1]);
+          printf("first dec:(%f,%f), second dec(%f,%f): last dec:(%f,%f)\n",t2[0][0],t2[0][1],t2[1][0],t2[1][1],t2.back()[0],t2.back()[1]);
+          printf("ori length: %zu, dec length: %zu\n", t1.size(), t2.size());
+          // //print all points
+          // for (size_t j = 0; j < t1.size(); j++){
+          //   printf("ori: (%d,%d), dec: (%d,%d),cell_ori: %d, cell_dec: %d\n",t1[j][0],t1[j][1],t2[j][0],t2[j][1],get_cell_offset(t1[j].data(), DW, DH),get_cell_offset(t2[j].data(), DW, DH));
+          // }
+        }
+      }
+      else if (cond2){ //original reach limit
+        auto dec_last_inside = findLastNonNegativeOne(t2);
+        if (get_cell_offset(t1.back().data(), DW, DH) != get_cell_offset(dec_last_inside.data(), DW, DH)){
+          wrong ++;
+          wrong_trajID.insert(i);
+          printf("Trajectory %ld is wrong!!!\n", i);
+          printf("first ori:(%f,%f), second ori(%f,%f): last ori:(%f,%f)\n",t1[0][0],t1[0][1],t1[1][0],t1[1][1],t1.back()[0],t1.back()[1]);
+          printf("first dec:(%f,%f), second dec(%f,%f): last dec:(%f,%f)\n",t2[0][0],t2[0][1],t2[1][0],t2[1][1],t2.back()[0],t2.back()[1]);
+          printf("ori length: %zu, dec length: %zu\n", t1.size(), t2.size());
+        }
+      }
+      else if (!cond2 && !cond4){ //inside and not reach max, ie found cp
+        auto ori_last_inside = findLastNonNegativeOne(t1);
+        auto dec_last_inside = findLastNonNegativeOne(t2);
+        if (get_cell_offset(ori_last_inside.data(), DW, DH) != get_cell_offset(dec_last_inside.data(), DW, DH)){
+          wrong ++;
+          wrong_trajID.insert(i);
+          printf("Trajectory %ld is wrong!!!\n", i);
+          printf("first ori:(%f,%f), second ori(%f,%f): last ori:(%f,%f)\n",t1[0][0],t1[0][1],t1[1][0],t1[1][1],t1.back()[0],t1.back()[1]);
+          printf("first dec:(%f,%f), second dec(%f,%f): last dec:(%f,%f)\n",t2[0][0],t2[0][1],t2[1][0],t2[1][1],t2.back()[0],t2.back()[1]);
+          printf("ori length: %zu, dec length: %zu\n", t1.size(), t2.size());
+        }
+      }
+      break;
+    
+    case 2:
+      if (cond2 && cond3){
+        continue;
+      }
+      else if (cond4 && cond5){
+        continue;
+      }
+      else{
+        if (!cond1){
+          wrong ++;
+          wrong_trajID.insert(i);
+          printf("Trajectory %ld is wrong!!!\n", i);
+          printf("first ori:(%f,%f), second ori(%f,%f): last ori:(%f,%f)\n",t1[0][0],t1[0][1],t1[1][0],t1[1][1],t1.back()[0],t1.back()[1]);
+          printf("first dec:(%f,%f), second dec(%f,%f): last dec:(%f,%f)\n",t2[0][0],t2[0][1],t2[1][0],t2[1][1],t2.back()[0],t2.back()[1]);
+          printf("ori length: %zu, dec length: %zu\n", t1.size(), t2.size());
+        }
+      }
+      break;
 
-            printf("ori: %f, dec: %f\n", U[(y+1)*DW+x], dec_U[(y+1)*DW+x]);
-            printf("ori: %f, dec: %f\n", grad_ori(0, x, y+1), grad_dec(0, x, y+1));
+    }
 
-            printf("ori: %f, dec: %f\n", U[(y+1)*DW+x+1], dec_U[(y+1)*DW+x+1]);
-            printf("ori: %f, dec: %f\n", grad_ori(0, x+1, y+1), grad_dec(0, x+1, y+1));
+    // if (cond4 && cond5){
+    //   outside_count ++;
+    // }
+    // else if (cond2 && cond3){
+    //   hit_max_iter ++;
+    // }
+    // else if (cond1){
+    //   correct ++;
+    // }
+    // else{
+    //   wrong ++;
+    //   wrong_trajID.insert(i);
+    //   printf("Trajectory %ld is wrong!!!\n", i);
+    //   printf("first ori:(%f,%f), second ori(%f,%f): last ori:(%f,%f)\n",t1[0][0],t1[0][1],t1[1][0],t1[1][1],t1.back()[0],t1.back()[1]);
+    //   printf("first dec:(%f,%f), second dec(%f,%f): last dec:(%f,%f)\n",t2[0][0],t2[0][1],t2[1][0],t2[1][1],t2.back()[0],t2.back()[1]);
+    //   printf("ori length: %zu, dec length: %zu\n", t1.size(), t2.size());
+    //   // //print all points
+    //   // for (size_t j = 0; j < t1.size(); j++){
+    //   //   printf("ori: (%f,%f), dec: (%f,%f), traj_dec (%f,%f)\n",t1[j][0],t1[j][1],t2[j][0],t2[j][1],trajs_dec[i][j][0],trajs_dec[i][j][1]);
+    //   // }
+    //   bool cp_ori = 0;
+    //   bool cp_dec = 0;
+    //   for(auto p:critical_points_dec){
+    //     if (p.second.x[0] == t1.back()[0] && p.second.x[1] == t1.back()[1]){
+    //       cp_ori = 1;
+    //     }
+    //     if (p.second.x[0] == t2.back()[0] && p.second.x[1] == t2.back()[1]){
+    //       cp_dec = 1;
+    //     }
+    //   }
+    //   printf("cp_ori: %d, cp_dec: %d\n", cp_ori, cp_dec);
+    // } 
+    // if (cond1 || (cond2 && cond3) || (cond4 && cond5)){
+    //   printf("Trajectory %ld is fixed!!!\n", i);
+    // }
+    // else{
+    //   printf("Trajectory %ld is not fixed!!!\n", i);
+    //   printf("first ori:(%f,%f), second ori(%f,%f): last ori:(%f,%f)\n",t1[0][0],t1[0][1],t1[1][0],t1[1][1],t1.back()[0],t1.back()[1]);
+    //   printf("first dec:(%f,%f), second dec(%f,%f): last dec:(%f,%f)\n",t2[0][0],t2[0][1],t2[1][0],t2[1][1],t2.back()[0],t2.back()[1]);
+    //   printf("ori length: %zu, dec length: %zu\n", t1.size(), t2.size());
+    //   //print all points
+    //   // for (size_t j = 0; j < t1.size(); j++){
+    //   //   printf("ori: (%d,%d), dec: (%d,%d),cell_ori: %d, cell_dec: %d\n",t1[j][0],t1[j][1],t2[j][0],t2[j][1],get_cell_offset(t1[j].data(), DW, DH),get_cell_offset(t2[j].data(), DW, DH));
+    //   // }
+    //   exit(0);
+    // }
+  }
 
+  printf("outside_count: %ld, hit_max_iter: %ld, correct: %ld, wrong: %ld\n", outside_count, hit_max_iter, correct, wrong);
+  if (wrong == 0){
+    printf("All trajectories are fixed!!! STOP...\n");
+    printf("writing state data...\n");
+    write_current_state_data("/Users/mingzexia/Documents/Github/tracecp/data_check/", U, V, dec_U, dec_V, check_trajs_dec, check_index_dec, r1, r2, 999);
+    printf("starting compression...");
+    unsigned char * final_result = NULL;
+    size_t final_result_size = 0;
+    final_result = sz_compress_cp_preserve_2d_record_vertex(U, V, r1, r2, final_result_size, false, max_pwr_eb, all_vertex_for_all_diff_traj);
+    unsigned char * final_result_after_lossless = NULL;
+    size_t final_lossless_outsize = sz_lossless_compress(ZSTD_COMPRESSOR, 3, final_result, final_result_size, &final_result_after_lossless);
+    size_t final_lossless_output = sz_lossless_decompress(ZSTD_COMPRESSOR, final_result_after_lossless, final_lossless_outsize, &final_result, final_result_size);
+    printf("FINAL Compressed size = %zu, ratio = %f\n", final_lossless_outsize, (2*r1*r2*sizeof(float)) * 1.0/final_lossless_outsize);
+  }
+  
+  //我的算法有问题，有些点没有fix，需要再fix一次
+  else{
+    int extra_round = 0;
+    bool extra_stop = false;
+    do
+    {
+      printf("Fixing extra wrong trajectories, round: %d\n", extra_round);
+      for (auto i:wrong_trajID){
+        auto t1 = check_trajs_ori[i];
+        auto pos = t1[0].data();
+        auto seed = t1[1];
+        double direction = trajID_direction_map[i];
+        std::vector<std::array<double, 2>> extra_fix = trajectory(pos, seed, direction * t_config.h, t_config.max_length, DH, DW, critical_points_ori, grad_ori, index_ori, all_vertex_for_all_diff_traj, cellID_trajIDs_map_ori, i);
+        //std::vector<std::array<double, 2>> extra_fix_oppsite = trajectory(pos, seed, -1.0* direction * t_config.h, t_config.max_length, DH, DW, critical_points_ori, grad_ori, index_ori, all_vertex_for_all_diff_traj, cellID_trajIDs_map_ori, i);
+        for (auto p:all_vertex_for_all_diff_traj){
+          dec_U[p] = U[p];
+          dec_V[p] = V[p];
+        }
+        grad_dec.reset();
+        grad_dec.reshape({2, static_cast<unsigned long>(r2), static_cast<unsigned long>(r1)});
+        refill_gradient(0, r1, r2, dec_U, grad_dec);
+        refill_gradient(1, r1, r2, dec_V, grad_dec);
+        printf("extra round - all vertex size: %ld\n", all_vertex_for_all_diff_traj.size());
+      }
+      //re-calculate RK4 using dec
+      printf("now re-calculate RK4 using  dec\n");
+      std::vector<std::vector<std::array<double, 2>>> check_trajs_dec_extra;
+      std::vector<int> check_index_dec_extra;
+      for(const auto& p:critical_points_dec){
+        auto cp = p.second;
+        if (cp.type == SADDLE){
+          double lambda[3];
+          double values[2];
+          auto eigvec = cp.eig_vec;
+          auto eigval = cp.eig;
+          auto pt = cp.x;
+          std::array<std::array<double, 3>, 4> directions;//first is direction(1 or -1), next 2 are seed point
+          for (int i = 0; i < 2; i++){
+              if (eigval[i].real() > 0){
+                directions[i][0] = 1;
+                directions[i][1] = t_config.eps * eigvec[i][0] + pt[0];
+                directions[i][2] = t_config.eps * eigvec[i][1] + pt[1];
+                directions[i+2][0] = -1;
+                directions[i+2][1] = -1 * t_config.eps * eigvec[i][0] + pt[0];
+                directions[i+2][2] = -1 * t_config.eps * eigvec[i][1] + pt[1];
+              }
+              else{
+                directions[i][0] = -1;
+                directions[i][1] = t_config.eps * eigvec[i][0] + pt[0];
+                directions[i][2] = t_config.eps * eigvec[i][1] + pt[1];
+                directions[i+2][0] = 1;
+                directions[i+2][1] = -1 * t_config.eps * eigvec[i][0] + pt[0];
+                directions[i+2][2] = -1 * t_config.eps * eigvec[i][1] + pt[1];
+              }
           }
-          else{
-            int x = floor(p1[0]);
-            int y = floor(p1[1]);
-            printf("ori: %f, dec: %f\n", U[y*DW+x], dec_U[y*DW+x]);
-            printf("ori: %f, dec: %f\n", grad_ori(0, x, y), grad_dec(0, x, y));
 
-            printf("ori: %f, dec: %f\n", U[y*DW+x+1], dec_U[y*DW+x+1]);
-            printf("ori: %f, dec: %f\n", grad_ori(0, x+1, y), grad_dec(0, x+1, y));
-
-            printf("ori: %f, dec: %f\n", U[(y+1)*DW+x+1], dec_U[(y+1)*DW+x+1]);
-            printf("ori: %f, dec: %f\n", grad_ori(0, x+1, y+1), grad_dec(0, x+1, y+1));
+          for (int i = 0; i < 4; i ++) {
+            std::array<double, 2> X_start;
+            std::vector<std::array<double, 2>> result_return;
+            //check if inside
+            if (inside(X_start,DH, DW)){
+              double pos[2] = {cp.x[0], cp.x[1]};
+              std::array<double, 2> seed = {directions[i][1], directions[i][2]};
+              result_return = trajectory(pos, seed, directions[i][0] * t_config.h, t_config.max_length, DH, DW, critical_points_dec, grad_dec, check_index_dec_extra);
+              check_trajs_dec_extra.push_back(result_return);
+            }
           }
         }
+      }
+  
+      printf("size of check_traj_ori: %ld, size of check_traj_dec: %ld, size of check_traj_dec_extra: %ld\n", check_trajs_ori.size(), check_trajs_dec.size(), check_trajs_dec_extra.size());
+      //compare the trajectory
+      int wrong_extra = 0;
+      for(size_t i=0;i < check_trajs_ori.size(); ++i){
+        auto t1 = check_trajs_ori[i];
+        auto t2 = check_trajs_dec_extra[i];
+        bool cond1 = get_cell_offset(t1.back().data(), DW, DH) == get_cell_offset(t2.back().data(), DW, DH);
+        bool cond2 = t1.size() == t_config.max_length;
+        bool cond3 = t2.size() == t_config.max_length;
+        bool cond4 = t1.back()[0] == -1;
+        bool cond5 = t2.back()[0] == -1;
+        switch (obj)
+        {
+        case 0:
+          if (!cond2 && !cond4){//original found cp
+            auto ori_last_inside = findLastNonNegativeOne(t1);
+            auto dec_last_inside = findLastNonNegativeOne(t2);
+            if (get_cell_offset(ori_last_inside.data(), DW, DH) != get_cell_offset(dec_last_inside.data(), DW, DH)){
+              wrong_trajID.insert(i);
+              printf("Trajectory %ld is wrong!!!\n", i);
+              printf("first ori:(%f,%f), second ori(%f,%f): last ori:(%f,%f)\n",t1[0][0],t1[0][1],t1[1][0],t1[1][1],t1.back()[0],t1.back()[1]);
+              printf("first dec:(%f,%f), second dec(%f,%f): last dec:(%f,%f)\n",t2[0][0],t2[0][1],t2[1][0],t2[1][1],t2.back()[0],t2.back()[1]);
+              printf("ori length: %zu, dec length: %zu\n", t1.size(), t2.size());
+              wrong_extra ++;
+            }
+          }
+          break;
         
-        // else{
-        //   printf("point same at index: %ld, ori: (%f, %f), dec: (%f, %f)\n", j, p1[0], p1[1], p2[0], p2[1]);
-        // }
+        case 1:
+          if (cond4){ // original outside
+            auto ori_last_inside = findLastNonNegativeOne(t1);
+            auto dec_last_inside = findLastNonNegativeOne(t2);
+            if (get_cell_offset(ori_last_inside.data(), DW, DH) != get_cell_offset(dec_last_inside.data(), DW, DH)){
+              wrong_extra ++;
+              wrong_trajID.insert(i);
+              printf("Trajectory %ld is wrong!!!\n", i);
+              printf("first ori:(%f,%f), second ori(%f,%f): last ori:(%f,%f)\n",t1[0][0],t1[0][1],t1[1][0],t1[1][1],t1.back()[0],t1.back()[1]);
+              printf("first dec:(%f,%f), second dec(%f,%f): last dec:(%f,%f)\n",t2[0][0],t2[0][1],t2[1][0],t2[1][1],t2.back()[0],t2.back()[1]);
+              printf("ori length: %zu, dec length: %zu\n", t1.size(), t2.size());
+              // //print all points
+              // for (size_t j = 0; j < t1.size(); j++){
+              //   printf("ori: (%d,%d), dec: (%d,%d),cell_ori: %d, cell_dec: %d\n",t1[j][0],t1[j][1],t2[j][0],t2[j][1],get_cell_offset(t1[j].data(), DW, DH),get_cell_offset(t2[j].data(), DW, DH));
+              // }
+            }
+          }
+          else if (cond2){ //original reach limit
+            auto dec_last_inside = findLastNonNegativeOne(t2);
+            if (get_cell_offset(t1.back().data(), DW, DH) != get_cell_offset(dec_last_inside.data(), DW, DH)){
+              wrong_extra ++;
+              wrong_trajID.insert(i);
+              printf("Trajectory %ld is wrong!!!\n", i);
+              printf("first ori:(%f,%f), second ori(%f,%f): last ori:(%f,%f)\n",t1[0][0],t1[0][1],t1[1][0],t1[1][1],t1.back()[0],t1.back()[1]);
+              printf("first dec:(%f,%f), second dec(%f,%f): last dec:(%f,%f)\n",t2[0][0],t2[0][1],t2[1][0],t2[1][1],t2.back()[0],t2.back()[1]);
+              printf("ori length: %zu, dec length: %zu\n", t1.size(), t2.size());
+            }
+          }
+          else if (!cond2 && !cond4){ //inside and not reach max, ie found cp
+            auto ori_last_inside = findLastNonNegativeOne(t1);
+            auto dec_last_inside = findLastNonNegativeOne(t2);
+            if (get_cell_offset(ori_last_inside.data(), DW, DH) != get_cell_offset(dec_last_inside.data(), DW, DH)){
+              wrong_extra ++;
+              wrong_trajID.insert(i);
+              printf("Trajectory %ld is wrong!!!\n", i);
+              printf("first ori:(%f,%f), second ori(%f,%f): last ori:(%f,%f)\n",t1[0][0],t1[0][1],t1[1][0],t1[1][1],t1.back()[0],t1.back()[1]);
+              printf("first dec:(%f,%f), second dec(%f,%f): last dec:(%f,%f)\n",t2[0][0],t2[0][1],t2[1][0],t2[1][1],t2.back()[0],t2.back()[1]);
+              printf("ori length: %zu, dec length: %zu\n", t1.size(), t2.size());
+            }
+          }
+          break;
+
+        case 2:
+          if (cond2 && cond3){
+            continue;
+          }
+          else if (cond4 && cond5){
+            continue;
+          }
+          else{
+            if (!cond1){
+              wrong_extra ++;
+              wrong_trajID.insert(i);
+              printf("Trajectory %ld is wrong!!!\n", i);
+              printf("first ori:(%f,%f), second ori(%f,%f): last ori:(%f,%f)\n",t1[0][0],t1[0][1],t1[1][0],t1[1][1],t1.back()[0],t1.back()[1]);
+              printf("first dec:(%f,%f), second dec(%f,%f): last dec:(%f,%f)\n",t2[0][0],t2[0][1],t2[1][0],t2[1][1],t2.back()[0],t2.back()[1]);
+              printf("ori length: %zu, dec length: %zu\n", t1.size(), t2.size());
+            }
+          }
+          break;
+        }
       }
-    }
-    //printf("CONVERGE\n");
-    //exit(0);
-  }
+      extra_round ++;
+      printf("checkpoint0");
+      if (wrong_extra == 0){
+        extra_stop = true;
+      }
 
-
-  //std::set_difference(vertex_ori.begin(), vertex_ori.end(), vertex_dec.begin(), vertex_dec.end(), std::inserter(all_vertex_for_all_diff_traj, all_vertex_for_all_diff_traj.begin()));
-
-  // 把所有ori的vertex加入到all_vertex_for_all_diff_traj ,即lossless all original trajectories's vertex
-  // for (auto p:vertex_ori){
-  //   all_vertex_for_all_diff_traj.insert(p);
-  // }
-
-  //加上saddle所在的周围3个cell的offset
-  // for(auto p:critical_points_ori){
-  //   auto cp = p.second;
-  //   if (cp.type == SADDLE){
-  //     auto surrounding_vertexs = get_surrounding_3_cells_vertexs(cp.x, DW, DH);
-  //     for (auto v:surrounding_vertexs){
-  //       all_vertex_for_all_diff_traj.insert(v);
-  //     }
-  //   }
-  // }
-
-
-  // for (size_t i = 0; i < trajs_ori.size(); ++i){
-  //   auto cp_ori = trajs_ori[i][0];
-  //   auto cp_dec = trajs_dec[i][0];
-  //   auto offsets_cp_ori = get_three_offsets(cp_ori.data(), DW, DH);
-  //   for (auto o:offsets_cp_ori){
-  //     all_vertex_for_all_diff_traj.insert(o);
-  //   }
-  //   std::vector<int> index_ori;
-  //   std::vector<int> index_dec;
+      if (extra_round > 10){
+        extra_stop = true; //stop after 10 rounds
+      }
+    } while (extra_stop == false);
     
-  //   std::set<size_t> lossless_index_ori;
-  //   std::set<size_t> lossless_index_dec;
-    
-  //   //这里有问题
-  //   auto t1 = trajectory(cp_ori.data(), trajs_ori[i][1], t_config.h, t_config.max_length, DH, DW, critical_points_ori, grad_ori, index_ori,lossless_index_ori);
-  //   auto t2 = trajectory(cp_dec.data(), trajs_dec[i][1], t_config.h, t_config.max_length, DH, DW, critical_points_dec, grad_dec, index_dec,lossless_index_dec);
-  //   std::set_difference(lossless_index_ori.begin(), lossless_index_ori.end(), lossless_index_dec.begin(), lossless_index_dec.end(), std::inserter(all_vertex_for_all_diff_traj, all_vertex_for_all_diff_traj.begin()));
-  
-  // }
-  printf("current iteration: %d, all_vertex_for_all_diff_traj size: %ld,ori_out_or_reach_limit: %d, dec_not_found_count: %d, dec_found_wrong_cp_count: %d\n", NUM_ITER, all_vertex_for_all_diff_traj.size(), ori_out_reach_limit, dec_not_found_count, dec_found_wrong_cp_count);
- 
-  NUM_ITER ++;
+    //now all fixed!
+    //calculate the compression ratio
+    unsigned char * final_result = NULL;
+    size_t final_result_size = 0;
+    final_result = sz_compress_cp_preserve_2d_record_vertex(U, V, r1, r2, final_result_size, false, max_pwr_eb, all_vertex_for_all_diff_traj);
 
-  printf("last_diff_traj_id size: %ld, current_diff_traj_id size: %ld\n", last_diff_traj_id.size(), current_diff_traj_id.size());
-  //print current_diff_traj_id
-  for (auto i:current_diff_traj_id){
-    printf("current_diff_traj_id: %ld, end_fix_index %d\n", i.first, i.second);
-  }
-  last_diff_traj_id.clear();
-  last_diff_traj_id = current_diff_traj_id;
-  
-  grad_dec.reset();
-  grad_ori.reset();
-  free(dec_U);
-  free(dec_V);
-  printf("######################\n\n");
+    unsigned char * final_result_after_lossless = NULL;
+    size_t final_lossless_outsize = sz_lossless_compress(ZSTD_COMPRESSOR, 3, final_result, final_result_size, &final_result_after_lossless);
 
+    printf("FINAL Compressed size = %zu, ratio = %f\n", final_lossless_outsize, (2*r1*r2*sizeof(float)) * 1.0/final_lossless_outsize);
+    printf("global trajID count : %d \n",global_start_trahID_need_fix);
+    size_t final_lossless_output = sz_lossless_decompress(ZSTD_COMPRESSOR, final_result_after_lossless, final_lossless_outsize, &final_result, final_result_size);
+    free(final_result);
+    free(final_result_after_lossless);
   }
+  
+exit(0);
+
+
 }
+
 
 
 
@@ -1820,9 +2796,22 @@ int main(int argc, char **argv){
   float * v = readfile<float>(argv[2], num);
   int DW = atoi(argv[3]); //1800
   int DH = atoi(argv[4]); //1200
-  double max_eb = 0.01;
+  double h = atof(argv[5]); //h 0.05
+  double eps = atof(argv[6]); //eps 0.01
+  int max_length = atoi(argv[7]); //max_length 2000
+  double max_eb = atof(argv[8]); //max_eb 0.01
+  //traj_config t_config = {0.05, 0.01, 2000};
+  traj_config t_config = {h, eps, max_length};
+  //double max_eb = 0.01;
+  //int objectives = 0;
+  int obj = atoi(argv[9]);
+  /*
+  objectives0: only garantee those trajectories that reach cp are correct
+  objectives1: object0 + garantee those trajectories that reach max_length has same ending cell +
+                those trajectories that outside the domain has same ending cell
 
-  fix_traj(u, v,DH, DW, max_eb, t_config);
+  */
+  fix_traj(u, v,DH, DW, max_eb, t_config, obj);
   exit(0);
 
   grad.reshape({2, static_cast<unsigned long>(DW), static_cast<unsigned long>(DH)});
@@ -1857,7 +2846,7 @@ int main(int argc, char **argv){
 
 
  
-  std::string test_flag = argv[11];
+  std::string test_flag = argv[10];
   std::string file_name;
   if (test_flag == "baseline" || test_flag == "out"){
     file_name = "out";
@@ -1887,11 +2876,6 @@ int main(int argc, char **argv){
   std::vector<record_t> record;
   std::vector<record_t> record_out;
 
-  
-
-
-
-  	
 
   printf("orginal critical points size: %ld\n", critical_points_0.size());
   printf("decompressed critical points size: %ld\n", critical_points_out.size());
@@ -1946,10 +2930,8 @@ int main(int argc, char **argv){
 
   // now do rk4
 
-  int num_steps = 2000;
-  double h = atof(argv[5]);
+  int num_steps = max_length;
   // double h = 0.1;
-  double eps = atof(argv[6]);
   // double eps = 0.01;
   int count_reach_limit = 0;
   int count_found = 0;
@@ -2108,33 +3090,34 @@ int main(int argc, char **argv){
     //TODO
     //.....
     //write files
-    std::string filename = argv[7]; // trajectory filename
-    std::string filename2 = argv[8]; // index corresponding to trajectory
-    std::string filename3 = argv[9]; //record start & end filename
-    std::string filename4 = argv[10]; //record cp filename
 
-    // if no filename provided, no write file
-    if (filename.empty() && filename2.empty() && filename3.empty()){
-        printf("missing parameter\n");
-        exit(0);
-    }
+    // std::string filename = argv[7]; // trajectory filename
+    // std::string filename2 = argv[8]; // index corresponding to trajectory
+    // std::string filename3 = argv[9]; //record start & end filename
+    // std::string filename4 = argv[10]; //record cp filename
 
-    write_trajectory(tracepoints, filename);
-    printf("Successfully write orginal trajectory to file, total trajectory: %ld\n",tracepoints.size());
-    write_trajectory(tracepoints_out, filename + ".test");
-    printf("Successfully write decompressed trajectory to file, total trajectory: %ld\n",tracepoints_out.size());
+    // // if no filename provided, no write file
+    // if (filename.empty() && filename2.empty() && filename3.empty()){
+    //     printf("missing parameter\n");
+    //     exit(0);
+    // }
 
-    //write index to file
-    writefile(filename2.c_str(), myindex.data(), myindex.size());
-    printf("Successfully write orginal index to file, total index: %ld\n",myindex.size());
-    writefile((filename2 + ".test").c_str(), myindex_out.data(), myindex_out.size());
-    printf("Successfully write decompressed index to file, total index: %ld\n",myindex_out.size());
+    // write_trajectory(tracepoints, filename);
+    // printf("Successfully write orginal trajectory to file, total trajectory: %ld\n",tracepoints.size());
+    // write_trajectory(tracepoints_out, filename + ".test");
+    // printf("Successfully write decompressed trajectory to file, total trajectory: %ld\n",tracepoints_out.size());
 
-    //write record to file
-    writeRecordsToBinaryFile(record, filename3);
+    // //write index to file
+    // writefile(filename2.c_str(), myindex.data(), myindex.size());
+    // printf("Successfully write orginal index to file, total index: %ld\n",myindex.size());
+    // writefile((filename2 + ".test").c_str(), myindex_out.data(), myindex_out.size());
+    // printf("Successfully write decompressed index to file, total index: %ld\n",myindex_out.size());
 
-    //write critical points to file
-    record_criticalpoints(filename4, critical_points_0);
+    // //write record to file
+    // writeRecordsToBinaryFile(record, filename3);
+
+    // //write critical points to file
+    // record_criticalpoints(filename4, critical_points_0);
 
   }
   else if (test_flag == "out"){ // .test: only cpsz, no modify
@@ -2222,27 +3205,27 @@ int main(int argc, char **argv){
     // exit(0);
 
     // write files
-    std::string filename = argv[7]; // trajectory filename
-    std::string filename2 = argv[8]; // index corresponding to trajectory
-    std::string filename3 = argv[9]; //record start & end filename
-    std::string filename4 = argv[10]; //record cp filename
+    // std::string filename = argv[7]; // trajectory filename
+    // std::string filename2 = argv[8]; // index corresponding to trajectory
+    // std::string filename3 = argv[9]; //record start & end filename
+    // std::string filename4 = argv[10]; //record cp filename
 
-    // if no filename provided, no write file
-    if (filename.empty() && filename2.empty() && filename3.empty()){
-        printf("missing parameter\n");
-        exit(0);
-    }
+    // // if no filename provided, no write file
+    // if (filename.empty() && filename2.empty() && filename3.empty()){
+    //     printf("missing parameter\n");
+    //     exit(0);
+    // }
 
-    write_trajectory(tracepoints, filename);
-    printf("Successfully write orginal trajectory to file, total trajectory: %ld\n",tracepoints.size());
-    write_trajectory(tracepoints_out, filename + ".out");
-    printf("Successfully write decompressed trajectory to file, total trajectory: %ld\n",tracepoints_out.size());
+    // write_trajectory(tracepoints, filename);
+    // printf("Successfully write orginal trajectory to file, total trajectory: %ld\n",tracepoints.size());
+    // write_trajectory(tracepoints_out, filename + ".out");
+    // printf("Successfully write decompressed trajectory to file, total trajectory: %ld\n",tracepoints_out.size());
 
-    //write index to file
-    writefile(filename2.c_str(), myindex.data(), myindex.size());
-    printf("Successfully write orginal index to file, total index: %ld\n",myindex.size());
-    writefile((filename2 + ".out").c_str(), myindex_out.data(), myindex_out.size());
-    printf("Successfully write decompressed index to file, total index: %ld\n",myindex_out.size());
+    // //write index to file
+    // writefile(filename2.c_str(), myindex.data(), myindex.size());
+    // printf("Successfully write orginal index to file, total index: %ld\n",myindex.size());
+    // writefile((filename2 + ".out").c_str(), myindex_out.data(), myindex_out.size());
+    // printf("Successfully write decompressed index to file, total index: %ld\n",myindex_out.size());
 
     // //write record to file
     // writeRecordsToBinaryFile(record, filename3);
@@ -2330,182 +3313,6 @@ int main(int argc, char **argv){
 
   }
 
-/*
-
-  if (test_flag == "test" || test_flag == "out"){
-    for(const auto& p:critical_points_out){
-      auto cp = p.second;
-      if (cp.type == SADDLE){
-        global_count ++;
-        std::vector<std::array<double,2>> X_all_direction;  
-        X_all_direction.push_back({cp.x[0] + eps*cp.eig_vec[0][0], cp.x[1] + eps*cp.eig_vec[0][1]});
-        X_all_direction.push_back({cp.x[0] - eps*cp.eig_vec[0][0], cp.x[1] - eps*cp.eig_vec[0][1]});
-        X_all_direction.push_back({cp.x[0] + eps*cp.eig_vec[1][0], cp.x[1] + eps*cp.eig_vec[1][1]});
-        X_all_direction.push_back({cp.x[0] - eps*cp.eig_vec[1][0], cp.x[1] - eps*cp.eig_vec[1][1]});                              
-        double lambda[3];
-        double values[2];
-        std::vector<std::vector<double>> config;
-        config.push_back({cp.eig_vec[0][0], cp.eig_vec[0][1],1});
-        config.push_back({cp.eig_vec[0][0], cp.eig_vec[0][1],1});
-        config.push_back({cp.eig_vec[1][0], cp.eig_vec[1][1],-1});
-        config.push_back({cp.eig_vec[1][0], cp.eig_vec[1][1],-1});
-        for (int i = 0; i < 4; i ++) {
-          std::array<double, 2> X_start;
-          std::vector<std::array<double, 2>> result_return;
-          X_start = X_all_direction[i];
-          //check if inside
-          if (inside(X_start,DH, DW)){
-            if(i == 0 || i ==1){
-              result_return = trajectory(cp.x,X_start, h,DH,DW, critical_points_out,grad_out,myindex_out,config[i],record_out,lossless_index_out);
-              tracepoints_out.push_back(result_return);
-              std::vector<size_t> cells;
-              for (auto r:result_return){
-                //每一个坐标转换成cell index（-1，-1）表示出界
-                if (r[0] != -1 && r[1] != -1){
-                  cells.push_back(get_cell_offset(r.data(), DW, DH));
-                }
-                else break;
-              }
-              traj_cells_out.push_back(cells);
-            }
-            else{
-              result_return = trajectory(cp.x,X_start, -h,DH,DW, critical_points_out,grad_out,myindex_out,config[i],record_out,lossless_index_out);
-              tracepoints_out.push_back(result_return);
-              std::vector<size_t> cells;
-              for (auto r:result_return){
-                //每一个坐标转换成cell index（-1，-1）表示出界
-                if (r[0] != -1 && r[1] != -1){
-                  cells.push_back(get_cell_offset(r.data(), DW, DH));
-                }
-                else break;
-              }
-              traj_cells_out.push_back(cells);
-            }
-          //printf("tracepoints size: %ld\n", result_return.size());
-          }
-        }
-      }
-    }
-
-    check_and_write_two_traj_detail(tracepoints, tracepoints_out,myindex,myindex_out, critical_points_0, critical_points_out, DW, DH);
-    printf("saved diff trajectories, 2 files\n");
-
-  }
-
-  printf("tracepoints size: %ld\n", tracepoints.size());
-  printf("tracepoints_out size: %ld\n", tracepoints_out.size());
-
-
-  std::set<size_t> diff_simplics;
-  std::set<std::array<size_t,2>> diff_coords;
-  std::set<size_t> diff_offset_index;
-  std::vector<size_t> diff_traj_index;
-  if (test_flag == "baseline"){
-    size_t * index_ptr = (size_t *) malloc(sizeof(size_t)*lossless_index.size());
-    if (index_ptr) {
-      // 复制 set 中的数据到动态分配的数组中
-      size_t i = 0;
-      for (const size_t& element : lossless_index) {
-          index_ptr[i++] = element;
-      }
-    }
-    writefile("../small_data/index_need_lossless.bin", index_ptr, lossless_index.size());
-    printf("index_need_lossless.bin written, size: %ld\n", lossless_index.size());
-    free(index_ptr);
-
-    writeVectorOfVector(traj_cells, "../small_data/traj_cells.bin");
-    
-  }
-  else if (test_flag == "test" || test_flag == "out"){
-
-    //把.out文件的trajectory经过的cell index写入文件
-    size_t * index_ptr = (size_t *) malloc(sizeof(size_t)*lossless_index_out.size());
-    if (index_ptr) {
-      // 复制 set 中的数据到动态分配的数组中
-      size_t i = 0;
-      for (const size_t& element : lossless_index_out) {
-          index_ptr[i++] = element;
-      }
-    }
-    writefile("../small_data/index_need_lossless.bin.out", index_ptr, lossless_index_out.size());
-    printf("index_need_lossless.bin.out written, size: %ld\n", lossless_index_out.size());
-    free(index_ptr);
-
-    writeVectorOfVector(traj_cells_out, "../small_data/traj_cells_out.bin");
-    
-    if (areTrajsEqual(tracepoints, tracepoints_out)){
-      printf("Two Trajs are equal\n");
-    }
-    else{
-      printf("Two Trajs are not equal\n");
-      printf("lossless_index size: %ld, lossless_index_out size: %ld\n", lossless_index.size(), lossless_index_out.size());
-    }
-    //check_start_end(tracepoints, tracepoints_out, DW, DH);
-    check_two_traj(tracepoints, tracepoints_out, critical_points_0, critical_points_out, DW, DH);
-    check_two_traj_start_end_cell(tracepoints, tracepoints_out, critical_points_0, critical_points_out,DW, DH);
-    printf("test done\n");
-  
-  }
-
-  //exit(0);
-  
-  //writing some files
-  if (test_flag == "out" || test_flag == "test"){
-  auto end = std::chrono::high_resolution_clock::now();
-  std::chrono::duration<double> duration = end - start;
-  std::cout << "Time taken: " << duration.count() << " seconds" << std::endl;
-
-  printf("record size: %ld\n", record.size());
-  
-
-  std::string filename = argv[7];
-  std::string filename2 = argv[8];
-  std::string filename3 = argv[9];
-  std::string filename4 = argv[10];
-
-  // if no filename provided, no write file
-  if (filename.empty() && filename2.empty() && filename3.empty()){
-      printf("missing parameter\n");
-      exit(0);
-  }
-
-  //write tracepoints to file
-  // std::ofstream file(filename, std::ios::out | std::ios::binary);
-  //   if (!file.is_open()) {
-  //       std::cerr << "Failed to open file for writing." << std::endl;
-  //       return 1;
-  //   }
-  //   int count = 0;
-  //   std::cout << tracepoints.size() <<std::endl;
-  //   for (const auto& row : tracepoints) {
-  //       for (const auto& point : row) {
-  //           file.write(reinterpret_cast<const char*>(point.data()), point.size() * sizeof(double));
-  //           count ++;
-  //       }
-  //   }
-  //   printf("Successfully write trajectory to file, total points: %d\n",count);
-  //   file.close();
-    write_trajectory(tracepoints, filename);
-    printf("Successfully write orginal trajectory to file, total trajectory: %ld\n",tracepoints.size());
-    write_trajectory(tracepoints_out, filename + ".out");
-    printf("Successfully write decompressed trajectory to file, total trajectory: %ld\n",tracepoints_out.size());
-
-    //write index to file
-    writefile(filename2.c_str(), myindex.data(), myindex.size());
-    printf("Successfully write orginal index to file, total index: %ld\n",myindex.size());
-    writefile((filename2 + ".out").c_str(), myindex_out.data(), myindex_out.size());
-    printf("Successfully write decompressed index to file, total index: %ld\n",myindex_out.size());
-
-    //write record to file
-    writeRecordsToBinaryFile(record, filename3);
-
-    //write critical points to file
-    //std::string cp_prefix = "../data/position";
-    record_criticalpoints(filename4, critical_points_0);
-
-    // write all the pos that need to lossless compress
-  }
-  */
 }
 
 

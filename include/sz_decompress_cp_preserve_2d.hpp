@@ -6,13 +6,18 @@
 #include "sz_prediction.hpp"
 #include <vector>
 
-template<typename T>
-void
-sz_decompress_cp_preserve_2d_offline(const unsigned char * compressed, size_t r1, size_t r2, T *& U, T *& V);
-
-template<typename T>
-void
-sz_decompress_cp_preserve_2d_offline_log(const unsigned char * compressed, size_t r1, size_t r2, T *& U, T *& V);
+// template<typename T>
+// void
+// sz_decompress_cp_preserve_2d_offline(const unsigned char * compressed, size_t r1, size_t r2, T *& U, T *& V);
+// template<typename T>
+// void
+// sz_decompress_cp_preserve_2d_offline_log(const unsigned char * compressed, size_t r1, size_t r2, T *& U, T *& V);
+// template<typename T>
+// void
+// sz_decompress_cp_preserve_2d_online_fp(const unsigned char * compressed, size_t r1, size_t r2, T *& U, T *& V);
+// template<typename T>
+// void
+// sz_decompress_cp_preserve_2d_online_log(const unsigned char * compressed, size_t r1, size_t r2, T *& U, T *& V);
 
 template<typename T>
 void
@@ -20,10 +25,7 @@ sz_decompress_cp_preserve_2d_online(const unsigned char * compressed, size_t r1,
 
 template<typename T>
 void
-sz_decompress_cp_preserve_2d_online_fp(const unsigned char * compressed, size_t r1, size_t r2, T *& U, T *& V);
+sz_decompress_cp_preserve_2d_online_record_vertex(const unsigned char * compressed, size_t r1, size_t r2, T *& U, T *& V);
 
-template<typename T>
-void
-sz_decompress_cp_preserve_2d_online_log(const unsigned char * compressed, size_t r1, size_t r2, T *& U, T *& V);
 
 #endif

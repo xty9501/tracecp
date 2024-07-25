@@ -83,6 +83,8 @@ decode_regression_coefficients(const unsigned char *& compressed_pos, size_t reg
 unsigned char * 
 convertByteArray2IntArray_fast_1b_sz(size_t intArrayLength, const unsigned char*& compressed_pos, size_t byteArrayLength);
 
+void convertByteArray2IntArray_fast_1b_sz(size_t intArrayLength, const unsigned char *&compressed_pos, size_t byteArrayLength, unsigned char *intArray);
+
 int *
 Huffman_decode_tree_and_data(size_t state_num, size_t num_elements, const unsigned char *& compressed_pos);
 

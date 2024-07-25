@@ -16,4 +16,4 @@ std::vector<std::array<double, 2>> trajectory(double *X_original,const std::arra
 
 std::vector<std::array<double, 2>> trajectory(double *X_original,const std::array<double, 2>& initial_x, const double time_step, const int max_length, const int DH,const int DW, const std::unordered_map<int, critical_point_t>& critical_points, ftk::ndarray<float>& data  ,std::vector<int>& index);
 
-std::vector<std::array<double, 2>> trajectory(double *X_original,const std::array<double, 2>& initial_x, const double time_step, const int max_length, const int DH,const int DW, const std::unordered_map<int, critical_point_t>& critical_points, ftk::ndarray<float>& data  ,std::vector<int>& index,std::set<size_t>& lossless_index);
+std::vector<std::array<double, 2>> trajectory(double *X_original,const std::array<double, 2>& initial_x, const double time_step, const int max_length, const int DH,const int DW, const std::unordered_map<int, critical_point_t>& critical_points, ftk::ndarray<float>& data  ,std::vector<int>& index,std::set<size_t>& lossless_index,std::unordered_map<size_t, std::set<int>>& cellID_trajIDs_map,size_t trajID);

@@ -1,8 +1,45 @@
 #include <array>
 #include <set>
 #include <vector>
-
-
+#include "interp.h"
+static const int tet_coords[6][4][3] = {
+  {
+    {0, 0, 0},
+    {0, 0, 1},
+    {0, 1, 1},
+    {1, 1, 1}
+  },
+  {
+    {0, 0, 0},
+    {0, 1, 0},
+    {0, 1, 1},
+    {1, 1, 1}
+  },
+  {
+    {0, 0, 0},
+    {0, 0, 1},
+    {1, 0, 1},
+    {1, 1, 1}
+  },
+  {
+    {0, 0, 0},
+    {1, 0, 0},
+    {1, 0, 1},
+    {1, 1, 1}
+  },
+  {
+    {0, 0, 0},
+    {0, 1, 0},
+    {1, 1, 0},
+    {1, 1, 1}
+  },
+  {
+    {0, 0, 0},
+    {1, 0, 0},
+    {1, 1, 0},
+    {1, 1, 1}
+  },
+};
 
 
 template<typename Container>
@@ -10,6 +47,8 @@ bool inside(const Container& x, int DH, int DW) {
   if (x[0] <=0 || x[0] > DW-1 || x[1] <= 0 || x[1] > DH-1) return false;
   return true;
 }
+
+
 
 inline bool is_upper(const std::array<double, 2> x){
   double x_ex = x[0] - floor(x[0]);
@@ -32,6 +71,98 @@ inline size_t get_cell_offset(const double *x, const int DW, const int DH){
   return cell_offset;
 }
 
+// template<typename T>
+// size_t get_cell_offset_3d(const T *x, const int DW, const int DH, const int DD){
+//   int x0 = floor(x[0]);
+//   int y0 = floor(x[1]);
+//   int z0 = floor(x[2]);
+//   for (int i = 0; i < 6; i++) {
+//     // printf("######\n");
+//     double X[4][3];
+//     double V[4][3];
+
+//     // 拷贝四面体顶点坐标
+//     for (int j = 0; j < 4; j++) {
+//       for (int k = 0; k < 3; k++) {
+//         X[j][k] = tet_coords[i][j][k];
+//       }
+//     }
+//     // 将四面体顶点坐标平移到实际坐标系中
+//     for (int j = 0; j < 4; j++) {
+//       X[j][0] += x0;
+//       X[j][1] += y0;
+//       X[j][2] += z0;
+//     }
+//     double lambda[4];
+//     double cond;
+//     bool is_inside = compute_barycentric_coordinates(X, x, lambda);
+//     if (is_inside) {
+//       switch (i)
+//       {
+//       case 0:
+//         return 0+ (x0 + y0 * DW + z0 * DW * DH)*6;
+//       case 1:
+//         return 2+ (x0 + y0 * DW + z0 * DW * DH)*6;
+//       case 2:
+//         return 1+ (x0 + y0 * DW + z0 * DW * DH)*6;
+//       case 3:
+//         return 4+ (x0 + y0 * DW + z0 * DW * DH)*6;
+//       case 4:
+//         return 3+ (x0 + y0 * DW + z0 * DW * DH)*6;
+//       case 5:
+//         return 5+ (x0 + y0 * DW + z0 * DW * DH)*6;        
+//       }
+
+//     }
+//   }
+//   printf("x: %f, %f, %f\n", x[0], x[1], x[2]);
+//   throw std::runtime_error("Could not get_cell_offset_3d");
+  
+// }
+
+template<typename T>
+size_t get_cell_offset_3d(const T *x_, const int DW, const int DH, const int DD){
+    double x = x_[0];
+    double y = x_[1];
+    double z = x_[2];
+    int x0 = std::floor(x);
+    int y0 = std::floor(y);
+    int z0 = std::floor(z);
+
+    Point V0(x0, y0, z0); //（0，0，0）
+    Point V1(x0 + 1, y0, z0); //（1，0，0）
+    Point V2(x0, y0 + 1, z0); //（0，1，0）
+    Point V3(x0, y0, z0 + 1); //（0，0，1）
+    Point V4(x0 + 1, y0 + 1, z0); //（1，1，0）
+    Point V5(x0 + 1, y0, z0 + 1); //（1，0，1）
+    Point V6(x0, y0 + 1, z0 + 1); //（0，1，1）
+    Point V7(x0 + 1, y0 + 1, z0 + 1); //（1，1，1）
+    std::vector<Tetrahedron> tetrahedrons = {
+        {V0,V3,V6,V7},
+        {V0,V2,V6,V7},
+        {V0,V3,V5,V7},
+        {V0,V1,V5,V7},
+        {V0,V2,V4,V7},
+        {V0,V1,V4,V7},
+    };
+
+    Point point(x, y, z);
+    Eigen::Vector4d bary_coords;
+    int index = 0;
+    for (const auto& tetra : tetrahedrons) {
+        if (isPointInTetrahedron(point, tetra, bary_coords)) {
+            return index + (x0 + y0 * DW + z0 * DW * DH) * 6;
+        }
+        index++;
+    }
+    printf("x: %f, %f, %f\n", x, y, z);
+    throw std::runtime_error("Could not get_cell_offset_3d");
+}
+
+
+
+template size_t get_cell_offset_3d(const double *x, const int DW, const int DH, const int DD);
+
 template<typename T>
 std::array<size_t, 3> get_three_offsets(const T& x, const int DW, const int DH){
   // vertex offset
@@ -53,6 +184,92 @@ std::array<size_t, 3> get_three_offsets(const T& x, const int DW, const int DH){
 }
 
 template std::array<size_t, 3> get_three_offsets(const std::array<double, 2>& x, const int DW, const int DH);
+
+// template<typename T>
+// std::array<size_t, 4> get_four_offsets(const T& x, const int DW, const int DH, const int DD){
+//   // vertex offset
+//   size_t x0 = floor(x[0]); 
+//   size_t y0 = floor(x[1]);
+//   size_t z0 = floor(x[2]);
+//   for (int i = 0; i < 6; i++) {
+//     // printf("######\n");
+//     double X[4][3];
+//     double V[4][3];
+//     // 拷贝四面体顶点坐标
+//     for (int j = 0; j < 4; j++) {
+//       for (int k = 0; k < 3; k++) {
+//         X[j][k] = tet_coords[i][j][k];
+//       }
+//     }
+//     // 将四面体顶点坐标平移到实际坐标系中
+//     for (int j = 0; j < 4; j++) {
+//       X[j][0] += x0;
+//       X[j][1] += y0;
+//       X[j][2] += z0;
+//     }
+//     double lambda[4];
+//     double cond;
+//     double x_temp[3] = {x[0], x[1], x[2]};
+//     bool is_inside = compute_barycentric_coordinates(X, x_temp, lambda);
+//     if (is_inside) {
+//       std::array<size_t, 4> _Result;
+//       for (int j = 0; j < 4; j++) {
+//         _Result[j] = X[j][0] + X[j][1] * DW + X[j][2] * DW * DH;
+//       }
+//       return _Result;
+//     }
+//   }
+//   throw std::runtime_error("could not determine the cell offset");
+// }
+
+template<typename T>
+std::array<size_t,4> get_four_offsets(const T& x_, const int DW, const int DH,const int DD){
+  double x = x_[0];
+  double y = x_[1];
+  double z = x_[2];
+  int x0 = std::floor(x);
+  int y0 = std::floor(y);
+  int z0 = std::floor(z);
+
+  Point V0(x0, y0, z0); //（0，0，0）
+  Point V1(x0 + 1, y0, z0); //（1，0，0）
+  Point V2(x0, y0 + 1, z0); //（0，1，0）
+  Point V3(x0, y0, z0 + 1); //（0，0，1）
+  Point V4(x0 + 1, y0 + 1, z0); //（1，1，0）
+  Point V5(x0 + 1, y0, z0 + 1); //（1，0，1）
+  Point V6(x0, y0 + 1, z0 + 1); //（0，1，1）
+  Point V7(x0 + 1, y0 + 1, z0 + 1); //（1，1，1）
+  std::vector<Tetrahedron> tetrahedrons = {
+      {V0,V3,V6,V7},
+      {V0,V2,V6,V7},
+      {V0,V3,V5,V7},
+      {V0,V1,V5,V7},
+      {V0,V2,V4,V7},
+      {V0,V1,V4,V7},
+  };
+
+  Point point(x, y, z);
+  Eigen::Vector4d bary_coords;
+  int index = 0;
+  for (const auto& tetra : tetrahedrons) {
+      if (isPointInTetrahedron(point, tetra, bary_coords)) {
+          //get the four vertexs
+          std::array<size_t, 4> result;
+          Tetrahedron temp = tetrahedrons[index];
+          for (int i = 0; i < 4; i++){
+            result[i] = temp[i][0] + temp[i][1] * DW + temp[i][2] * DW * DH;
+          }
+          return result;
+      }
+      index++;
+  }
+  printf("x: %f, %f, %f\n", x, y, z);
+  printf("x0: %d, y0: %d, z0: %d\n", x0, y0, z0);
+
+  throw std::runtime_error("Could not get_four_offsets");
+}
+
+template std::array<size_t, 4> get_four_offsets(const std::array<double, 3>& x, const int DW, const int DH, const int DD);
 
 inline bool vaild_offset(const int offset, const int DW, const int DH){
   if (offset < 0 || offset >= 2*(DW-1)*(DH-1)){
