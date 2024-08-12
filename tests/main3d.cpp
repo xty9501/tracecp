@@ -69,7 +69,18 @@ struct critical_point_t_3d {
 #define STABLE_SINK 7
 #define UNSTABLE_SINK 8
 
-
+bool compare_trajectory(const std::vector<std::array<double, 3>>& traj1, const std::vector<std::array<double, 3>>& traj2) {
+    size_t len = std::min(traj1.size(), traj2.size());
+    for (size_t i = 0; i < len; ++i) {
+        if (traj1[i][0] != traj2[i][0])
+            return traj1[i][0] < traj2[i][0]; // 先比较第 i 个坐标的 x
+        if (traj1[i][1] != traj2[i][1])
+            return traj1[i][1] < traj2[i][1]; // 如果 x 相同，再比较 y
+        if (traj1[i][2] != traj2[i][2])
+            return traj1[i][2] < traj2[i][2]; // 如果 x 和 y 相同，再比较 z
+    }
+    return traj1.size() < traj2.size(); // 如果所有坐标都相同，较短的轨迹排在前面
+}
 
 template<typename T>
 int
@@ -723,7 +734,7 @@ int main(int argc, char ** argv){
     #pragma omp parallel for reduction(+:total_saddle_count)
     for (size_t i = 0; i < keys.size(); ++i) {
         int key = keys[i];
-        printf("current key: %d,current thread: %d\n",key,omp_get_thread_num());
+        // printf("current key: %d,current thread: %d\n",key,omp_get_thread_num());
         auto &cp = critical_points_0[key];
         if (cp.type >=3 && cp.type <= 6){
             //auto start_six_traj = std::chrono::high_resolution_clock::now();
@@ -787,7 +798,7 @@ int main(int argc, char ** argv){
                 size_t trajID = trajID_counter++;
                 //printf("current trajID: %d\n",trajID);
                 std::vector<std::array<double, 3>> traj = trajectory_3d_parallel(pt, {direction[1], direction[2], direction[3]}, h * direction[0], max_length, r3,r2,r1, critical_points_0, grad_ori,index_ori,vertex_ori,cellID_trajIDs_map_ori,trajID);
-                printf("threadID: %d, trajID: %d, seed pt: %f %f %f, end pt: %f %f %f\n",omp_get_thread_num(),trajID,direction[1], direction[2], direction[3],traj.back()[0],traj.back()[1],traj.back()[2]);
+                // printf("threadID: %d, trajID: %d, seed pt: %f %f %f, end pt: %f %f %f\n",omp_get_thread_num(),trajID,direction[1], direction[2], direction[3],traj.back()[0],traj.back()[1],traj.back()[2]);
                 #pragma omp critical
                 {
                     trajs_ori.push_back(traj);
@@ -809,7 +820,7 @@ int main(int argc, char ** argv){
     }
     auto end1 = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> elapsed = end1 - start1;
-    cout << "Elapsed time for calculate all traj once: " << elapsed.count() << "s" << endl;
+    cout << "Elapsed time for calculate all ori traj once: " << elapsed.count() << "s" << endl;
     printf("total traj: %zu\n",trajs_ori.size());
 
     start1 = std::chrono::high_resolution_clock::now();
@@ -858,8 +869,15 @@ int main(int argc, char ** argv){
     std::vector<int> index_dec;
     std::set<size_t> vertex_dec;
     std::unordered_map<size_t, std::set<int>> cellID_trajIDs_map_dec;
-    for (const auto&p:critical_points_out){
-        auto cp = p.second;
+    std::vector<int> keys_dec;
+    start1 = std::chrono::high_resolution_clock::now();
+    for (const auto &p : critical_points_out) {
+        keys_dec.push_back(p.first);
+    }
+    #pragma omp parallel for
+    for (size_t i = 0; i < keys_dec.size(); ++i) {
+        int key = keys_dec[i];
+        auto &cp = critical_points_out[key];
         if (cp.type >=3 && cp.type <= 6){
             total_saddle_count_dec ++;
             //cout << "critical point saddle at " << cp.x[0] << " " << cp.x[1] << " " << cp.x[2] << " type: " << cp.type << endl;
@@ -908,13 +926,18 @@ int main(int argc, char ** argv){
             for (int i = 0; i < 6; i++){
                 auto direction = directions[i];  
                 size_t trajID = trajs_dec.size();
-                std::vector<std::array<double, 3>> traj = trajectory_3d(pt, {direction[1], direction[2], direction[3]}, h * direction[0], max_length, r3,r2,r1, critical_points_out, grad_dec,index_dec,vertex_dec,cellID_trajIDs_map_dec,trajID);
-                trajs_dec.push_back(traj);
+                std::vector<std::array<double, 3>> traj = trajectory_3d_parallel(pt, {direction[1], direction[2], direction[3]}, h * direction[0], max_length, r3,r2,r1, critical_points_out, grad_dec,index_dec,vertex_dec,cellID_trajIDs_map_dec,trajID);
+                #pragma omp critical
+                {
+                    trajs_dec.push_back(traj);
+                }
             }
         }
     }
 
-
+    end1 = std::chrono::high_resolution_clock::now();
+    elapsed = end1 - start1;
+    cout << "Elapsed time for calculate all dec traj once: " << elapsed.count() << "s" << endl;
     for (auto traj:trajs_dec){
         auto last = traj.back();
         auto last_offset = get_cell_offset_3d(last.data(), r3, r2, r1);
@@ -942,6 +965,10 @@ int main(int argc, char ** argv){
     printf("total critical points_dec: %zu\n",critical_points_out.size());
 
     //check traj_ori and traj_dec, the first and second point should be the same
+    //这里并行化之后，traj_ori和traj_dec的顺序可能不一样，所以需要先排序
+    std::sort(trajs_ori.begin(),trajs_ori.end(),compare_trajectory);
+    std::sort(trajs_dec.begin(),trajs_dec.end(),compare_trajectory);
+
     for (int i = 0; i < trajs_ori.size(); i++){
         auto traj_ori = trajs_ori[i];
         auto traj_dec = trajs_dec[i];

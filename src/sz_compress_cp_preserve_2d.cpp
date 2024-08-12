@@ -3,7 +3,7 @@
 #include "sz_compress_cp_preserve_2d.hpp"
 #include "sz_def.hpp"
 #include "sz_compression_utils.hpp"
-
+#include <cassert>
 #include <iostream>
 #include <set>
 
@@ -950,13 +950,19 @@ template<typename T>
 unsigned char *
 sz_compress_cp_preserve_2d_record_vertex(const T * U, const T * V, size_t r1, size_t r2, size_t& compressed_size, bool transpose, double max_pwr_eb,const std::set<size_t> &index_need_to_fix){
 	size_t num_elements = r1 * r2;
-	
+	printf("parpare bitmap\n");
 	//准备bitmap#####################
 	unsigned char * bitmap = (unsigned char *) malloc(num_elements*sizeof(unsigned char));
+	if (bitmap == NULL) {
+    fprintf(stderr, "Failed to allocate memory for bitmap\n");
+    exit(1);
+	}
 	// set all to 0
-	memset(bitmap, 0, num_elements*sizeof(T));
+	// memset(bitmap, 0, num_elements * sizeof(T));
+	memset(bitmap, 0, num_elements * sizeof(unsigned char));
 	//set index_need_to_fix to 1
-	for(auto it = index_need_to_fix.begin(); it != index_need_to_fix.end(); it++){
+	for(auto it = index_need_to_fix.begin(); it != index_need_to_fix.end(); ++it){
+		assert(*it < num_elements);
 		bitmap[*it] = 1;
 	}
 	size_t intArrayLength = num_elements;
@@ -1127,6 +1133,7 @@ sz_compress_cp_preserve_2d_record_vertex(const T * U, const T * V, size_t r1, si
 		U_pos += r2;
 		V_pos += r2;
 	}
+	printf("ready to free decompressed_U &V\n");
 	free(decompressed_U);
 	free(decompressed_V);
 	printf("offsets eb_q, data_q, unpred: %ld %ld %ld\n", eb_quant_index_pos - eb_quant_index, data_quant_index_pos - data_quant_index, unpred_data.size());
@@ -1136,9 +1143,11 @@ sz_compress_cp_preserve_2d_record_vertex(const T * U, const T * V, size_t r1, si
 	// write_variable_to_dst(compressed_pos,num_elements); // 处理后的bitmap的长度 size_t
 	//write_array_to_dst(compressed_pos, compressedArray, num_bytes);
 	convertIntArray2ByteArray_fast_1b_to_result_sz(bitmap, num_elements, compressed_pos);
+	printf("bitmap pos = %ld\n", compressed_pos - compressed);
 
 	//再写index_need_to_fix的大小
 	write_variable_to_dst(compressed_pos, index_need_to_fix.size()); //size_t, index_need_to_fix的大小
+	printf("index_need_to_fix pos = %ld\n", compressed_pos - compressed);
 	//再写index_need_to_fix对应U和V的数据
 	for (auto it = index_need_to_fix.begin(); it != index_need_to_fix.end(); it++){
 		write_variable_to_dst(compressed_pos, U[*it]); //T, index_need_to_fix对应的U的值
@@ -1146,6 +1155,7 @@ sz_compress_cp_preserve_2d_record_vertex(const T * U, const T * V, size_t r1, si
 	for (auto it = index_need_to_fix.begin(); it != index_need_to_fix.end(); it++){
 		write_variable_to_dst(compressed_pos, V[*it]); //T, index_need_to_fix对应的V的值
 	}
+	printf("index_need_to_fix lossless data pos = %ld\n", compressed_pos - compressed);
 
 	write_variable_to_dst(compressed_pos, base); //int
 	write_variable_to_dst(compressed_pos, threshold); //double
@@ -1156,7 +1166,7 @@ sz_compress_cp_preserve_2d_record_vertex(const T * U, const T * V, size_t r1, si
 	Huffman_encode_tree_and_data(2*1024, eb_quant_index, 2*num_elements, compressed_pos);
 	free(eb_quant_index);
 	Huffman_encode_tree_and_data(2*capacity, data_quant_index, 2*num_elements, compressed_pos);
-	printf("pos = %ld\n", compressed_pos - compressed);
+	printf("pos = %ld\n", compressed_pos - compressed);//pos = 41812580
 	free(data_quant_index);
 	compressed_size = compressed_pos - compressed;
 	return compressed;	

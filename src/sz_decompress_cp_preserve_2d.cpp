@@ -95,6 +95,8 @@ sz_decompress_cp_preserve_2d_online_record_vertex(const unsigned char * compress
 	T * lossless_data_V;
 	lossless_data_U = read_array_from_src<T>(compressed_pos,lossless_count);
 	lossless_data_V = read_array_from_src<T>(compressed_pos,lossless_count);
+	T * lossless_data_U_pos = lossless_data_U;
+	T * lossless_data_V_pos = lossless_data_V;
 
 	read_variable_from_src(compressed_pos, base);
 	printf("base = %d\n", base);
@@ -116,6 +118,7 @@ sz_decompress_cp_preserve_2d_online_record_vertex(const unsigned char * compress
 	T * V_pos = V;
 	int * eb_quant_index_pos = eb_quant_index;
 	int * data_quant_index_pos = data_quant_index;
+	double lossless_sum_u = 0;
 	// const double threshold=std::numeric_limits<float>::epsilon();
 	for(int i=0; i<r1; i++){
 		for(int j=0; j<r2; j++){
@@ -142,8 +145,38 @@ sz_decompress_cp_preserve_2d_online_record_vertex(const unsigned char * compress
 			data_quant_index_pos += 2;
 		}
 	}
+
+	//最后在根据bitmap更新
+	for(int i=0; i<r1; i++){
+		for(int j=0; j<r2; j++){
+		//check bitmap
+			if(static_cast<int>(bitmap[i*r2+j]) == 1){
+				U[i*r2+j] = *(lossless_data_U_pos ++);
+				V[i*r2+j] = *(lossless_data_V_pos ++);
+				lossless_sum_u += U[i*r2+j];
+				continue;
+			}
+		}
+	}
+
 	free(eb_quant_index);
 	free(data_quant_index);
+	free(bitmap);
+	free(lossless_data_U);
+	free(lossless_data_V);
+	printf("lossless_count = %ld\n", lossless_data_U_pos - lossless_data_U);
+	printf("lossless_sum_u_when_decomp = %lf\n", lossless_sum_u);
+	// //loop through bitmap, if bitmap[i] == 1, then replace U[i] and V[i] with lossless_data_U[i] and lossless_data_V[i]
+	// size_t count_lossless = 0;
+	// for(size_t i = 0; i < num_elements; i++){
+	// 	if(static_cast<int>(bitmap[i]) == 1){
+	// 		U[i] = lossless_data_U[i];
+	// 		V[i] = lossless_data_V[i];
+	// 		count_lossless++;
+	// 	}
+	// }
+	// printf("lossless_count = %ld\n", lossless_count);
+
 }
 
 template
