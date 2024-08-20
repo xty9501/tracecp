@@ -35,7 +35,7 @@ void updateOffsetsAndMap(const Type* p, const int DW, const int DH, std::set<siz
 // }
 
 template<typename Type>
-void updateOffsets(const Type* p, const int DW, const int DH, std::vector<std::set<int>>& thread_lossless_index,int thread_id) {
+void updateOffsets(const Type* p, const int DW, const int DH, std::vector<std::set<size_t>>& thread_lossless_index,int thread_id) {
     auto coords = get_three_offsets(p, DW, DH);
     thread_lossless_index[thread_id].insert(coords.begin(), coords.end());
 }
@@ -261,7 +261,7 @@ std::array<Type, 2> newRK4(const Type * x, const Type * v, const ftk::ndarray<fl
 // }
 
 template<typename Type>
-std::array<Type, 2> newRK4_parallel(const Type* x, const Type* v, const ftk::ndarray<float>& data, Type h, const int DH, const int DW, std::vector<std::set<int>>& thread_lossless_index,int thread_id) {
+std::array<Type, 2> newRK4_parallel(const Type* x, const Type* v, const ftk::ndarray<float>& data, Type h, const int DH, const int DW, std::vector<std::set<size_t>>& thread_lossless_index,int thread_id) {
     // x and y are positions, and h is the step size
     double rk1[2] = {0};
     const double p1[2] = {x[0], x[1]};
@@ -840,7 +840,7 @@ std::vector<std::array<double, 2>> trajectory(double *X_original,const std::arra
   return result;
 }
 
-std::vector<std::array<double, 2>> trajectory_parallel(double *X_original,const std::array<double, 2>& initial_x, const double time_step, const int max_length, const int DH,const int DW, const std::unordered_map<int, critical_point_t>& critical_points, ftk::ndarray<float>& data ,std::vector<std::set<int>>& thread_lossless_index,int thread_id){
+std::vector<std::array<double, 2>> trajectory_parallel(double *X_original,const std::array<double, 2>& initial_x, const double time_step, const int max_length, const int DH,const int DW, const std::unordered_map<int, critical_point_t>& critical_points, ftk::ndarray<float>& data ,std::vector<std::set<size_t>>& thread_lossless_index,int thread_id){
   std::vector<std::array<double, 2>> result;
   int flag = 0; // 1 means found, -1 means out of bound， 0 means reach max length
   int length = 0;
