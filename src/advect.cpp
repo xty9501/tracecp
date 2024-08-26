@@ -965,3 +965,123 @@ std::vector<std::array<double, 2>> trajectory_parallel(double *X_original,const 
   
   return result;
 }
+
+
+std::vector<std::array<double, 2>> trajectory(double *X_original,const std::array<double, 2>& initial_x, const double time_step, const int max_length, const int DH,const int DW, const std::unordered_map<int, critical_point_t>& critical_points, ftk::ndarray<float>& data  ,std::vector<int>& index,std::set<size_t>& lossless_index){
+  std::vector<std::array<double, 2>> result;
+  int flag = 0; // 1 means found, -1 means out of bound， 0 means reach max length
+  int length = 0;
+  result.push_back({X_original[0], X_original[1]}); //add original true position
+  length ++;
+  int orginal_offset = get_cell_offset(X_original, DW, DH);
+
+  std::array<double, 2> current_x = initial_x;
+
+  //add original and initial_x position's offset
+  auto ori_offset = get_three_offsets(X_original, DW, DH);
+
+  for (auto offset:ori_offset){
+    lossless_index.insert(offset);
+  }  
+
+
+
+  if(!inside(current_x, DH, DW)){
+    //count_out_bound ++;
+    flag = -1;
+    result.push_back({-1, -1});
+    length ++;
+
+    index.push_back(length);
+
+    
+    return result;
+  }
+  else{
+    result.push_back(current_x); //add initial position(seed)
+    length ++;
+    auto ini_offset = get_three_offsets(current_x, DW, DH);
+    for (auto offset:ini_offset){
+      lossless_index.insert(offset);
+    }
+
+  }
+
+  while (flag == 0){
+    if(!inside(current_x, DH, DW)){
+      //count_out_bound ++;
+      flag = -1;
+      result.push_back({-1, -1});
+      length ++;
+      break;
+    }
+    if (length == max_length) {
+      //printf("reach max length!\n");
+      //count_limit ++;
+      flag = 1;
+      break;
+    }
+
+    double current_v[2] = {0};
+
+    interp2d(current_x.data(), current_v,data); 
+
+    //int current_offset = get_cell_offset(current_x.data(), DW, DH);    
+    
+    std::array<double, 2> RK4result = newRK4(current_x.data(), current_v, data, time_step, DH, DW,lossless_index);
+
+    if (RK4result[0] == -1 && RK4result[1] == -1){
+      //count_out_bound ++;
+      flag = -1;
+      result.push_back({-1, -1});
+      length ++;
+      break;
+    }
+
+    size_t current_offset = get_cell_offset(RK4result.data(), DW, DH);
+    
+    if (current_offset != orginal_offset){
+      //moved to another cell
+      auto it = critical_points.find(current_offset);
+      if (it != critical_points.end()){
+        auto cp = it->second;
+        double error = 1e-3;
+        if (cp.type != SADDLE && fabs(RK4result[0] - cp.x[0]) < error && fabs(RK4result[1] - cp.x[1]) < error){
+          flag = 1; //found cp
+          int cp_offset = get_cell_offset(cp.x, DW, DH);
+          // first add rk4 position
+          result.push_back({RK4result[0], RK4result[1]});
+          length++;
+          
+          // then add cp position
+          std::array<double, 2> true_cp = {cp.x[0], cp.x[1]};
+          result.push_back(true_cp);
+          length++;
+
+          
+          auto final_offset_rk = get_three_offsets(RK4result, DW, DH);
+          for (auto offset:final_offset_rk){
+            lossless_index.insert(offset);
+          }
+          auto final_offset_cp = get_three_offsets(cp.x, DW, DH);
+          for (auto offset:final_offset_cp){
+            lossless_index.insert(offset);
+          }  
+          index.push_back(length);
+
+          return result;
+        }
+      }
+    }
+    current_x = RK4result;
+    // printf("current_x: (%f, %f)\n", current_x[0], current_x[1]);
+    result.push_back(current_x);
+    length++;
+    
+  }
+
+  index.push_back(length);
+
+  
+  return result;
+}
