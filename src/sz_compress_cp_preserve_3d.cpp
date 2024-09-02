@@ -4,6 +4,7 @@
 #include "sz_def.hpp"
 #include "sz_compression_utils.hpp"
 #include <unordered_map>
+#include <cassert>
 
 template<typename Type>
 void writefile(const char * file, Type * data, size_t num_elements){
@@ -1151,9 +1152,475 @@ unsigned char *
 sz_compress_cp_preserve_3d_unstructured(int n, const double * points, const double * data, int m, const int * tets_ind, size_t& compressed_size, double max_pwr_eb);
 
 
+template<typename T>
+unsigned char *
+sz_compress_cp_preserve_3d_record_vertex(const T * U, const T * V, const T * W, size_t r1, size_t r2, size_t r3, size_t& compressed_size, bool transpose, double max_pwr_eb,const std::set<size_t>& index_need_to_lossless){
+
+	size_t num_elements = r1 * r2 * r3;
+	//准备bitmap
+	unsigned char * bitmap = (unsigned char *) malloc(num_elements*sizeof(unsigned char));
+	if(bitmap == NULL){
+		printf("Error: bitmap malloc failed\n");
+		exit(1);
+	}
+	//set all to 0
+	memset(bitmap, 0, num_elements*sizeof(unsigned char));
+	//set the index to 1
+	for(auto it = index_need_to_lossless.begin(); it != index_need_to_lossless.end(); it++){
+		assert(*it < num_elements);
+		bitmap[*it] = 1;
+	}
+	size_t intArrayLength = num_elements;
+	//输出的长度num_bytes
+	size_t num_bytes = (intArrayLength % 8 == 0) ? intArrayLength / 8 : intArrayLength / 8 + 1;
+	//准备完成
+	size_t sign_map_size = (num_elements - 1)/8 + 1;
+	unsigned char * sign_map_compressed = (unsigned char *) malloc(3*sign_map_size);
+	unsigned char * sign_map_compressed_pos = sign_map_compressed;
+	unsigned char * sign_map = (unsigned char *) malloc(num_elements*sizeof(unsigned char));
+	// Note the convert function has address auto increment
+	T * log_U = log_transform(U, sign_map, num_elements);
+	convertIntArray2ByteArray_fast_1b_to_result_sz(sign_map, num_elements, sign_map_compressed_pos);
+	T * log_V = log_transform(V, sign_map, num_elements);
+	convertIntArray2ByteArray_fast_1b_to_result_sz(sign_map, num_elements, sign_map_compressed_pos);
+	T * log_W = log_transform(W, sign_map, num_elements);
+	convertIntArray2ByteArray_fast_1b_to_result_sz(sign_map, num_elements, sign_map_compressed_pos);
+	free(sign_map);
+
+	T * decompressed_U = (T *) malloc(num_elements*sizeof(T));
+	memcpy(decompressed_U, U, num_elements*sizeof(T));
+	T * decompressed_V = (T *) malloc(num_elements*sizeof(T));
+	memcpy(decompressed_V, V, num_elements*sizeof(T));
+	T * decompressed_W = (T *) malloc(num_elements*sizeof(T));
+	memcpy(decompressed_W, W, num_elements*sizeof(T));
+
+	int * eb_quant_index = (int *) malloc(num_elements*sizeof(int));
+	int * data_quant_index = (int *) malloc(3*num_elements*sizeof(int));
+	int * eb_quant_index_pos = eb_quant_index;
+	int * data_quant_index_pos = data_quant_index;
+	// next, row by row
+	const int base = 2;
+	const double log_of_base = log2(base);
+	const int capacity = 65536;
+	const int intv_radius = (capacity >> 1);
+	size_t dim0_offset = r2 * r3;
+	size_t dim1_offset = r3;
+	// offsets to get 24 adjacent simplex indices
+	// x -> z, high -> low
+	// current data would always be the last index, i.e. x[i][3]
+	const int coordinates[24][4][3] = {
+		// offset = 0, 0, 0
+		{
+			{0, 0, 1},
+			{0, 1, 1},
+			{1, 1, 1},
+			{0, 0, 0}
+		},
+		{
+			{0, 1, 0},
+			{0, 1, 1},
+			{1, 1, 1},
+			{0, 0, 0}
+		},
+		{
+			{0, 0, 1},
+			{1, 0, 1},
+			{1, 1, 1},
+			{0, 0, 0}
+		},
+		{
+			{1, 0, 0},
+			{1, 0, 1},
+			{1, 1, 1},
+			{0, 0, 0}
+		},
+		{
+			{0, 1, 0},
+			{1, 1, 0},
+			{1, 1, 1},
+			{0, 0, 0}
+		},
+		{
+			{1, 0, 0},
+			{1, 1, 0},
+			{1, 1, 1},
+			{0, 0, 0}
+		},
+		// offset = -1, 0, 0
+		{
+			{0, 0, 0},
+			{1, 0, 1},
+			{1, 1, 1},
+			{1, 0, 0}
+		},
+		{
+			{0, 0, 0},
+			{1, 1, 0},
+			{1, 1, 1},
+			{1, 0, 0}
+		},
+		// offset = 0, -1, 0
+		{
+			{0, 0, 0},
+			{0, 1, 1},
+			{1, 1, 1},
+			{0, 1, 0}
+		},
+		{
+			{0, 0, 0},
+			{1, 1, 0},
+			{1, 1, 1},
+			{0, 1, 0}
+		},
+		// offset = -1, -1, 0
+		{
+			{0, 0, 0},
+			{0, 1, 0},
+			{1, 1, 1},
+			{1, 1, 0}
+		},
+		{
+			{0, 0, 0},
+			{1, 0, 0},
+			{1, 1, 1},
+			{1, 1, 0}
+		},
+		// offset = 0, 0, -1
+		{
+			{0, 0, 0},
+			{0, 1, 1},
+			{1, 1, 1},
+			{0, 0, 1}
+		},
+		{
+			{0, 0, 0},
+			{1, 0, 1},
+			{1, 1, 1},
+			{0, 0, 1}
+		},
+		// offset = -1, 0, -1
+		{
+			{0, 0, 0},
+			{0, 0, 1},
+			{1, 1, 1},
+			{1, 0, 1}
+		},
+		{
+			{0, 0, 0},
+			{1, 0, 0},
+			{1, 1, 1},
+			{1, 0, 1}
+		},
+		// offset = 0, -1, -1
+		{
+			{0, 0, 0},
+			{0, 0, 1},
+			{1, 1, 1},
+			{0, 1, 1}
+		},
+		{
+			{0, 0, 0},
+			{0, 1, 0},
+			{1, 1, 1},
+			{0, 1, 1}
+		},
+		// offset = -1, -1, -1
+		{
+			{0, 0, 0},
+			{0, 0, 1},
+			{0, 1, 1},
+			{1, 1, 1}
+		},
+		{
+			{0, 0, 0},
+			{0, 1, 0},
+			{0, 1, 1},
+			{1, 1, 1}
+		},
+		{
+			{0, 0, 0},
+			{0, 0, 1},
+			{1, 0, 1},
+			{1, 1, 1}
+		},
+		{
+			{0, 0, 0},
+			{1, 0, 0},
+			{1, 0, 1},
+			{1, 1, 1}
+		},
+		{
+			{0, 0, 0},
+			{0, 1, 0},
+			{1, 1, 0},
+			{1, 1, 1}
+		},
+		{
+			{0, 0, 0},
+			{1, 0, 0},
+			{1, 1, 0},
+			{1, 1, 1}
+		}
+	};
+	ptrdiff_t simplex_offset[24];
+	{
+		ptrdiff_t * simplex_offset_pos = simplex_offset;
+		ptrdiff_t base = 0;
+		// offset = 0, 0, 0
+		for(int i=0; i<6; i++){
+			*(simplex_offset_pos++) = i;
+		}
+		// offset = -1, 0, 0
+		base = -6*dim0_offset;
+		*(simplex_offset_pos++) = base + 3;
+		*(simplex_offset_pos++) = base + 5;
+		// offset = 0, -1, 0
+		base = -6*dim1_offset;
+		*(simplex_offset_pos++) = base + 1;
+		*(simplex_offset_pos++) = base + 4;
+		// offset = -1, -1, 0
+		base = -6*dim0_offset - 6*dim1_offset;
+		*(simplex_offset_pos++) = base + 4;
+		*(simplex_offset_pos++) = base + 5;
+		// offset = 0, 0, -1
+		base = -6;
+		*(simplex_offset_pos++) = base + 0;
+		*(simplex_offset_pos++) = base + 2;
+		// offset = -1, 0, -1
+		base = -6*dim0_offset - 6;
+		*(simplex_offset_pos++) = base + 2;
+		*(simplex_offset_pos++) = base + 3;
+		// offset = 0, -1, -1
+		base = -6*dim1_offset - 6;
+		*(simplex_offset_pos++) = base + 0;
+		*(simplex_offset_pos++) = base + 1;
+		// offset = -1, -1, -1
+		base = -6*dim0_offset - 6*dim1_offset - 6;
+		for(int i=0; i<6; i++){
+			*(simplex_offset_pos++) = base + i;
+		}
+	}
+	int index_offset[24][3][3];
+	for(int i=0; i<24; i++){
+		for(int j=0; j<3; j++){
+			for(int k=0; k<3; k++){
+				index_offset[i][j][k] = coordinates[i][j][k] - coordinates[i][3][k];
+			}
+		}
+	}
+	ptrdiff_t offset[24][3];
+	for(int i=0; i<24; i++){
+		for(int x=0; x<3; x++){
+			// offset[i][x] = (coordinates[i][x][0] - coordinates[i][3][0]) * dim0_offset + (coordinates[i][x][1] - coordinates[i][3][1]) * dim1_offset + (coordinates[i][x][2] - coordinates[i][3][2]);
+			offset[i][x] = (coordinates[i][x][0] - coordinates[i][3][0]) + (coordinates[i][x][1] - coordinates[i][3][1]) * dim1_offset + (coordinates[i][x][2] - coordinates[i][3][2]) * dim0_offset;
+		}
+	}
+	T * cur_log_U_pos = log_U;
+	T * cur_log_V_pos = log_V;
+	T * cur_log_W_pos = log_W;
+	T * cur_U_pos = decompressed_U;
+	T * cur_V_pos = decompressed_V;
+	T * cur_W_pos = decompressed_W;
+	unpred_vec<T> eb_zero_data = unpred_vec<T>();
+	ptrdiff_t max_pointer_pos = num_elements;
+	double threshold = std::numeric_limits<float>::epsilon();
+	int eb_quant_index_max = (int) (log2(1.0 / threshold)/log_of_base) + 1;
+
+	// double * eb = (double *) malloc(sizeof(double)*num_elements);
+	// int eb_index = 0;
+	// int est_outrange = num_elements * 0.1;
+	// unsigned char * outrange_sign = (unsigned char *) malloc(est_outrange);
+	// int * outrange_exp = (int *) malloc(est_outrange*sizeof(int));
+	// unsigned char * outrange_residue = (unsigned char *) malloc(est_outrange*sizeof(T));
+	// unsigned char * outrange_sign_pos = outrange_sign;
+	// int * outrange_exp_pos = outrange_exp; 
+	// unsigned char * outrange_residue_pos = outrange_residue;
+	// int outrange_pos = 0;
+	// unpred_vec<float> outrange_data = unpred_vec<float>();
+	// record flags
+	for(int i=0; i<r1; i++){
+		// printf("start %d row\n", i);
+		for(int j=0; j<r2; j++){
+			for(int k=0; k<r3; k++){
+				double required_eb = max_pwr_eb;
+				// derive eb given 24 adjacent simplex
+				for(int n=0; n<24; n++){
+					bool in_mesh = true;
+					for(int p=0; p<3; p++){
+						// reversed order!
+						if(!(in_range(i + index_offset[n][p][2], (int)r1) && in_range(j + index_offset[n][p][1], (int)r2) && in_range(k + index_offset[n][p][0], (int)r3))){
+							in_mesh = false;
+							break;
+						}
+					}
+					if(in_mesh){
+						int index = simplex_offset[n] + i*6*dim0_offset + j*6*dim1_offset + k*6; // TODO: define index for each simplex
+						required_eb = MIN(required_eb, max_eb_to_keep_position_and_type_3d_online(
+							cur_U_pos[offset[n][0]], cur_U_pos[offset[n][1]], cur_U_pos[offset[n][2]], *cur_U_pos,
+							cur_V_pos[offset[n][0]], cur_V_pos[offset[n][1]], cur_V_pos[offset[n][2]], *cur_V_pos,
+							cur_W_pos[offset[n][0]], cur_W_pos[offset[n][1]], cur_W_pos[offset[n][2]], *cur_W_pos));
+					}
+				}
+				// eb[eb_index ++] = required_eb;
+				if(required_eb < 1e-6) required_eb = 0;
+				if(required_eb > 0){
+					bool unpred_flag = false;
+					T decompressed[3];
+					double abs_eb = log2(1 + required_eb);
+					*eb_quant_index_pos = eb_exponential_quantize(abs_eb, base, log_of_base, threshold);
+					if(*eb_quant_index_pos > 0){
+						// compress vector fields
+						T * log_data_pos[3] = {cur_log_U_pos, cur_log_V_pos, cur_log_W_pos};
+						T * data_pos[3] = {cur_U_pos, cur_V_pos, cur_W_pos};
+						for(int p=0; p<3; p++){
+							T * cur_log_data_pos = log_data_pos[p];
+							T cur_data = *cur_log_data_pos;
+							// get adjacent data and perform Lorenzo
+							/*
+								d6	X
+								d4	d5
+								d2	d3
+								d0	d1
+							*/
+							T d0 = (i && j && k) ? cur_log_data_pos[- dim0_offset - dim1_offset - 1] : 0;
+							T d1 = (i && j) ? cur_log_data_pos[- dim0_offset - dim1_offset] : 0;
+							T d2 = (i && k) ? cur_log_data_pos[- dim0_offset - 1] : 0;
+							T d3 = (i) ? cur_log_data_pos[- dim0_offset] : 0;
+							T d4 = (j && k) ? cur_log_data_pos[- dim1_offset - 1] : 0;
+							T d5 = (j) ? cur_log_data_pos[- dim1_offset] : 0;
+							T d6 = (k) ? cur_log_data_pos[- 1] : 0;
+							T pred = d0 + d3 + d5 + d6 - d1 - d2 - d4;
+							double diff = cur_data - pred;
+							double quant_diff = fabs(diff) / abs_eb + 1;
+							if(quant_diff < capacity){
+								quant_diff = (diff > 0) ? quant_diff : -quant_diff;
+								int quant_index = (int)(quant_diff/2) + intv_radius;
+								data_quant_index_pos[p] = quant_index;
+								decompressed[p] = pred + 2 * (quant_index - intv_radius) * abs_eb; 
+								// check original data
+								if(fabs(decompressed[p] - cur_data) >= abs_eb){
+									unpred_flag = true;
+									break;
+								}
+							}
+							else{
+								unpred_flag = true;
+								break;
+							}
+						}
+					}
+					else unpred_flag = true;
+					if(unpred_flag){
+						*(eb_quant_index_pos ++) = eb_quant_index_max;
+						// int outrange_residue_len = exp_offset<double>() - getExponent(required_eb) + 2;
+						// *cur_U_pos = out_of_range_data_encode(*cur_U_pos, outrange_residue_len, outrange_sign_pos, outrange_exp_pos, outrange_residue_pos, outrange_pos);
+						// *cur_V_pos = out_of_range_data_encode(*cur_V_pos, outrange_residue_len, outrange_sign_pos, outrange_exp_pos, outrange_residue_pos, outrange_pos);
+						// *cur_W_pos = out_of_range_data_encode(*cur_W_pos, outrange_residue_len, outrange_sign_pos, outrange_exp_pos, outrange_residue_pos, outrange_pos);
+						// *cur_log_U_pos = log2(fabs(*cur_U_pos));
+						// *cur_log_V_pos = log2(fabs(*cur_V_pos));
+						// *cur_log_W_pos = log2(fabs(*cur_W_pos));
+						// printf("outrange_residue_len = %d\n", outrange_residue_pos - outrange_residue);
+
+						eb_zero_data.push_back(*cur_U_pos);
+						eb_zero_data.push_back(*cur_V_pos);
+						eb_zero_data.push_back(*cur_W_pos);
+					}
+					else{
+						eb_quant_index_pos ++;
+						data_quant_index_pos += 3;
+						*cur_log_U_pos = decompressed[0];
+						*cur_log_V_pos = decompressed[1];
+						*cur_log_W_pos = decompressed[2];
+						*cur_U_pos = (*cur_U_pos > 0) ? exp2(*cur_log_U_pos) : -exp2(*cur_log_U_pos);
+						*cur_V_pos = (*cur_V_pos > 0) ? exp2(*cur_log_V_pos) : -exp2(*cur_log_V_pos);
+						*cur_W_pos = (*cur_W_pos > 0) ? exp2(*cur_log_W_pos) : -exp2(*cur_log_W_pos);
+					}
+				}
+				else{
+					// record as unpredictable data
+					*(eb_quant_index_pos ++) = 0;
+					eb_zero_data.push_back(*cur_U_pos);
+					eb_zero_data.push_back(*cur_V_pos);
+					eb_zero_data.push_back(*cur_W_pos);
+				}
+				cur_log_U_pos ++, cur_log_V_pos ++, cur_log_W_pos ++;
+				cur_U_pos ++, cur_V_pos ++, cur_W_pos ++;
+			}
+		}
+	}
+	// printf("%d %d\n", eb_index, num_elements);
+	// writefile("eb_3d.dat", eb, num_elements);
+	// free(eb);
+	// if(outrange_pos) outrange_residue_pos ++;
+	free(log_U);
+	free(log_V);
+	free(log_W);
+	free(decompressed_U);
+	free(decompressed_V);
+	free(decompressed_W);
+	printf("offset eb_q, data_q, unpred: %ld %ld %ld\n", eb_quant_index_pos - eb_quant_index, data_quant_index_pos - data_quant_index, eb_zero_data.size());
+	unsigned char * compressed = (unsigned char *) malloc(3*num_elements*sizeof(T));
+	unsigned char * compressed_pos = compressed;
+	//开始写入
+	//先写bitmap
+	convertIntArray2ByteArray_fast_1b_to_result_sz(bitmap, num_elements, compressed_pos);
+	printf("bitmap size = %ld\n", num_bytes);
+	//再写入lossless数据的大小
+	write_variable_to_dst(compressed_pos, index_need_to_lossless.size());
+	//再写入lossless数据
+	for (auto it = index_need_to_lossless.begin(); it != index_need_to_lossless.end(); it++){
+		write_variable_to_dst(compressed_pos, U[*it]);
+	}
+	for (auto it = index_need_to_lossless.begin(); it != index_need_to_lossless.end(); it++){
+		write_variable_to_dst(compressed_pos, V[*it]);
+	}
+	for (auto it = index_need_to_lossless.begin(); it != index_need_to_lossless.end(); it++){
+		write_variable_to_dst(compressed_pos, W[*it]);
+	}
+	printf("index_need_to_lossless lossless data pos = %ld\n", compressed_pos - compressed);
+
+	write_variable_to_dst(compressed_pos, base);
+	write_variable_to_dst(compressed_pos, intv_radius);
+	write_array_to_dst(compressed_pos, sign_map_compressed, 3*sign_map_size);
+	free(sign_map_compressed);
+	size_t unpredictable_count = eb_zero_data.size();
+	write_variable_to_dst(compressed_pos, unpredictable_count);
+	write_array_to_dst(compressed_pos, (T *)&eb_zero_data[0], unpredictable_count);	
+	printf("eb_zero_data size = %ld\n", unpredictable_count*sizeof(T));
+	// store out range information
+	unsigned char * tmp = compressed_pos;
+	// size_t outrange_count = outrange_sign_pos - outrange_sign;
+	// write_variable_to_dst(compressed_pos, outrange_count);
+	// convertIntArray2ByteArray_fast_1b_to_result_sz(outrange_sign, outrange_count, compressed_pos);
+	// unsigned char * tmp2 = compressed_pos;
+	// Huffman_encode_tree_and_data(2*(exp_offset<T>() + 1), outrange_exp, outrange_count, compressed_pos);
+	// unsigned char * tmp3 = compressed_pos;
+	// write_array_to_dst(compressed_pos, outrange_residue, outrange_residue_pos - outrange_residue);
+	// printf("outrange count = %ld, outrange_exp_size = %ld, outrange_residue_size = %ld\n", outrange_count, tmp3 - tmp2, outrange_residue_pos - outrange_residue);
+	// printf("outrange size = %ld\n", compressed_pos - tmp);
+	// free(outrange_sign);
+	// free(outrange_exp);
+	// free(outrange_residue);
+	tmp = compressed_pos;
+	size_t eb_quant_num = eb_quant_index_pos - eb_quant_index;
+	write_variable_to_dst(compressed_pos, eb_quant_num);
+	Huffman_encode_tree_and_data(2*256, eb_quant_index, num_elements, compressed_pos);
+	printf("eb_quant_index size = %ld\n", compressed_pos - tmp);
+	free(eb_quant_index);
+	tmp = compressed_pos;
+	size_t data_quant_num = data_quant_index_pos - data_quant_index;
+	write_variable_to_dst(compressed_pos, data_quant_num);
+	Huffman_encode_tree_and_data(2*capacity, data_quant_index, data_quant_num, compressed_pos);
+	printf("data_quant_index size = %ld\n", compressed_pos - tmp);
+	free(data_quant_index);
+	compressed_size = compressed_pos - compressed;
+	return compressed;	
+}
 
 
-
+template
+unsigned char *
+sz_compress_cp_preserve_3d_record_vertex(const float * U, const float * V, const float * W, size_t r1, size_t r2, size_t r3, size_t& compressed_size, bool transpose, double max_pwr_eb,const std::set<size_t>& index_need_to_lossless);
 
 
 

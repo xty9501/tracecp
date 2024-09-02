@@ -1296,7 +1296,7 @@ fix_traj(const T * U, const T * V,size_t r1, size_t r2, double max_pwr_eb,traj_c
         dec_V[o] = V[o];
       }
       //更新ftk::ndarray<float> grad_dec
-      grad_dec.reset();
+      //grad_dec.reset();当前版本没有reset函数，直接覆盖就行
       grad_dec.reshape({2, static_cast<unsigned long>(r2), static_cast<unsigned long>(r1)});
       refill_gradient(0, r1, r2, dec_U, grad_dec);
       refill_gradient(1, r1, r2, dec_V, grad_dec);
@@ -1521,7 +1521,7 @@ fix_traj(const T * U, const T * V,size_t r1, size_t r2, double max_pwr_eb,traj_c
           dec_V[o.first] = o.second;
           all_vertex_for_all_diff_traj.erase(o.first);
         }
-        grad_dec.reset();
+        //grad_dec.reset();//当前版本没有reset函数，直接覆盖就行
         grad_dec.reshape({2, static_cast<unsigned long>(r2), static_cast<unsigned long>(r1)});
         refill_gradient(0, r1, r2, dec_U, grad_dec);
         refill_gradient(1, r1, r2, dec_V, grad_dec);
@@ -1579,8 +1579,8 @@ fix_traj(const T * U, const T * V,size_t r1, size_t r2, double max_pwr_eb,traj_c
   //   printf("Successfully write orginal index to file, total index: %ld\n",index_ori.size());
   // }
 
-  // grad_dec.reset();
-  // grad_ori.reset();
+  // grad_dec.reset();//当前版本没有reset函数，直接覆盖就行
+  // grad_ori.reset();//当前版本没有reset函数，直接覆盖就行
   //free(dec_U);
   //free(dec_V);
   auto end_total = std::chrono::high_resolution_clock::now();  //timer
@@ -1599,7 +1599,7 @@ fix_traj(const T * U, const T * V,size_t r1, size_t r2, double max_pwr_eb,traj_c
     dec_U[v] = U[v];
     dec_V[v] = V[v];
   }
-  grad_dec.reset();
+  //grad_dec.reset();//当前版本没有reset函数，直接覆盖就行
   grad_dec.reshape({2, static_cast<unsigned long>(r2), static_cast<unsigned long>(r1)});
   refill_gradient(0, r1, r2, dec_U, grad_dec);
   refill_gradient(1, r1, r2, dec_V, grad_dec);
@@ -2012,7 +2012,7 @@ fix_traj(const T * U, const T * V,size_t r1, size_t r2, double max_pwr_eb,traj_c
           dec_U[p] = U[p];
           dec_V[p] = V[p];
         }
-        grad_dec.reset();
+        //grad_dec.reset();//当前版本没有reset函数，直接覆盖就行
         grad_dec.reshape({2, static_cast<unsigned long>(r2), static_cast<unsigned long>(r1)});
         refill_gradient(0, r1, r2, dec_U, grad_dec);
         refill_gradient(1, r1, r2, dec_V, grad_dec);
@@ -2705,7 +2705,7 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
             grad_dec(1, x, y) = dec_V[o];
             local_all_vertex_for_all_diff_traj[thread_id].erase(o);
           }
-          // grad_dec.reset();
+          // grad_dec.reset();//当前版本没有reset函数，直接覆盖就行
           // grad_dec.reshape({2, static_cast<unsigned long>(r2), static_cast<unsigned long>(r1)});
           // refill_gradient(0, r1, r2, dec_U, grad_dec);
           // refill_gradient(1, r1, r2, dec_V, grad_dec);
@@ -2826,10 +2826,10 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
           if (get_cell_offset(ori_last_inside.data(), DW, DH) != get_cell_offset(dec_last_inside.data(), DW, DH)){
             wrong ++;
             trajID_need_fix_next.insert(i);
-            printf("Trajectory %ld is wrong!!!\n", i);
-            printf("first ori:(%f,%f), second ori(%f,%f): last ori:(%f,%f)\n",t1[0][0],t1[0][1],t1[1][0],t1[1][1],t1.back()[0],t1.back()[1]);
-            printf("first dec:(%f,%f), second dec(%f,%f): last dec:(%f,%f)\n",t2[0][0],t2[0][1],t2[1][0],t2[1][1],t2.back()[0],t2.back()[1]);
-            printf("ori length: %zu, dec length: %zu\n", t1.size(), t2.size());
+            // printf("Trajectory %ld is wrong!!!\n", i);
+            // printf("first ori:(%f,%f), second ori(%f,%f): last ori:(%f,%f)\n",t1[0][0],t1[0][1],t1[1][0],t1[1][1],t1.back()[0],t1.back()[1]);
+            // printf("first dec:(%f,%f), second dec(%f,%f): last dec:(%f,%f)\n",t2[0][0],t2[0][1],t2[1][0],t2[1][1],t2.back()[0],t2.back()[1]);
+            // printf("ori length: %zu, dec length: %zu\n", t1.size(), t2.size());
           }
 
         }
@@ -2842,10 +2842,10 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
           if (get_cell_offset(ori_last_inside.data(), DW, DH) != get_cell_offset(dec_last_inside.data(), DW, DH)){
             wrong ++;
             trajID_need_fix_next.insert(i);
-            printf("Trajectory %ld is wrong!!!\n", i);
-            printf("first ori:(%f,%f), second ori(%f,%f): last ori:(%f,%f)\n",t1[0][0],t1[0][1],t1[1][0],t1[1][1],t1.back()[0],t1.back()[1]);
-            printf("first dec:(%f,%f), second dec(%f,%f): last dec:(%f,%f)\n",t2[0][0],t2[0][1],t2[1][0],t2[1][1],t2.back()[0],t2.back()[1]);
-            printf("ori length: %zu, dec length: %zu\n", t1.size(), t2.size());
+            // printf("Trajectory %ld is wrong!!!\n", i);
+            // printf("first ori:(%f,%f), second ori(%f,%f): last ori:(%f,%f)\n",t1[0][0],t1[0][1],t1[1][0],t1[1][1],t1.back()[0],t1.back()[1]);
+            // printf("first dec:(%f,%f), second dec(%f,%f): last dec:(%f,%f)\n",t2[0][0],t2[0][1],t2[1][0],t2[1][1],t2.back()[0],t2.back()[1]);
+            // printf("ori length: %zu, dec length: %zu\n", t1.size(), t2.size());
           }
         }
         else if (cond2){ //original reach limit
@@ -2853,10 +2853,10 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
           if (get_cell_offset(t1.back().data(), DW, DH) != get_cell_offset(dec_last_inside.data(), DW, DH)){
             wrong ++;
             trajID_need_fix_next.insert(i);
-            printf("Trajectory %ld is wrong!!!\n", i);
-            printf("first ori:(%f,%f), second ori(%f,%f): last ori:(%f,%f)\n",t1[0][0],t1[0][1],t1[1][0],t1[1][1],t1.back()[0],t1.back()[1]);
-            printf("first dec:(%f,%f), second dec(%f,%f): last dec:(%f,%f)\n",t2[0][0],t2[0][1],t2[1][0],t2[1][1],t2.back()[0],t2.back()[1]);
-            printf("ori length: %zu, dec length: %zu\n", t1.size(), t2.size());
+            // printf("Trajectory %ld is wrong!!!\n", i);
+            // printf("first ori:(%f,%f), second ori(%f,%f): last ori:(%f,%f)\n",t1[0][0],t1[0][1],t1[1][0],t1[1][1],t1.back()[0],t1.back()[1]);
+            // printf("first dec:(%f,%f), second dec(%f,%f): last dec:(%f,%f)\n",t2[0][0],t2[0][1],t2[1][0],t2[1][1],t2.back()[0],t2.back()[1]);
+            // printf("ori length: %zu, dec length: %zu\n", t1.size(), t2.size());
           }
         }
         else if (!cond2 && !cond4){ //inside and not reach max, ie found cp
@@ -2865,10 +2865,10 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
           if (get_cell_offset(ori_last_inside.data(), DW, DH) != get_cell_offset(dec_last_inside.data(), DW, DH)){
             wrong ++;
             trajID_need_fix_next.insert(i);
-            printf("Trajectory %ld is wrong!!!\n", i);
-            printf("first ori:(%f,%f), second ori(%f,%f): last ori:(%f,%f)\n",t1[0][0],t1[0][1],t1[1][0],t1[1][1],t1.back()[0],t1.back()[1]);
-            printf("first dec:(%f,%f), second dec(%f,%f): last dec:(%f,%f)\n",t2[0][0],t2[0][1],t2[1][0],t2[1][1],t2.back()[0],t2.back()[1]);
-            printf("ori length: %zu, dec length: %zu\n", t1.size(), t2.size());
+            // printf("Trajectory %ld is wrong!!!\n", i);
+            // printf("first ori:(%f,%f), second ori(%f,%f): last ori:(%f,%f)\n",t1[0][0],t1[0][1],t1[1][0],t1[1][1],t1.back()[0],t1.back()[1]);
+            // printf("first dec:(%f,%f), second dec(%f,%f): last dec:(%f,%f)\n",t2[0][0],t2[0][1],t2[1][0],t2[1][1],t2.back()[0],t2.back()[1]);
+            // printf("ori length: %zu, dec length: %zu\n", t1.size(), t2.size());
           }
         }
         break;
@@ -2884,10 +2884,10 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
           if (!cond1){
             wrong ++;
             trajID_need_fix_next.insert(i);
-            printf("Trajectory %ld is wrong!!!\n", i);
-            printf("first ori:(%f,%f), second ori(%f,%f): last ori:(%f,%f)\n",t1[0][0],t1[0][1],t1[1][0],t1[1][1],t1.back()[0],t1.back()[1]);
-            printf("first dec:(%f,%f), second dec(%f,%f): last dec:(%f,%f)\n",t2[0][0],t2[0][1],t2[1][0],t2[1][1],t2.back()[0],t2.back()[1]);
-            printf("ori length: %zu, dec length: %zu\n", t1.size(), t2.size());
+            // printf("Trajectory %ld is wrong!!!\n", i);
+            // printf("first ori:(%f,%f), second ori(%f,%f): last ori:(%f,%f)\n",t1[0][0],t1[0][1],t1[1][0],t1[1][1],t1.back()[0],t1.back()[1]);
+            // printf("first dec:(%f,%f), second dec(%f,%f): last dec:(%f,%f)\n",t2[0][0],t2[0][1],t2[1][0],t2[1][1],t2.back()[0],t2.back()[1]);
+            // printf("ori length: %zu, dec length: %zu\n", t1.size(), t2.size());
           }
         }
         break;
@@ -2895,7 +2895,7 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
       }
 
     }
-    printf("wrong: %ld\n", wrong);
+    //printf("wrong: %ld\n", wrong);
     auto comp_end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> comp_elapsed = comp_end - comp_start;
     compare_time_vec.push_back(comp_elapsed.count());
@@ -2909,11 +2909,11 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
       trajID_need_fix_next_vec.push_back(trajID_need_fix_next.size());
       //清空trajID_need_fix，然后把trajID_need_fix_next赋值给trajID_need_fix
       trajID_need_fix.clear();
-      printf("before change trajID_need_fix size(should be 0): %ld\n", trajID_need_fix.size());
+      //printf("before change trajID_need_fix size(should be 0): %ld\n", trajID_need_fix.size());
       for(auto o:trajID_need_fix_next){
         trajID_need_fix.insert(o);
       }
-      printf("after change trajID_need_fix size(should be 1+ wrong): %ld\n", trajID_need_fix.size());
+      //printf("after change trajID_need_fix size(should be 1+ wrong): %ld\n", trajID_need_fix.size());
     }
     
 

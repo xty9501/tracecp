@@ -136,6 +136,81 @@ void interp3d(const double p[3], double *v, const ftk::ndarray<float> &grad) {
     }
 }
 
+void interp3d_new(const double p[3],double *v, const ftk::ndarray<float> &grad){
+    double x0 = std::floor(p[0]);
+    double y0 = std::floor(p[1]);
+    double z0 = std::floor(p[2]);
+    double x_delta = p[0] - x0;
+    double y_delta = p[1] - y0;
+    double z_delta = p[2] - z0;
+    Point pt = {p[0], p[1], p[2]};
+    Tetrahedron simplex;
+    if (x_delta <= y_delta && y_delta <= z_delta){
+        simplex = {
+            Point{x0, y0, z0},
+            Point{x0, y0, z0+1},
+            Point{x0, y0+1, z0+1},
+            Point{x0+1, y0+1, z0+1}};
+    }
+    else if (y_delta <=x_delta && x_delta <=z_delta){
+      simplex = {
+          Point{x0, y0, z0},
+          Point{x0, y0, z0+1},
+          Point{x0+1, y0, z0+1},
+          Point{x0+1, y0+1, z0+1}
+      };
+    }
+    else if (x_delta <=z_delta && z_delta <=y_delta){
+      simplex = {
+          Point{x0, y0, z0},
+          Point{x0, y0+1, z0},
+          Point{x0, y0+1, z0+1},
+          Point{x0+1, y0+1, z0+1}
+      };
+    }
+    else if (z_delta <=x_delta && x_delta <=y_delta){
+      simplex = {
+          Point{x0, y0, z0},
+          Point{x0, y0+1, z0},
+          Point{x0+1, y0+1, z0},
+          Point{x0+1, y0+1, z0+1}
+      };
+    }
+    else if (y_delta <=z_delta && z_delta <=x_delta){
+      simplex = {
+          Point{x0, y0, z0},
+          Point{x0+1, y0, z0},
+          Point{x0+1, y0, z0+1},
+          Point{x0+1, y0+1, z0+1}
+      };
+    }
+    else if (z_delta <=y_delta && y_delta <=x_delta){
+      simplex = {
+          Point{x0, y0, z0},
+          Point{x0+1, y0, z0},
+          Point{x0+1, y0+1, z0},
+          Point{x0+1, y0+1, z0+1}
+      };
+    }
+    else{
+      printf("x: %f, %f, %f\n", p[0], p[1], p[2]);
+      throw std::runtime_error("Could not get_four_offsets");
+    }
+    double V[4][3];
+    for (int i = 0; i < 4; ++i) {
+        for (int j = 0; j < 3; ++j) {
+            V[i][j] = grad(j, static_cast<int>(simplex[i][0]), static_cast<int>(simplex[i][1]), static_cast<int>(simplex[i][2]));
+        }
+    }
+    Eigen::Vector4d lambda;
+    barycent3d(simplex[0], simplex[1], simplex[2], simplex[3], pt, lambda);
+    for (int i = 0; i < 3; ++i) {
+        v[i] = lambda[0] * V[0][i] + lambda[1] * V[1][i] + lambda[2] * V[2][i] + lambda[3] * V[3][i];
+    }
+    
+}
+
+
 bool solve_linear3x3(const double A[3][3], const double b[3], double x[3]) {
     double det = A[0][0]*(A[1][1]*A[2][2] - A[1][2]*A[2][1]) -
                  A[0][1]*(A[1][0]*A[2][2] - A[1][2]*A[2][0]) +

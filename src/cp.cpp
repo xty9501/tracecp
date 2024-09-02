@@ -32,11 +32,11 @@ void refill_gradient(int id,const int DH,const int DW, const float* grad_tmp, ft
   }
 }
 
-void refill_gradient_3d(int id, const int DH, const int DW, const int DD, const float* grad_tmp, ftk::ndarray<float>& grad){
+void refill_gradient_3d(int id, const int DD, const int DH, const int DW, const float* grad_tmp, ftk::ndarray<float>& grad){
   const float * grad_tmp_pos = grad_tmp;
-  for (int i = 0; i < DH; i ++) {
-    for (int j = 0; j < DW; j ++) {
-      for (int k = 0; k < DD; k ++) {
+  for (int i = 0; i < DD; i ++) {
+    for (int j = 0; j < DH; j ++) {
+      for (int k = 0; k < DW; k ++) {
         grad(id, k, j, i) = *(grad_tmp_pos ++);
       }
     }

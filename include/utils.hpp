@@ -128,6 +128,9 @@ size_t get_cell_offset_3d(const T *x_, const int DW, const int DH, const int DD)
     int x0 = std::floor(x);
     int y0 = std::floor(y);
     int z0 = std::floor(z);
+    double x_delta = x - x0;
+    double y_delta = y - y0;
+    double z_delta = z - z0;
 
     Point V0(x0, y0, z0); //（0，0，0）
     Point V1(x0 + 1, y0, z0); //（1，0，0）
@@ -138,28 +141,41 @@ size_t get_cell_offset_3d(const T *x_, const int DW, const int DH, const int DD)
     Point V6(x0, y0 + 1, z0 + 1); //（0，1，1）
     Point V7(x0 + 1, y0 + 1, z0 + 1); //（1，1，1）
     std::vector<Tetrahedron> tetrahedrons = {
-        {V0,V3,V6,V7},
-        {V0,V2,V6,V7},
-        {V0,V3,V5,V7},
-        {V0,V1,V5,V7},
-        {V0,V2,V4,V7},
-        {V0,V1,V4,V7},
+      {V0,V3,V6,V7}, //x<=y<=z
+      {V0,V3,V5,V7}, //y<=x<=z
+      {V0,V2,V6,V7}, //x<=z<=y
+      {V0,V2,V4,V7}, //z<=x<=y
+      {V0,V1,V5,V7}, //y<=z<=x
+      {V0,V1,V4,V7}, //z<=y<=x
     };
-
-    Point point(x, y, z);
-    Eigen::Vector4d bary_coords;
-    int index = 0;
-    for (const auto& tetra : tetrahedrons) {
-        if (isPointInTetrahedron(point, tetra, bary_coords)) {
-            return index + (x0 + y0 * DW + z0 * DW * DH) * 6;
-        }
-        index++;
+    if (x_delta <= y_delta && y_delta <= z_delta)
+    {
+      return 0+ (x0 + y0 * DW + z0 * DW * DH)*6;
     }
-    printf("x: %f, %f, %f\n", x, y, z);
-    throw std::runtime_error("Could not get_cell_offset_3d");
+    else if (y_delta <= x_delta && x_delta <= z_delta)
+    {
+      return 1+ (x0 + y0 * DW + z0 * DW * DH)*6;
+    }
+    else if (x_delta <= z_delta && z_delta <= y_delta)
+    {
+      return 2+ (x0 + y0 * DW + z0 * DW * DH)*6;
+    }
+    else if (z_delta <= x_delta && x_delta <= y_delta)
+    {
+      return 3+ (x0 + y0 * DW + z0 * DW * DH)*6;
+    }
+    else if (y_delta <= z_delta && z_delta <= x_delta)
+    {
+      return 4+ (x0 + y0 * DW + z0 * DW * DH)*6;
+    }
+    else if (z_delta <= y_delta && y_delta <= x_delta)
+    {
+      return 5+ (x0 + y0 * DW + z0 * DW * DH)*6;
+    }
+    else{
+      throw std::runtime_error("Could not get_cell_offset_3d");
+    }
 }
-
-
 
 template size_t get_cell_offset_3d(const double *x, const int DW, const int DH, const int DD);
 
@@ -227,9 +243,9 @@ std::array<size_t,4> get_four_offsets(const T& x_, const int DW, const int DH,co
   double x = x_[0];
   double y = x_[1];
   double z = x_[2];
-  int x0 = std::floor(x);
-  int y0 = std::floor(y);
-  int z0 = std::floor(z);
+  size_t x0 = std::floor(x);
+  size_t y0 = std::floor(y);
+  size_t z0 = std::floor(z);
 
   Point V0(x0, y0, z0); //（0，0，0）
   Point V1(x0 + 1, y0, z0); //（1，0，0）
@@ -240,33 +256,37 @@ std::array<size_t,4> get_four_offsets(const T& x_, const int DW, const int DH,co
   Point V6(x0, y0 + 1, z0 + 1); //（0，1，1）
   Point V7(x0 + 1, y0 + 1, z0 + 1); //（1，1，1）
   std::vector<Tetrahedron> tetrahedrons = {
-      {V0,V3,V6,V7},
-      {V0,V2,V6,V7},
-      {V0,V3,V5,V7},
-      {V0,V1,V5,V7},
-      {V0,V2,V4,V7},
-      {V0,V1,V4,V7},
+      {V0,V3,V6,V7}, //x<=y<=z
+      {V0,V3,V5,V7}, //y<=x<=z
+      {V0,V2,V6,V7}, //x<=z<=y
+      {V0,V2,V4,V7}, //z<=x<=y
+      {V0,V1,V5,V7}, //y<=z<=x
+      {V0,V1,V4,V7}, //z<=y<=x
   };
-
-  Point point(x, y, z);
-  Eigen::Vector4d bary_coords;
-  int index = 0;
-  for (const auto& tetra : tetrahedrons) {
-      if (isPointInTetrahedron(point, tetra, bary_coords)) {
-          //get the four vertexs
-          std::array<size_t, 4> result;
-          Tetrahedron temp = tetrahedrons[index];
-          for (int i = 0; i < 4; i++){
-            result[i] = temp[i][0] + temp[i][1] * DW + temp[i][2] * DW * DH;
-          }
-          return result;
-      }
-      index++;
+  double x_delta = x - x0;
+  double y_delta = y - y0;
+  double z_delta = z - z0;
+  if (x_delta <= y_delta && y_delta <= z_delta){
+    return {x0+y0*DW+z0*DW*DH, x0+y0*DW+(z0+1)*DW*DH, x0+(y0+1)*DW+(z0+1)*DW*DH, (x0+1)+(y0+1)*DW+(z0+1)*DW*DH};
   }
-  printf("x: %f, %f, %f\n", x, y, z);
-  printf("x0: %d, y0: %d, z0: %d\n", x0, y0, z0);
-
-  throw std::runtime_error("Could not get_four_offsets");
+  else if (y_delta <= x_delta && x_delta <= z_delta){
+    return {x0+y0*DW+z0*DW*DH, x0+y0*DW+(z0+1)*DW*DH, (x0+1)+y0*DW+(z0+1)*DW*DH, (x0+1)+(y0+1)*DW+(z0+1)*DW*DH};
+  }
+  else if (x_delta <= z_delta && x_delta <= y_delta){
+    return {x0+y0*DW+z0*DW*DH, x0+(y0+1)*DW+z0*DW*DH, x0+(y0+1)*DW+(z0+1)*DW*DH, (x0+1)+(y0+1)*DW+(z0+1)*DW*DH};
+  }
+  else if (z_delta <= x_delta && x_delta <= y_delta){
+    return {x0+y0*DW+z0*DW*DH, x0+(y0+1)*DW+z0*DW*DH, (x0+1)+(y0+1)*DW+z0*DW*DH, (x0+1)+(y0+1)*DW+(z0+1)*DW*DH};
+  }
+  else if (y_delta <= z_delta && z_delta <= x_delta){
+    return {x0+y0*DW+z0*DW*DH, (x0+1)+y0*DW+z0*DW*DH, (x0+1)+y0*DW+(z0+1)*DW*DH, (x0+1)+(y0+1)*DW+(z0+1)*DW*DH};
+  }
+  else if (z_delta <= y_delta && y_delta <= x_delta){
+    return {x0+y0*DW+z0*DW*DH, (x0+1)+y0*DW+z0*DW*DH, (x0+1)+(y0+1)*DW+z0*DW*DH, (x0+1)+(y0+1)*DW+(z0+1)*DW*DH};
+  }
+  else{
+    throw std::runtime_error("could not determine the cell offset");
+  }
 }
 
 template std::array<size_t, 4> get_four_offsets(const std::array<double, 3>& x, const int DW, const int DH, const int DD);

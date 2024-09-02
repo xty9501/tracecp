@@ -20,3 +20,4 @@ void interp3d(const double p[3], double *v,const ftk::ndarray<float> &grad);
 std::pair<Tetrahedron, Eigen::Vector4d> findTetrahedronVertices(double x, double y, double z);
 std::pair<Tetrahedron, Eigen::Vector4d> findTetrahedronAndInterpolate(double x, double y, double z, const ftk::ndarray<float> &grad);
 bool isPointInTetrahedron(const Point& p, const Tetrahedron& tetra, Eigen::Vector4d& bary_coords);
+void interp3d_new(const double p[3],double *v, const ftk::ndarray<float> &grad);
