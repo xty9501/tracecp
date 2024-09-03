@@ -9,8 +9,8 @@ project(traceview)
 set(CMAKE_BUILD_TYPE "Debug")
 
 # 查找 FTK 包
-find_package(FTK REQUIRED HINTS "/home/mxi235/CP/ftk/install/lib64/cmake/FTK/")
-# find_package(FTK REQUIRED HINTS "/home/mxi235/test_cpsz/cpSZ/external/ftk/install/lib64/cmake/FTK")
+#find_package(FTK REQUIRED HINTS "/home/mxi235/CP/ftk/install/lib64/cmake/FTK/")
+find_package(FTK REQUIRED HINTS "/home/mxi235/test_cpsz/cpSZ/external/ftk/install/lib64/cmake/FTK")
 # 查找zstd包
 find_package(zstd REQUIRED)
 # 查找 Eigen3 包

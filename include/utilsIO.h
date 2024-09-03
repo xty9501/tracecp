@@ -35,3 +35,7 @@ void writeVectorOfVector(const std::vector<std::vector<Type>>& vec, const std::s
 
 template<typename Type>
 std::vector<std::vector<Type>> readVectorOfVector(const std::string& filename);
+
+void save_trajs_to_binary(const std::vector<std::vector<std::array<double, 2>>>& data, const std::string& filename);
+
+void save_trajs_to_binary_3d(const std::vector<std::vector<std::array<double, 3>>>& data, const std::string& filename);

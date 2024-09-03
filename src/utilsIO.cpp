@@ -179,3 +179,44 @@ std::vector<std::vector<Type>> readVectorOfVector(const std::string& filename) {
 
 template std::vector<std::vector<size_t>> readVectorOfVector<size_t>(const std::string& filename);
 
+void save_trajs_to_binary(const std::vector<std::vector<std::array<double, 2>>>& data, const std::string& filename) {
+    std::ofstream file(filename, std::ios::binary);
+
+    // 记录外部 vector 的长度
+    size_t outer_size = data.size();
+    file.write(reinterpret_cast<const char*>(&outer_size), sizeof(outer_size));
+
+    for (const auto& inner_vector : data) {
+        // 记录每个内部 vector 的长度
+        size_t inner_size = inner_vector.size();
+        file.write(reinterpret_cast<const char*>(&inner_size), sizeof(inner_size));
+
+        // 记录内部 vector 的数据
+        for (const auto& arr : inner_vector) {
+            file.write(reinterpret_cast<const char*>(arr.data()), sizeof(arr));
+        }
+    }
+
+    file.close();
+}
+
+void save_trajs_to_binary_3d(const std::vector<std::vector<std::array<double, 3>>>& data, const std::string& filename) {
+    std::ofstream file(filename, std::ios::binary);
+
+    // 记录外部 vector 的长度
+    size_t outer_size = data.size();
+    file.write(reinterpret_cast<const char*>(&outer_size), sizeof(outer_size));
+
+    for (const auto& inner_vector : data) {
+        // 记录每个内部 vector 的长度
+        size_t inner_size = inner_vector.size();
+        file.write(reinterpret_cast<const char*>(&inner_size), sizeof(inner_size));
+
+        // 记录内部 vector 的数据
+        for (const auto& arr : inner_vector) {
+            file.write(reinterpret_cast<const char*>(arr.data()), sizeof(arr));
+        }
+    }
+
+    file.close();
+}

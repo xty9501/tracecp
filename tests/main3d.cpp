@@ -576,7 +576,7 @@ std::vector<std::array<double, 3>> trajectory_3d(double *X_original, const std::
 
   }
 
-void final_check(float *U, float *V, float *W, int r1, int r2, int r3, double eb, int obj,traj_config t_config,int total_thread, std::set<size_t> vertex_need_to_lossless){
+void final_check(float *U, float *V, float *W, int r1, int r2, int r3, double eb, int obj,traj_config t_config,int total_thread, std::set<size_t> vertex_need_to_lossless, std::string file_out_dir=""){
   unsigned char * final_result = NULL;
   size_t final_result_size = 0;
   final_result = sz_compress_cp_preserve_3d_record_vertex(U, V, W, r1, r2, r3, final_result_size, false, eb, vertex_need_to_lossless);
@@ -628,6 +628,9 @@ void final_check(float *U, float *V, float *W, int r1, int r2, int r3, double eb
       if (p.second.type >= 3 && p.second.type <= 6) keys.push_back(p.first); //如果是saddle点，就加入到keys中
   }
 
+  std::vector<std::vector<std::array<double, 3>>> final_check_ori(keys.size() * 6);
+  std::vector<std::vector<std::array<double, 3>>> final_check_dec(keys.size() * 6);
+
   omp_set_num_threads(total_thread);
   #pragma omp parallel for
   for (size_t i = 0; i < keys.size(); ++i) {
@@ -672,6 +675,8 @@ void final_check(float *U, float *V, float *W, int r1, int r2, int r3, double eb
               //printf("current trajID: %d\n",trajID);
               std::vector<std::array<double, 3>> result_return_ori = trajectory_3d_parallel(pt, seed, t_config.h * directions[k][0], t_config.max_length, r3,r2,r1, critical_points_final, grad_ori,thread_lossless_index,thread_id);
               std::vector<std::array<double, 3>> result_return_dec = trajectory_3d_parallel(pt, seed, t_config.h * directions[k][0], t_config.max_length, r3,r2,r1, critical_points_final, grad_final,thread_lossless_index,thread_id);
+              final_check_ori[i*6+k] = result_return_ori;
+              final_check_dec[i*6+k] = result_return_dec;
               switch (obj)
               {
                 case 0:
@@ -726,9 +731,13 @@ void final_check(float *U, float *V, float *W, int r1, int r2, int r3, double eb
   free(final_dec_U);
   free(final_dec_V);
   free(final_dec_W);
-
+  if(file_out_dir != ""){
+    save_trajs_to_binary_3d(final_check_ori, file_out_dir + "ori_traj_3d.bin");
+    save_trajs_to_binary_3d(final_check_dec, file_out_dir + "dec_traj_3d.bin");
+  }
 }
 int main(int argc, char ** argv){
+    //bool write_flag = true;
     // 计时用
     std::vector<double> compare_time_vec;
     std::vector<double> index_time_vec;
@@ -750,6 +759,7 @@ int main(int argc, char ** argv){
     double max_eb = atof(argv[10]);
     int obj = atoi(argv[11]);
     int total_thread = atoi(argv[12]);
+    std::string file_out_dir = argv[13];
     // int obj = 0;
     omp_set_num_threads(total_thread);
     traj_config t_config = {h, eps, max_length};
@@ -1510,5 +1520,6 @@ int main(int argc, char ** argv){
     // now final check
     printf("verifying the final decompressed data...\n");
     printf("BEGIN Compression Ratio: %f\n", begin_cr);
-    final_check(U, V, W, r1, r2, r3, max_eb,obj,t_config,total_thread,final_vertex_need_to_lossless);   
+    bool write_flag = true;
+    final_check(U, V, W, r1, r2, r3, max_eb,obj,t_config,total_thread,final_vertex_need_to_lossless,file_out_dir);   
 }
