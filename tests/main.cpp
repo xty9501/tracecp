@@ -886,7 +886,7 @@ fix_traj(const T * U, const T * V,size_t r1, size_t r2, double max_pwr_eb,traj_c
                 directions[i][0] = 1;
                 directions[i][1] = t_config.eps * eigvec[i][0] + pt[0];
                 directions[i][2] = t_config.eps * eigvec[i][1] + pt[1];
-                directions[i+2][0] = -1;
+                directions[i+2][0] = 1;
                 directions[i+2][1] = -1 * t_config.eps * eigvec[i][0] + pt[0];
                 directions[i+2][2] = -1 * t_config.eps * eigvec[i][1] + pt[1];
               }
@@ -894,7 +894,7 @@ fix_traj(const T * U, const T * V,size_t r1, size_t r2, double max_pwr_eb,traj_c
                 directions[i][0] = -1;
                 directions[i][1] = t_config.eps * eigvec[i][0] + pt[0];
                 directions[i][2] = t_config.eps * eigvec[i][1] + pt[1];
-                directions[i+2][0] = 1;
+                directions[i+2][0] = -1;
                 directions[i+2][1] = -1 * t_config.eps * eigvec[i][0] + pt[0];
                 directions[i+2][2] = -1 * t_config.eps * eigvec[i][1] + pt[1];
               }
@@ -966,7 +966,7 @@ fix_traj(const T * U, const T * V,size_t r1, size_t r2, double max_pwr_eb,traj_c
                 directions[i][0] = 1;
                 directions[i][1] = t_config.eps * eigvec[i][0] + pt[0];
                 directions[i][2] = t_config.eps * eigvec[i][1] + pt[1];
-                directions[i+2][0] = -1;
+                directions[i+2][0] = 1;
                 directions[i+2][1] = -1 * t_config.eps * eigvec[i][0] + pt[0];
                 directions[i+2][2] = -1 * t_config.eps * eigvec[i][1] + pt[1];
               }
@@ -974,7 +974,7 @@ fix_traj(const T * U, const T * V,size_t r1, size_t r2, double max_pwr_eb,traj_c
                 directions[i][0] = -1;
                 directions[i][1] = t_config.eps * eigvec[i][0] + pt[0];
                 directions[i][2] = t_config.eps * eigvec[i][1] + pt[1];
-                directions[i+2][0] = 1;
+                directions[i+2][0] = -1;
                 directions[i+2][1] = -1 * t_config.eps * eigvec[i][0] + pt[0];
                 directions[i+2][2] = -1 * t_config.eps * eigvec[i][1] + pt[1];
               }
@@ -1724,7 +1724,7 @@ fix_traj(const T * U, const T * V,size_t r1, size_t r2, double max_pwr_eb,traj_c
             directions[i][0] = 1;
             directions[i][1] = t_config.eps * eigvec[i][0] + pt[0];
             directions[i][2] = t_config.eps * eigvec[i][1] + pt[1];
-            directions[i+2][0] = -1;
+            directions[i+2][0] = 1;
             directions[i+2][1] = -1 * t_config.eps * eigvec[i][0] + pt[0];
             directions[i+2][2] = -1 * t_config.eps * eigvec[i][1] + pt[1];
           }
@@ -1732,7 +1732,7 @@ fix_traj(const T * U, const T * V,size_t r1, size_t r2, double max_pwr_eb,traj_c
             directions[i][0] = -1;
             directions[i][1] = t_config.eps * eigvec[i][0] + pt[0];
             directions[i][2] = t_config.eps * eigvec[i][1] + pt[1];
-            directions[i+2][0] = 1;
+            directions[i+2][0] = -1;
             directions[i+2][1] = -1 * t_config.eps * eigvec[i][0] + pt[0];
             directions[i+2][2] = -1 * t_config.eps * eigvec[i][1] + pt[1];
           }
@@ -1792,7 +1792,7 @@ fix_traj(const T * U, const T * V,size_t r1, size_t r2, double max_pwr_eb,traj_c
             directions[i][0] = 1;
             directions[i][1] = t_config.eps * eigvec[i][0] + pt[0];
             directions[i][2] = t_config.eps * eigvec[i][1] + pt[1];
-            directions[i+2][0] = -1;
+            directions[i+2][0] = 1;
             directions[i+2][1] = -1 * t_config.eps * eigvec[i][0] + pt[0];
             directions[i+2][2] = -1 * t_config.eps * eigvec[i][1] + pt[1];
           }
@@ -1800,7 +1800,7 @@ fix_traj(const T * U, const T * V,size_t r1, size_t r2, double max_pwr_eb,traj_c
             directions[i][0] = -1;
             directions[i][1] = t_config.eps * eigvec[i][0] + pt[0];
             directions[i][2] = t_config.eps * eigvec[i][1] + pt[1];
-            directions[i+2][0] = 1;
+            directions[i+2][0] = -1;
             directions[i+2][1] = -1 * t_config.eps * eigvec[i][0] + pt[0];
             directions[i+2][2] = -1 * t_config.eps * eigvec[i][1] + pt[1];
           }
@@ -2036,7 +2036,7 @@ fix_traj(const T * U, const T * V,size_t r1, size_t r2, double max_pwr_eb,traj_c
                 directions[i][0] = 1;
                 directions[i][1] = t_config.eps * eigvec[i][0] + pt[0];
                 directions[i][2] = t_config.eps * eigvec[i][1] + pt[1];
-                directions[i+2][0] = -1;
+                directions[i+2][0] = 1;
                 directions[i+2][1] = -1 * t_config.eps * eigvec[i][0] + pt[0];
                 directions[i+2][2] = -1 * t_config.eps * eigvec[i][1] + pt[1];
               }
@@ -2044,7 +2044,7 @@ fix_traj(const T * U, const T * V,size_t r1, size_t r2, double max_pwr_eb,traj_c
                 directions[i][0] = -1;
                 directions[i][1] = t_config.eps * eigvec[i][0] + pt[0];
                 directions[i][2] = t_config.eps * eigvec[i][1] + pt[1];
-                directions[i+2][0] = 1;
+                directions[i+2][0] = -1;
                 directions[i+2][1] = -1 * t_config.eps * eigvec[i][0] + pt[0];
                 directions[i+2][2] = -1 * t_config.eps * eigvec[i][1] + pt[1];
               }
@@ -2295,7 +2295,7 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
               directions[i][0] = 1;
               directions[i][1] = t_config.eps * eigvec[i][0] + pt[0];
               directions[i][2] = t_config.eps * eigvec[i][1] + pt[1];
-              directions[i+2][0] = -1;
+              directions[i+2][0] = 1;
               directions[i+2][1] = -1 * t_config.eps * eigvec[i][0] + pt[0];
               directions[i+2][2] = -1 * t_config.eps * eigvec[i][1] + pt[1];
             }
@@ -2303,7 +2303,7 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
               directions[i][0] = -1;
               directions[i][1] = t_config.eps * eigvec[i][0] + pt[0];
               directions[i][2] = t_config.eps * eigvec[i][1] + pt[1];
-              directions[i+2][0] = 1;
+              directions[i+2][0] = -1;
               directions[i+2][1] = -1 * t_config.eps * eigvec[i][0] + pt[0];
               directions[i+2][2] = -1 * t_config.eps * eigvec[i][1] + pt[1];
             }
@@ -2384,7 +2384,7 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
               directions[i][0] = 1;
               directions[i][1] = t_config.eps * eigvec[i][0] + pt[0];
               directions[i][2] = t_config.eps * eigvec[i][1] + pt[1];
-              directions[i+2][0] = -1;
+              directions[i+2][0] = 1;
               directions[i+2][1] = -1 * t_config.eps * eigvec[i][0] + pt[0];
               directions[i+2][2] = -1 * t_config.eps * eigvec[i][1] + pt[1];
             }
@@ -2392,7 +2392,7 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
               directions[i][0] = -1;
               directions[i][1] = t_config.eps * eigvec[i][0] + pt[0];
               directions[i][2] = t_config.eps * eigvec[i][1] + pt[1];
-              directions[i+2][0] = 1;
+              directions[i+2][0] = -1;
               directions[i+2][1] = -1 * t_config.eps * eigvec[i][0] + pt[0];
               directions[i+2][2] = -1 * t_config.eps * eigvec[i][1] + pt[1];
             }
@@ -2748,7 +2748,7 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
             directions[i][0] = 1;
             directions[i][1] = t_config.eps * eigvec[i][0] + pt[0];
             directions[i][2] = t_config.eps * eigvec[i][1] + pt[1];
-            directions[i+2][0] = -1;
+            directions[i+2][0] = 1;
             directions[i+2][1] = -1 * t_config.eps * eigvec[i][0] + pt[0];
             directions[i+2][2] = -1 * t_config.eps * eigvec[i][1] + pt[1];
           }
@@ -2756,7 +2756,7 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
             directions[i][0] = -1;
             directions[i][1] = t_config.eps * eigvec[i][0] + pt[0];
             directions[i][2] = t_config.eps * eigvec[i][1] + pt[1];
-            directions[i+2][0] = 1;
+            directions[i+2][0] = -1;
             directions[i+2][1] = -1 * t_config.eps * eigvec[i][0] + pt[0];
             directions[i+2][2] = -1 * t_config.eps * eigvec[i][1] + pt[1];
           }
@@ -2984,7 +2984,7 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
             directions[i][0] = 1;
             directions[i][1] = t_config.eps * eigvec[i][0] + pt[0];
             directions[i][2] = t_config.eps * eigvec[i][1] + pt[1];
-            directions[i+2][0] = -1;
+            directions[i+2][0] = 1;
             directions[i+2][1] = -1 * t_config.eps * eigvec[i][0] + pt[0];
             directions[i+2][2] = -1 * t_config.eps * eigvec[i][1] + pt[1];
           }
@@ -2992,7 +2992,7 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
             directions[i][0] = -1;
             directions[i][1] = t_config.eps * eigvec[i][0] + pt[0];
             directions[i][2] = t_config.eps * eigvec[i][1] + pt[1];
-            directions[i+2][0] = 1;
+            directions[i+2][0] = -1;
             directions[i+2][1] = -1 * t_config.eps * eigvec[i][0] + pt[0];
             directions[i+2][2] = -1 * t_config.eps * eigvec[i][1] + pt[1];
           }

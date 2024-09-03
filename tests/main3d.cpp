@@ -652,7 +652,7 @@ void final_check(float *U, float *V, float *W, int r1, int r2, int r3, double eb
                   directions[i][1] = t_config.eps * eigvec[i][0] + pt[0];
                   directions[i][2] = t_config.eps * eigvec[i][1] + pt[1];
                   directions[i][3] = t_config.eps * eigvec[i][2] + pt[2];
-                  directions[i+3][0] = -1;
+                  directions[i+3][0] = 1;
                   directions[i+3][1] = -1 * t_config.eps * eigvec[i][0] + pt[0];
                   directions[i+3][2] = -1 * t_config.eps * eigvec[i][1] + pt[1];
                   directions[i+3][3] = -1 * t_config.eps* eigvec[i][2] + pt[2];
@@ -662,7 +662,7 @@ void final_check(float *U, float *V, float *W, int r1, int r2, int r3, double eb
                   directions[i][1] = t_config.eps * eigvec[i][0] + pt[0];
                   directions[i][2] = t_config.eps * eigvec[i][1] + pt[1];
                   directions[i][3] = t_config.eps * eigvec[i][2] + pt[2];
-                  directions[i+3][0] = 1;
+                  directions[i+3][0] = -1;
                   directions[i+3][1] = -1 * t_config.eps * eigvec[i][0] + pt[0];
                   directions[i+3][2] = -1 * t_config.eps * eigvec[i][1] + pt[1];
                   directions[i+3][3] = -1 * t_config.eps * eigvec[i][2] + pt[2];
@@ -880,7 +880,7 @@ int main(int argc, char ** argv){
                     directions[i][1] = eps * eigvec[i][0] + pt[0];
                     directions[i][2] = eps * eigvec[i][1] + pt[1];
                     directions[i][3] = eps * eigvec[i][2] + pt[2];
-                    directions[i+3][0] = -1;
+                    directions[i+3][0] = 1;
                     directions[i+3][1] = -1 * eps * eigvec[i][0] + pt[0];
                     directions[i+3][2] = -1 * eps * eigvec[i][1] + pt[1];
                     directions[i+3][3] = -1 * eps* eigvec[i][2] + pt[2];
@@ -890,7 +890,7 @@ int main(int argc, char ** argv){
                     directions[i][1] = eps * eigvec[i][0] + pt[0];
                     directions[i][2] = eps * eigvec[i][1] + pt[1];
                     directions[i][3] = eps * eigvec[i][2] + pt[2];
-                    directions[i+3][0] = 1;
+                    directions[i+3][0] = -1;
                     directions[i+3][1] = -1 * eps * eigvec[i][0] + pt[0];
                     directions[i+3][2] = -1 * eps * eigvec[i][1] + pt[1];
                     directions[i+3][3] = -1 * eps * eigvec[i][2] + pt[2];
@@ -1003,7 +1003,7 @@ int main(int argc, char ** argv){
                     directions[i][1] = eps * eigvec[i][0] + pt[0];
                     directions[i][2] = eps * eigvec[i][1] + pt[1];
                     directions[i][3] = eps * eigvec[i][2] + pt[2];
-                    directions[i+3][0] = -1;
+                    directions[i+3][0] = 1;
                     directions[i+3][1] = -1 * eps * eigvec[i][0] + pt[0];
                     directions[i+3][2] = -1 * eps * eigvec[i][1] + pt[1];
                     directions[i+3][3] = -1 * eps* eigvec[i][2] + pt[2];
@@ -1013,7 +1013,7 @@ int main(int argc, char ** argv){
                     directions[i][1] = eps * eigvec[i][0] + pt[0];
                     directions[i][2] = eps * eigvec[i][1] + pt[1];
                     directions[i][3] = eps * eigvec[i][2] + pt[2];
-                    directions[i+3][0] = 1;
+                    directions[i+3][0] = -1;
                     directions[i+3][1] = -1 * eps * eigvec[i][0] + pt[0];
                     directions[i+3][2] = -1 * eps * eigvec[i][1] + pt[1];
                     directions[i+3][3] = -1 * eps * eigvec[i][2] + pt[2];
@@ -1358,7 +1358,7 @@ int main(int argc, char ** argv){
                       directions[i][1] = eps * eigvec[i][0] + pt[0];
                       directions[i][2] = eps * eigvec[i][1] + pt[1];
                       directions[i][3] = eps * eigvec[i][2] + pt[2];
-                      directions[i+3][0] = -1;
+                      directions[i+3][0] = 1;
                       directions[i+3][1] = -1 * eps * eigvec[i][0] + pt[0];
                       directions[i+3][2] = -1 * eps * eigvec[i][1] + pt[1];
                       directions[i+3][3] = -1 * eps* eigvec[i][2] + pt[2];
@@ -1368,7 +1368,7 @@ int main(int argc, char ** argv){
                       directions[i][1] = eps * eigvec[i][0] + pt[0];
                       directions[i][2] = eps * eigvec[i][1] + pt[1];
                       directions[i][3] = eps * eigvec[i][2] + pt[2];
-                      directions[i+3][0] = 1;
+                      directions[i+3][0] = -1;
                       directions[i+3][1] = -1 * eps * eigvec[i][0] + pt[0];
                       directions[i+3][2] = -1 * eps * eigvec[i][1] + pt[1];
                       directions[i+3][3] = -1 * eps * eigvec[i][2] + pt[2];
