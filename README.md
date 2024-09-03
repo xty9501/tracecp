@@ -18,3 +18,4 @@ eg:
 
 ../test3d ~/data/nek5000/U.dat ~/data/nek5000/V.dat ~/data/nek5000/W.dat 512 512 512 0.05 0.01 2000 0.01 0 64 ~/data/saved_trajs/
 
+if <traj_output_dir> is not specified， then the trajs file will not be wriiten
