@@ -98,9 +98,9 @@ void refill_gradient_3d(int id, const int DH, const int DW, const int DD, const 
 
 template<typename T>
 static void 
-check_simplex_seq_saddle(const T v[3][2], const double X[3][2], const int indices[3], int i, int j, int simplex_id, std::unordered_map<int, critical_point_t>& critical_points);
+check_simplex_seq_saddle(const T v[3][2], const double X[3][2], const int indices[3], int i, int j, int simplex_id, std::unordered_map<size_t, critical_point_t>& critical_points);
 
 template<typename T>
-std::unordered_map<int, critical_point_t>
+std::unordered_map<size_t, critical_point_t>
 compute_critical_points(const T * U, const T * V, int r1, int r2);
 

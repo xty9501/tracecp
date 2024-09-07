@@ -164,59 +164,59 @@ std::array<Type, 2> newRK4(const Type * x, const Type * v, const ftk::ndarray<fl
 }
 
 //deprecated
-template<typename Type>
-std::array<Type, 2> newRK4(const Type * x, const Type * v, const ftk::ndarray<float> &data,  Type h, const int DH, const int DW,std::set<size_t>& lossless_index,std::unordered_map<size_t, std::set<int>>& cellID_trajIDs_map,size_t trajID) {
-  // x and y are positions, and h is the step size
-  double rk1[2] = {0};
-  const double p1[2] = {x[0], x[1]};
+// template<typename Type>
+// std::array<Type, 2> newRK4(const Type * x, const Type * v, const ftk::ndarray<float> &data,  Type h, const int DH, const int DW,std::set<size_t>& lossless_index,std::unordered_map<size_t, std::set<int>>& cellID_trajIDs_map,size_t trajID) {
+//   // x and y are positions, and h is the step size
+//   double rk1[2] = {0};
+//   const double p1[2] = {x[0], x[1]};
 
-  if(!inside(p1, DH, DW)){
-    return std::array<Type, 2>{-1, -1};
-  }
-  updateOffsetsAndMap(p1,DW,DH,lossless_index,cellID_trajIDs_map,trajID);
-  interp2d(p1, rk1,data);
+//   if(!inside(p1, DH, DW)){
+//     return std::array<Type, 2>{-1, -1};
+//   }
+//   updateOffsetsAndMap(p1,DW,DH,lossless_index,cellID_trajIDs_map,trajID);
+//   interp2d(p1, rk1,data);
 
 
   
-  double rk2[2] = {0};
-  const double p2[2] = {x[0] + 0.5 * h * rk1[0], x[1] + 0.5 * h * rk1[1]};
-  if (!inside(p2, DH, DW)){
-    //return std::array<Type, 2>{p1[0], p1[1]};
-    return std::array<Type, 2>{-1, -1};
-  }
-  updateOffsetsAndMap(p2,DW,DH,lossless_index,cellID_trajIDs_map,trajID);
-  interp2d(p2, rk2,data);
+//   double rk2[2] = {0};
+//   const double p2[2] = {x[0] + 0.5 * h * rk1[0], x[1] + 0.5 * h * rk1[1]};
+//   if (!inside(p2, DH, DW)){
+//     //return std::array<Type, 2>{p1[0], p1[1]};
+//     return std::array<Type, 2>{-1, -1};
+//   }
+//   updateOffsetsAndMap(p2,DW,DH,lossless_index,cellID_trajIDs_map,trajID);
+//   interp2d(p2, rk2,data);
   
   
-  double rk3[2] = {0};
-  const double p3[2] = {x[0] + 0.5 * h * rk2[0], x[1] + 0.5 * h * rk2[1]};
-  if (!inside(p3, DH, DW)){
-    //return std::array<Type, 2>{p2[0], p2[1]};
-    return std::array<Type, 2>{-1, -1};
-  }
-  updateOffsetsAndMap(p3,DW,DH,lossless_index,cellID_trajIDs_map,trajID);
-  interp2d(p3, rk3,data);
+//   double rk3[2] = {0};
+//   const double p3[2] = {x[0] + 0.5 * h * rk2[0], x[1] + 0.5 * h * rk2[1]};
+//   if (!inside(p3, DH, DW)){
+//     //return std::array<Type, 2>{p2[0], p2[1]};
+//     return std::array<Type, 2>{-1, -1};
+//   }
+//   updateOffsetsAndMap(p3,DW,DH,lossless_index,cellID_trajIDs_map,trajID);
+//   interp2d(p3, rk3,data);
 
 
-  double rk4[2] = {0};
-  const double p4[2] = {x[0] + h * rk3[0], x[1] + h * rk3[1]};
-  if (!inside(p4, DH, DW)){
-    //return std::array<Type, 2>{p3[0], p3[1]};
-    return std::array<Type, 2>{-1, -1};
-  }
-  interp2d(p4, rk4,data);
-  updateOffsetsAndMap(p4,DW,DH,lossless_index,cellID_trajIDs_map,trajID);
+//   double rk4[2] = {0};
+//   const double p4[2] = {x[0] + h * rk3[0], x[1] + h * rk3[1]};
+//   if (!inside(p4, DH, DW)){
+//     //return std::array<Type, 2>{p3[0], p3[1]};
+//     return std::array<Type, 2>{-1, -1};
+//   }
+//   interp2d(p4, rk4,data);
+//   updateOffsetsAndMap(p4,DW,DH,lossless_index,cellID_trajIDs_map,trajID);
   
-  Type next_x = x[0] + h * (rk1[0] + 2 * rk2[0] + 2 * rk3[0] + rk4[0]) / 6.0;
-  Type next_y = x[1] + h * (rk1[1] + 2 * rk2[1] + 2 * rk3[1] + rk4[1]) / 6.0;
-  if (!inside(std::array<Type, 2>{next_x, next_y}, DH, DW)){
-    //return std::array<Type, 2>{p4[0], p4[1]};
-    return std::array<Type, 2>{-1, -1};
-  }
-  std::array<Type, 2> result = {next_x, next_y};
-  updateOffsetsAndMap(result.data(),DW,DH,lossless_index,cellID_trajIDs_map,trajID);
-  return result;
-}
+//   Type next_x = x[0] + h * (rk1[0] + 2 * rk2[0] + 2 * rk3[0] + rk4[0]) / 6.0;
+//   Type next_y = x[1] + h * (rk1[1] + 2 * rk2[1] + 2 * rk3[1] + rk4[1]) / 6.0;
+//   if (!inside(std::array<Type, 2>{next_x, next_y}, DH, DW)){
+//     //return std::array<Type, 2>{p4[0], p4[1]};
+//     return std::array<Type, 2>{-1, -1};
+//   }
+//   std::array<Type, 2> result = {next_x, next_y};
+//   updateOffsetsAndMap(result.data(),DW,DH,lossless_index,cellID_trajIDs_map,trajID);
+//   return result;
+// }
 
 
 template<typename Type>
@@ -269,83 +269,6 @@ std::array<Type, 2> newRK4_parallel(const Type* x, const Type* v, const ftk::nda
     return result;
 }
 
-template<typename Type>
-std::set<size_t> vertex_for_each_RK4(const Type *x, const Type *v, const ftk::ndarray<float> &data, double h, const int DH, const int DW) {
-  std::set<size_t> result_set;
-  double rk1[2] = {0};
-  const double p1[] = {x[0], x[1]};
-
-  auto coords = get_three_offsets(x, DW, DH);
-  for (auto offset:coords){
-    result_set.insert(offset);
-  }
-
-  if(!inside(p1, DH, DW)){
-    //return std::array<Type, 2>{x[0], x[1]};
-    return result_set;
-  }
-  interp2d(p1, rk1,data);
-  coords = get_three_offsets(p1, DW, DH);
-  for (auto offset:coords){
-    result_set.insert(offset);
-  }
-  
-  double rk2[2] = {0};
-  const double p2[] = {x[0] + 0.5 * h * rk1[0], x[1] + 0.5 * h * rk1[1]};
-  if (!inside(p2, DH, DW)){
-    //return std::array<Type, 2>{p1[0], p1[1]};
-    return result_set;
-  }
-  interp2d(p2, rk2,data);
-  coords = get_three_offsets(p2, DW, DH);
-  for (auto offset:coords){
-    result_set.insert(offset);
-  }
-  
-  double rk3[2] = {0};
-  const double p3[] = {x[0] + 0.5 * h * rk2[0], x[1] + 0.5 * h * rk2[1]};
-  if (!inside(p3, DH, DW)){
-    //return std::array<Type, 2>{p2[0], p2[1]};
-    return result_set;
-  }
-  interp2d(p3, rk3,data);
-  coords = get_three_offsets(p3, DW, DH);
-  for (auto offset:coords){
-    result_set.insert(offset);
-  }
-  
-  double rk4[2] = {0};
-  const double p4[] = {x[0] + h * rk3[0], x[1] + h * rk3[1]};
-  if (!inside(p4, DH, DW)){
-    //return std::array<Type, 2>{p3[0], p3[1]};
-    return result_set;
-  }
-  interp2d(p4, rk4,data);
-  coords = get_three_offsets(p4, DW, DH);
-  for (auto offset:coords){
-    result_set.insert(offset);
-  }
-  
-  Type next_x = x[0] + h * (rk1[0] + 2 * rk2[0] + 2 * rk3[0] + rk4[0]) / 6;
-  Type next_y = x[1] + h * (rk1[1] + 2 * rk2[1] + 2 * rk3[1] + rk4[1]) / 6;
-  // printf("shift: (%f, %f)\n", next_x - x[0], next_y - x[1]);
-  // printf("coefficients: (%f,%f)\n",(rk1[0] + 2 * rk2[0] + 2 * rk3[0] + rk4[0]) / 6, (rk1[1] + 2 * rk2[1] + 2 * rk3[1] + rk4[1]) / 6);
-  // printf("current h sign: %d\n", printsign(h));
-  // printf("sign of coefficients x (%d,%d,%d,%d)\n", printsign(rk1[0]), printsign(rk2[0]), printsign(rk3[0]), printsign(rk4[0]));
-  // printf("sign of coefficients y (%d,%d,%d,%d)\n", printsign(rk1[1]), printsign(rk2[1]), printsign(rk3[1]), printsign(rk4[1]));
-  if (!inside(std::array<Type, 2>{next_x, next_y}, DH, DW)){
-    //return std::array<Type, 2>{p4[0], p4[1]};
-    return result_set;
-  }
-  std::array<Type, 2> result = {next_x, next_y};
-  coords = get_three_offsets(result, DW, DH);
-  for (auto offset:coords){
-    result_set.insert(offset);
-  }
-  return result_set;
-}
-
-template std::set<unsigned long> vertex_for_each_RK4<double>(double const*, double const*, ftk::ndarray<float> const&, double, int, int);
 
 
 template<typename Type>
@@ -459,7 +382,7 @@ std::array<Type, 2> rkf45(const Type * x, const Type * v, const ftk::ndarray<flo
 
 }
 
-std::vector<std::array<double, 2>> trajectory(double *X_original,const std::array<double, 2>& initial_x, const double time_step, const int DH,const int DW, const std::unordered_map<int, critical_point_t>& critical_points, ftk::ndarray<float>& data  ,std::vector<int>& index, std::vector<double>& config, std::vector<record_t>& record,std::set<size_t>& lossless_index){
+std::vector<std::array<double, 2>> trajectory(double *X_original,const std::array<double, 2>& initial_x, const double time_step, const int DH,const int DW, const std::unordered_map<size_t, critical_point_t>& critical_points, ftk::ndarray<float>& data  ,std::vector<int>& index, std::vector<double>& config, std::vector<record_t>& record,std::set<size_t>& lossless_index){
   std::vector<std::array<double, 2>> result;
   int flag = 0; // 1 means found, -1 means out of bound， 0 means reach max length
   int length = 0;
@@ -570,7 +493,7 @@ std::vector<std::array<double, 2>> trajectory(double *X_original,const std::arra
 }
 
 //?
-std::vector<std::array<double, 2>> trajectory(double *X_original,const std::array<double, 2>& initial_x, const double time_step, const int max_length, const int DH,const int DW, const std::unordered_map<int, critical_point_t>& critical_points, ftk::ndarray<float>& data  ,std::vector<int>& index){
+std::vector<std::array<double, 2>> trajectory(double *X_original,const std::array<double, 2>& initial_x, const double time_step, const int max_length, const int DH,const int DW, const std::unordered_map<size_t, critical_point_t>& critical_points, ftk::ndarray<float>& data  ,std::vector<int>& index){
   std::vector<std::array<double, 2>> result;
   int flag = 0; // 1 means found, -1 means out of bound， 0 means reach max length
   int length = 0;
@@ -662,148 +585,7 @@ std::vector<std::array<double, 2>> trajectory(double *X_original,const std::arra
 }
 
 
-std::vector<std::array<double, 2>> trajectory(double *X_original,const std::array<double, 2>& initial_x, const double time_step, const int max_length, const int DH,const int DW, const std::unordered_map<int, critical_point_t>& critical_points, ftk::ndarray<float>& data  ,std::vector<int>& index,std::set<size_t>& lossless_index,std::unordered_map<size_t, std::set<int>>& cellID_trajIDs_map, size_t trajID){
-  std::vector<std::array<double, 2>> result;
-  int flag = 0; // 1 means found, -1 means out of bound， 0 means reach max length
-  int length = 0;
-  result.push_back({X_original[0], X_original[1]}); //add original true position
-  length ++;
-  int orginal_offset = get_cell_offset(X_original, DW, DH);
-  #pragma omp critical
-  {
-    cellID_trajIDs_map[orginal_offset].insert(trajID); //add original cp to map 
-  }
-
-  std::array<double, 2> current_x = initial_x;
-
-  //add original and initial_x position's offset
-  auto ori_offset = get_three_offsets(X_original, DW, DH);
-  #pragma omp critical
-  {
-    for (auto offset:ori_offset){
-      lossless_index.insert(offset);
-    }  
-  }
-
-
-  if(!inside(current_x, DH, DW)){
-    //count_out_bound ++;
-    flag = -1;
-    result.push_back({-1, -1});
-    length ++;
-    #pragma omp critical
-    {
-      index.push_back(length);
-    }
-    
-    return result;
-  }
-  else{
-    result.push_back(current_x); //add initial position(seed)
-    length ++;
-    #pragma omp critical
-    {
-      cellID_trajIDs_map[get_cell_offset(current_x.data(), DW, DH)].insert(trajID); //add seed to map
-      auto ini_offset = get_three_offsets(current_x, DW, DH);
-      for (auto offset:ini_offset){
-        lossless_index.insert(offset);
-      }
-
-    }
-
-  }
-
-  while (flag == 0){
-    if(!inside(current_x, DH, DW)){
-      //count_out_bound ++;
-      flag = -1;
-      result.push_back({-1, -1});
-      length ++;
-      break;
-    }
-    if (length == max_length) {
-      //printf("reach max length!\n");
-      //count_limit ++;
-      flag = 1;
-      break;
-    }
-
-    double current_v[2] = {0};
-
-    interp2d(current_x.data(), current_v,data); 
-
-    //int current_offset = get_cell_offset(current_x.data(), DW, DH);    
-    
-    std::array<double, 2> RK4result = newRK4(current_x.data(), current_v, data, time_step, DH, DW,lossless_index,cellID_trajIDs_map,trajID);
-
-    if (RK4result[0] == -1 && RK4result[1] == -1){
-      //count_out_bound ++;
-      flag = -1;
-      result.push_back({-1, -1});
-      length ++;
-      break;
-    }
-
-    size_t current_offset = get_cell_offset(RK4result.data(), DW, DH);
-    
-    if (current_offset != orginal_offset){
-      //moved to another cell
-      auto it = critical_points.find(current_offset);
-      if (it != critical_points.end()){
-        auto cp = it->second;
-        double error = 1e-3;
-        if (cp.type != SADDLE && fabs(RK4result[0] - cp.x[0]) < error && fabs(RK4result[1] - cp.x[1]) < error){
-          flag = 1; //found cp
-          int cp_offset = get_cell_offset(cp.x, DW, DH);
-          // first add rk4 position
-          result.push_back({RK4result[0], RK4result[1]});
-          length++;
-          #pragma omp critical
-          {
-            cellID_trajIDs_map[current_offset].insert(trajID); //add element to map
-          }
-          
-          // then add cp position
-          std::array<double, 2> true_cp = {cp.x[0], cp.x[1]};
-          result.push_back(true_cp);
-          length++;
-          #pragma omp critical
-          {
-            cellID_trajIDs_map[get_cell_offset(cp.x, DW, DH)].insert(trajID); //add element to map
-          
-            auto final_offset_rk = get_three_offsets(RK4result, DW, DH);
-            for (auto offset:final_offset_rk){
-              lossless_index.insert(offset);
-            }
-            auto final_offset_cp = get_three_offsets(cp.x, DW, DH);
-            for (auto offset:final_offset_cp){
-              lossless_index.insert(offset);
-            }  
-            index.push_back(length);
-          }
-          return result;
-        }
-      }
-    }
-    current_x = RK4result;
-    // printf("current_x: (%f, %f)\n", current_x[0], current_x[1]);
-    result.push_back(current_x);
-    length++;
-    #pragma omp critical
-    {
-      cellID_trajIDs_map[current_offset].insert(trajID); //add element to map
-    }
-    
-  }
-  #pragma omp critical
-  {
-    index.push_back(length);
-  }
-  
-  return result;
-}
-
-std::vector<std::array<double, 2>> trajectory_parallel(double *X_original,const std::array<double, 2>& initial_x, const double time_step, const int max_length, const int DH,const int DW, const std::unordered_map<int, critical_point_t>& critical_points, ftk::ndarray<float>& data ,std::vector<std::set<size_t>>& thread_lossless_index,int thread_id){
+std::vector<std::array<double, 2>> trajectory_parallel(double *X_original,const std::array<double, 2>& initial_x, const double time_step, const int max_length, const int DH,const int DW, const std::unordered_map<size_t, critical_point_t>& critical_points, ftk::ndarray<float>& data ,std::vector<std::set<size_t>>& thread_lossless_index,int thread_id){
   std::vector<std::array<double, 2>> result;
   int flag = 0; // 1 means found, -1 means out of bound， 0 means reach max length
   int length = 0;
@@ -930,7 +712,7 @@ std::vector<std::array<double, 2>> trajectory_parallel(double *X_original,const 
 }
 
 
-std::vector<std::array<double, 2>> trajectory(double *X_original,const std::array<double, 2>& initial_x, const double time_step, const int max_length, const int DH,const int DW, const std::unordered_map<int, critical_point_t>& critical_points, ftk::ndarray<float>& data  ,std::vector<int>& index,std::set<size_t>& lossless_index){
+std::vector<std::array<double, 2>> trajectory(double *X_original,const std::array<double, 2>& initial_x, const double time_step, const int max_length, const int DH,const int DW, const std::unordered_map<size_t, critical_point_t>& critical_points, ftk::ndarray<float>& data  ,std::vector<int>& index,std::set<size_t>& lossless_index){
   std::vector<std::array<double, 2>> result;
   int flag = 0; // 1 means found, -1 means out of bound， 0 means reach max length
   int length = 0;

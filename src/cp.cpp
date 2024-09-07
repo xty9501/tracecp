@@ -45,7 +45,7 @@ void refill_gradient_3d(int id, const int DD, const int DH, const int DW, const 
 
 template<typename T>
 static void 
-check_simplex_seq_saddle(const T v[3][2], const double X[3][2], const int indices[3], int i, int j, int simplex_id, std::unordered_map<int, critical_point_t>& critical_points){
+check_simplex_seq_saddle(const T v[3][2], const double X[3][2], const int indices[3], int i, int j, int simplex_id, std::unordered_map<size_t, critical_point_t>& critical_points){
   int sos = 0;
   double mu[3]; // check intersection
   double cond;
@@ -137,7 +137,7 @@ check_simplex_seq_saddle(const T v[3][2], const double X[3][2], const int indice
 
 
 template<typename T>
-std::unordered_map<int, critical_point_t>
+std::unordered_map<size_t, critical_point_t>
 compute_critical_points(const T * U, const T * V, int r1, int r2){
   size_t num_elements = r1*r2;
 
@@ -153,7 +153,7 @@ compute_critical_points(const T * U, const T * V, int r1, int r2){
 		{1, 1}
 	};
   double v[3][2] = {0};
-  std::unordered_map<int, critical_point_t> critical_points;
+  std::unordered_map<size_t, critical_point_t> critical_points;
 	for(int i=0; i<r1-1; i++){ //坑
     // if(i%100==0) std::cout << i << " / " << r1-1 << std::endl;
 		for(int j=0; j<r2-1; j++){
@@ -178,4 +178,4 @@ compute_critical_points(const T * U, const T * V, int r1, int r2){
 }
 
 // This should follow immediately after the template definition
-template std::unordered_map<int, critical_point_t> compute_critical_points<float>(float const*, float const*, int, int);
+template std::unordered_map<size_t, critical_point_t> compute_critical_points<float>(float const*, float const*, int, int);

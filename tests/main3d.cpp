@@ -75,6 +75,80 @@ struct critical_point_t_3d {
 #define STABLE_SINK 7
 #define UNSTABLE_SINK 8
 
+double euclideanDistance(const array<double, 3>& p, const array<double, 3>& q) {
+    return sqrt((p[0] - q[0]) * (p[0] - q[0]) + (p[1] - q[1]) * (p[1] - q[1]) + (p[2] - q[2]) * (p[2] - q[2]));
+}
+
+double frechetDistance(const vector<array<double, 3>>& P, const vector<array<double, 3>>& Q) {
+    int n = P.size();
+    int m = Q.size();
+    vector<vector<double>> dp(n, vector<double>(m, -1.0));
+
+    // 初始化第一个元素
+    dp[0][0] = euclideanDistance(P[0], Q[0]);
+
+    // 计算第一列
+    #pragma omp parallel for
+    for (int i = 1; i < n; i++) {
+        dp[i][0] = max(dp[i-1][0], euclideanDistance(P[i], Q[0]));
+    }
+
+    // 计算第一行
+    #pragma omp parallel for
+    for (int j = 1; j < m; j++) {
+        dp[0][j] = max(dp[0][j-1], euclideanDistance(P[0], Q[j]));
+    }
+
+    // 并行化主循环
+    #pragma omp parallel for collapse(2)
+    for (int i = 1; i < n; i++) {
+        for (int j = 1; j < m; j++) {
+            dp[i][j] = max(min({dp[i-1][j], dp[i][j-1], dp[i-1][j-1]}), euclideanDistance(P[i], Q[j]));
+        }
+    }
+
+    return dp[n-1][m-1];
+}
+
+
+void calculateStatistics(const vector<double>& data, double& minVal, double& maxVal, double& medianVal, double& meanVal, double& stdevVal) {
+    // 检查输入是否为空
+    if (data.empty()) {
+        cerr << "Error: The data set is empty!" << endl;
+        return;
+    }
+
+    // 1. 计算最小值和最大值
+    minVal = *min_element(data.begin(), data.end());
+    maxVal = *max_element(data.begin(), data.end());
+
+    // 2. 计算均值
+    double sum = 0.0;
+    for (double value : data) {
+        sum += value;
+    }
+    meanVal = sum / data.size();
+
+    // 3. 计算中位数
+    vector<double> sortedData = data; // 创建数据的副本用于排序
+    sort(sortedData.begin(), sortedData.end());
+    size_t n = sortedData.size();
+    
+    if (n % 2 == 0) {
+        medianVal = (sortedData[n / 2 - 1] + sortedData[n / 2]) / 2.0;
+    } else {
+        medianVal = sortedData[n / 2];
+    }
+
+    // 4. 计算标准差
+    double varianceSum = 0.0;
+    for (double value : data) {
+        varianceSum += (value - meanVal) * (value - meanVal);
+    }
+    stdevVal = sqrt(varianceSum / data.size());
+}
+
+
 bool compare_trajectory(const std::vector<std::array<double, 3>>& traj1, const std::vector<std::array<double, 3>>& traj2) {
     size_t len = std::min(traj1.size(), traj2.size());
     for (size_t i = 0; i < len; ++i) {
@@ -580,12 +654,12 @@ void final_check(float *U, float *V, float *W, int r1, int r2, int r3, double eb
   unsigned char * final_result = NULL;
   size_t final_result_size = 0;
   final_result = sz_compress_cp_preserve_3d_record_vertex(U, V, W, r1, r2, r3, final_result_size, false, eb, vertex_need_to_lossless);
-  printf("ckp1\n");
   unsigned char * result_after_zstd = NULL;
   size_t result_after_zstd_size = sz_lossless_compress(ZSTD_COMPRESSOR, 3, final_result, final_result_size, &result_after_zstd);
-  printf("ckp2\n");
   //printf("BEGIN COmpression ratio =  \n");
-  printf("FINAL Compressed size = %zu, ratio = %f\n", result_after_zstd_size, (3*r1*r2*r3*sizeof(float)) * 1.0/result_after_zstd_size);
+  //printf("FINAL Compressed size = %zu, ratio = %f\n", result_after_zstd_size, (3*r1*r2*r3*sizeof(float)) * 1.0/result_after_zstd_size);
+  printf("%f\n", (3*r1*r2*r3*sizeof(float)) * 1.0/result_after_zstd_size);
+  printf("====================================\n");
   free(final_result);
   size_t zstd_decompressed_size = sz_lossless_decompress(ZSTD_COMPRESSOR, result_after_zstd, result_after_zstd_size, &final_result, final_result_size);
   float * final_dec_U = NULL;
@@ -631,6 +705,7 @@ void final_check(float *U, float *V, float *W, int r1, int r2, int r3, double eb
   std::vector<std::vector<std::array<double, 3>>> final_check_ori(keys.size() * 6);
   std::vector<std::vector<std::array<double, 3>>> final_check_dec(keys.size() * 6);
 
+  bool terminate = false;
   omp_set_num_threads(total_thread);
   #pragma omp parallel for
   for (size_t i = 0; i < keys.size(); ++i) {
@@ -684,48 +759,112 @@ void final_check(float *U, float *V, float *W, int r1, int r2, int r3, double eb
                     if (get_cell_offset_3d(result_return_ori.back().data(), r1, r2, r3) != get_cell_offset_3d(result_return_dec.back().data(), r1, r2, r3)){
                       printf("some trajectories not fixed!(case 0-1)\n");
                       printf("ori first point: %f, %f, %f ,dec first point: %f, %f, %f\n",result_return_ori[0][0],result_return_ori[0][1],result_return_ori[0][2],result_return_dec[0][0],result_return_dec[0][1],result_return_dec[0][2]);
-                      printf("ori second point: %f, %f, %f ,dec second point: %f, %f, %f\n",result_return_ori[1][0],result_return_ori[1][1],result_return_ori[1][2],result_return_dec[1][0],result_return_dec[1][1],result_return_dec[1][2]);
+                      printf("ori last-1 point: %f, %f, %f ,dec last-1 point: %f, %f, %f\n",result_return_ori[result_return_ori.size()-2][0],result_return_ori[result_return_ori.size()-2][1],result_return_ori[result_return_ori.size()-2][2],result_return_dec[result_return_dec.size()-2][0],result_return_dec[result_return_dec.size()-2][1],result_return_dec[result_return_dec.size()-2][2]);
+                      printf("ori last point: %f, %f, %f ,dec last point: %f, %f, %f\n",result_return_ori.back()[0],result_return_ori.back()[1],result_return_ori.back()[2],result_return_dec.back()[0],result_return_dec.back()[1],result_return_dec.back()[2]);
                       printf("ori length: %d, dec length: %d\n",result_return_ori.size(),result_return_dec.size());
-                      exit(0);
+                      terminate = true;
                     }
+                  }
+                  else if((result_return_ori.back()[0] == -1) && (result_return_dec.back()[0]) != -1){
+                    printf("some trajectories not fixed!(case 0-2)\n");
+                    printf("ori first point: %f, %f, %f ,dec first point: %f, %f, %f\n",result_return_ori[0][0],result_return_ori[0][1],result_return_ori[0][2],result_return_dec[0][0],result_return_dec[0][1],result_return_dec[0][2]);
+                    printf("ori last-1 point: %f, %f, %f ,dec last-1 point: %f, %f, %f\n",result_return_ori[result_return_ori.size()-2][0],result_return_ori[result_return_ori.size()-2][1],result_return_ori[result_return_ori.size()-2][2],result_return_dec[result_return_dec.size()-2][0],result_return_dec[result_return_dec.size()-2][1],result_return_dec[result_return_dec.size()-2][2]);
+                    printf("ori last point: %f, %f, %f ,dec last point: %f, %f, %f\n",result_return_ori.back()[0],result_return_ori.back()[1],result_return_ori.back()[2],result_return_dec.back()[0],result_return_dec.back()[1],result_return_dec.back()[2]);
+                    printf("ori length: %d, dec length: %d\n",result_return_ori.size(),result_return_dec.size());
+                    terminate = true;
                   }
                   break;
                 
                 case 2:
                   if(result_return_ori.size() == t_config.max_length){
-                    for (auto it = critical_points_final.begin(); it !=critical_points_final.end(); ++it){
-                      if ((std::abs(it->second.x[0] - result_return_ori.back()[0]) < 1e-4 && std::abs(it->second.x[1] - result_return_ori.back()[1]) < 1e-4) && std::abs(it->second.x[2] - result_return_ori.back()[2]) < 1e-4){
-                        if (get_cell_offset_3d(result_return_ori.back().data(), r1, r2, r3) != get_cell_offset_3d(result_return_dec.back().data(), r1, r2, r3)){
-                          printf("some trajectories not fixed!(case2-1)\n");
-                          printf("ori first point: %f, %f, %f ,dec first point: %f, %f, %f\n",result_return_ori[0][0],result_return_ori[0][1],result_return_ori[0][2],result_return_dec[0][0],result_return_dec[0][1],result_return_dec[0][2]);
-                          printf("ori second point: %f, %f, %f ,dec second point: %f, %f, %f\n",result_return_ori[1][0],result_return_ori[1][1],result_return_ori[1][2],result_return_dec[1][0],result_return_dec[1][1],result_return_dec[1][2]);
-                          printf("ori length: %d, dec length: %d\n",result_return_ori.size(),result_return_dec.size());
-                          exit(0);
-                        }
-                      }
+                    // if(result_return_ori.back()[0] == -1 && result_return_dec.back()[0] != -1){
+                    //   // last point just reach the boundary
+                    //   printf("some trajectories not fixed!(case2-0)\n");
+                    //   printf("ori first point: %f, %f, %f ,dec first point: %f, %f, %f\n",result_return_ori[0][0],result_return_ori[0][1],result_return_ori[0][2],result_return_dec[0][0],result_return_dec[0][1],result_return_dec[0][2]);
+                    //   printf("ori last-1 point: %f, %f, %f ,dec last-1 point: %f, %f, %f\n",result_return_ori[result_return_ori.size()-2][0],result_return_ori[result_return_ori.size()-2][1],result_return_ori[result_return_ori.size()-2][2],result_return_dec[result_return_dec.size()-2][0],result_return_dec[result_return_dec.size()-2][1],result_return_dec[result_return_dec.size()-2][2]);
+                    //   printf("ori last point: %f, %f, %f ,dec last point: %f, %f, %f\n",result_return_ori.back()[0],result_return_ori.back()[1],result_return_ori.back()[2],result_return_dec.back()[0],result_return_dec.back()[1],result_return_dec.back()[2]);
+                    //   printf("ori length: %d, dec length: %d\n",result_return_ori.size(),result_return_dec.size());
+                    //   terminate = true;
+                    // }
+                    if(result_return_dec.size() != t_config.max_length && get_cell_offset_3d(result_return_ori.back().data(), r1, r2, r3) != get_cell_offset_3d(result_return_dec.back().data(), r1, r2, r3)){
+                      printf("some trajectories not fixed!(case2-1)\n");
+                      printf("ori first point: %f, %f, %f ,dec first point: %f, %f, %f\n",result_return_ori[0][0],result_return_ori[0][1],result_return_ori[0][2],result_return_dec[0][0],result_return_dec[0][1],result_return_dec[0][2]);
+                      printf("ori last-1 point: %f, %f, %f ,dec last-1 point: %f, %f, %f\n",result_return_ori[result_return_ori.size()-2][0],result_return_ori[result_return_ori.size()-2][1],result_return_ori[result_return_ori.size()-2][2],result_return_dec[result_return_dec.size()-2][0],result_return_dec[result_return_dec.size()-2][1],result_return_dec[result_return_dec.size()-2][2]);
+                      printf("ori last point: %f, %f, %f ,dec last point: %f, %f, %f\n",result_return_ori.back()[0],result_return_ori.back()[1],result_return_ori.back()[2],result_return_dec.back()[0],result_return_dec.back()[1],result_return_dec.back()[2]);
+                      printf("ori length: %d, dec length: %d\n",result_return_ori.size(),result_return_dec.size());
+                      terminate = true;
                     }
+                    // 这是一种corner case，如果original的trajectory长度是max_length，但是恰好最后一个点是critical point
+                    // for (auto it = critical_points_final.begin(); it !=critical_points_final.end(); ++it){
+                    //   if ((std::abs(it->second.x[0] - result_return_ori.back()[0]) < 1e-4 && std::abs(it->second.x[1] - result_return_ori.back()[1]) < 1e-4) && std::abs(it->second.x[2] - result_return_ori.back()[2]) < 1e-4){
+                    //     if (get_cell_offset_3d(result_return_ori.back().data(), r1, r2, r3) != get_cell_offset_3d(result_return_dec.back().data(), r1, r2, r3)){
+                    //       printf("some trajectories not fixed!(case2-1)\n");
+                    //       printf("ori first point: %f, %f, %f ,dec first point: %f, %f, %f\n",result_return_ori[0][0],result_return_ori[0][1],result_return_ori[0][2],result_return_dec[0][0],result_return_dec[0][1],result_return_dec[0][2]);
+                    //       printf("ori last-1 point: %f, %f, %f ,dec last-1 point: %f, %f, %f\n",result_return_ori[result_return_ori.size()-2][0],result_return_ori[result_return_ori.size()-2][1],result_return_ori[result_return_ori.size()-2][2],result_return_dec[result_return_dec.size()-2][0],result_return_dec[result_return_dec.size()-2][1],result_return_dec[result_return_dec.size()-2][2]);
+                    //       printf("ori last point: %f, %f, %f ,dec last point: %f, %f, %f\n",result_return_ori.back()[0],result_return_ori.back()[1],result_return_ori.back()[2],result_return_dec.back()[0],result_return_dec.back()[1],result_return_dec.back()[2]);
+                    //       printf("ori length: %d, dec length: %d\n",result_return_ori.size(),result_return_dec.size());
+                    //       terminate = true;
+                    //     }
+                    //   }
+                    // }
                   }
                   else if((result_return_ori.size() == t_config.max_length) && (result_return_dec.size() != t_config.max_length)){
                     printf("some trajectories not fixed!(case2-2)\n");
                     printf("ori first point: %f, %f, %f ,dec first point: %f, %f, %f\n",result_return_ori[0][0],result_return_ori[0][1],result_return_ori[0][2],result_return_dec[0][0],result_return_dec[0][1],result_return_dec[0][2]);
-                    printf("ori second point: %f, %f, %f ,dec second point: %f, %f, %f\n",result_return_ori[1][0],result_return_ori[1][1],result_return_ori[1][2],result_return_dec[1][0],result_return_dec[1][1],result_return_dec[1][2]);
+                    printf("ori last-1 point: %f, %f, %f ,dec last-1 point: %f, %f, %f\n",result_return_ori[result_return_ori.size()-2][0],result_return_ori[result_return_ori.size()-2][1],result_return_ori[result_return_ori.size()-2][2],result_return_dec[result_return_dec.size()-2][0],result_return_dec[result_return_dec.size()-2][1],result_return_dec[result_return_dec.size()-2][2]);
+                    printf("ori last point: %f, %f, %f ,dec last point: %f, %f, %f\n",result_return_ori.back()[0],result_return_ori.back()[1],result_return_ori.back()[2],result_return_dec.back()[0],result_return_dec.back()[1],result_return_dec.back()[2]);
                     printf("ori length: %d, dec length: %d\n",result_return_ori.size(),result_return_dec.size());
-                    exit(0);
+                    terminate = true;
                   }
                   else if(result_return_dec.back()[0] != -1 && result_return_ori.back()[0] == -1){
                     printf("some trajectories not fixed!(case2-3)\n");
                     printf("ori first point: %f, %f, %f ,dec first point: %f, %f, %f\n",result_return_ori[0][0],result_return_ori[0][1],result_return_ori[0][2],result_return_dec[0][0],result_return_dec[0][1],result_return_dec[0][2]);
-                    printf("ori second point: %f, %f, %f ,dec second point: %f, %f, %f\n",result_return_ori[1][0],result_return_ori[1][1],result_return_ori[1][2],result_return_dec[1][0],result_return_dec[1][1],result_return_dec[1][2]);
-                    printf("ori length: %d, dec length: %d\n",result_return_ori.size(),result_return_dec.size()); 
-                    exit(0);
+                    printf("ori last-1 point: %f, %f, %f ,dec last-1 point: %f, %f, %f\n",result_return_ori[result_return_ori.size()-2][0],result_return_ori[result_return_ori.size()-2][1],result_return_ori[result_return_ori.size()-2][2],result_return_dec[result_return_dec.size()-2][0],result_return_dec[result_return_dec.size()-2][1],result_return_dec[result_return_dec.size()-2][2]);
+                    printf("ori last point: %f, %f, %f ,dec last point: %f, %f, %f\n",result_return_ori.back()[0],result_return_ori.back()[1],result_return_ori.back()[2],result_return_dec.back()[0],result_return_dec.back()[1],result_return_dec.back()[2]);
+                    printf("ori length: %d, dec length: %d\n",result_return_ori.size(),result_return_dec.size());
+                    terminate = true;
                   }
                   break;
-
               }
           }     
       }
     }
+  if(terminate){
+    printf("some trajectories not fixed!\n");
+  }
   printf("all passed!\n");
+
+  //计算frechet distance
+  int numTrajectories = final_check_ori.size();
+  vector<double> frechetDistances(numTrajectories, -1);
+  auto frechetDis_time_start = std::chrono::high_resolution_clock::now();
+  #pragma omp parallel for
+  for (int i = 0; i < numTrajectories; i++){
+    auto traj1 = final_check_ori[i];
+    auto traj2 = final_check_dec[i];
+    //remove the last point if it is -1
+    if (traj1.back()[0] == -1){
+      traj1.pop_back();
+    }
+    if (traj2.back()[0] == -1){
+      traj2.pop_back();
+    }
+    frechetDistances[i] = frechetDistance(traj1,traj2);
+  }
+  auto frechetDis_time_end = std::chrono::high_resolution_clock::now();
+  //calculate time in second
+  std::chrono::duration<double> frechetDis_time = frechetDis_time_end - frechetDis_time_start;
+  printf("frechet distance time: %f\n",frechetDis_time.count());
+  //计算统计量
+  double minVal, maxVal, medianVal, meanVal, stdevVal;
+  calculateStatistics(frechetDistances, minVal, maxVal, medianVal, meanVal, stdevVal);
+  printf("Statistics data===============\n");
+  printf("min: %f\n", minVal);
+  printf("max: %f\n", maxVal);
+  printf("median: %f\n", medianVal);
+  printf("mean: %f\n", meanVal);
+  printf("stdev: %f\n", stdevVal);
+  printf("Statistics data===============\n");
   free(final_result);
   free(result_after_zstd);
   free(final_dec_U);
@@ -759,7 +898,10 @@ int main(int argc, char ** argv){
     double max_eb = atof(argv[10]);
     int obj = atoi(argv[11]);
     int total_thread = atoi(argv[12]);
-    std::string file_out_dir = argv[13];
+    std::string file_out_dir = "";
+    if (argc == 14){
+      file_out_dir = argv[13];
+    }
     // int obj = 0;
     omp_set_num_threads(total_thread);
     traj_config t_config = {h, eps, max_length};
@@ -831,7 +973,7 @@ int main(int argc, char ** argv){
     //exit(0);
 
     //*************先计算一次整体的traj_ori 和traj_dec,后续只需增量修改*************
-
+    auto start_alg_time = std::chrono::high_resolution_clock::now();
     //*************计算原始数据的traj_ori*************
     size_t found = 0;
     size_t outside = 0;
@@ -923,33 +1065,31 @@ int main(int argc, char ** argv){
 
 
     start1 = std::chrono::high_resolution_clock::now();
-    for (auto traj:trajs_ori){
-        auto last = traj.back();
-        auto last_offset = get_cell_offset_3d(last.data(), r3, r2, r1);
-        auto first = traj[0];
-        // printf("first: %f %f %f, last: %f %f %f\n",first[0],first[1],first[2],last[0],last[1],last[2]);
-        // printf("first: %f %f %f\n",first[0],first[1],first[2]);
-        // printf("last: %f %f %f\n",last[0],last[1],last[2]);
-        if (traj.size() == max_length){
-            max_iter ++;
-        }
-        else if (last[0] == -1 && last[1] == -1 && last[2] == -1){
-            outside ++;
-        }
-        else{
-            //check if last point in critical_points_0
-
-            for (auto cp:critical_points_0){
-                auto cp_pt = cp.second.x;
-                if (last[0] == cp_pt[0] && last[1] == cp_pt[1] && last[2] == cp_pt[2]){
-                  found ++;
-                  break;  
-                }
-            }
-
-        }
-    }
-    end1 = std::chrono::high_resolution_clock::now();
+    // for (auto traj:trajs_ori){
+    //     auto last = traj.back();
+    //     auto last_offset = get_cell_offset_3d(last.data(), r3, r2, r1);
+    //     auto first = traj[0];
+    //     // printf("first: %f %f %f, last: %f %f %f\n",first[0],first[1],first[2],last[0],last[1],last[2]);
+    //     // printf("first: %f %f %f\n",first[0],first[1],first[2]);
+    //     // printf("last: %f %f %f\n",last[0],last[1],last[2]);
+    //     if (traj.size() == max_length){
+    //         max_iter ++;
+    //     }
+    //     else if (last[0] == -1 && last[1] == -1 && last[2] == -1){
+    //         outside ++;
+    //     }
+    //     else{
+    //         //check if last point in critical_points_0
+    //         for (auto cp:critical_points_0){
+    //             auto cp_pt = cp.second.x;
+    //             if (last[0] == cp_pt[0] && last[1] == cp_pt[1] && last[2] == cp_pt[2]){
+    //               found ++;
+    //               break;  
+    //             }
+    //         }
+    //     }
+    // }
+    // end1 = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double>elapsed = end1 - start1;
     cout << "Elapsed time for check all traj once: " << elapsed.count() << "s" << endl;
     printf("found: %zu, outside: %zu, max_iter: %zu\n",found,outside,max_iter);
@@ -1044,22 +1184,22 @@ int main(int argc, char ** argv){
     printf("total saddle points: %zu\n",total_saddle_count);
     printf("vertex_ori size: %zu\n",vertex_ori.size());
     printf("total_traj_reach_cp: %zu\n",total_traj_reach_cp);
-    for (int i = 0; i < trajs_ori.size(); i++){
-        auto traj_ori = trajs_ori[i];
-        auto traj_dec = trajs_dec[i];
-        auto first_ori = traj_ori[0];
-        auto first_dec = traj_dec[0];
-        auto second_ori = traj_ori[1];
-        auto second_dec = traj_dec[1];
-        if (first_ori[0] != first_dec[0] || first_ori[1] != first_dec[1] || first_ori[2] != first_dec[2]){
-            printf("first point not the same\n");
-            exit(0);
-        }
-        if (second_ori[0] != second_dec[0] || second_ori[1] != second_dec[1] || second_ori[2] != second_dec[2]){
-            printf("second point not the same\n");
-            exit(0);
-        }
-    }
+    // for (int i = 0; i < trajs_ori.size(); i++){
+    //     auto traj_ori = trajs_ori[i];
+    //     auto traj_dec = trajs_dec[i];
+    //     auto first_ori = traj_ori[0];
+    //     auto first_dec = traj_dec[0];
+    //     auto second_ori = traj_ori[1];
+    //     auto second_dec = traj_dec[1];
+    //     if (first_ori[0] != first_dec[0] || first_ori[1] != first_dec[1] || first_ori[2] != first_dec[2]){
+    //         printf("first point not the same\n");
+    //         exit(0);
+    //     }
+    //     if (second_ori[0] != second_dec[0] || second_ori[1] != second_dec[1] || second_ori[2] != second_dec[2]){
+    //         printf("second point not the same\n");
+    //         exit(0);
+    //     }
+    // }
 
     printf("done\n");
 
@@ -1076,7 +1216,11 @@ int main(int argc, char ** argv){
         bool cond1 = get_cell_offset_3d(t1.back().data(), r3, r2, r1) == get_cell_offset_3d(t2.back().data(), r3, r2, r1);
         bool cond2 = t1.size() == t_config.max_length;
         bool cond3 = t1.back()[0] == -1;
+        bool cond4 = t2.back()[0] == -1;
         if (!cond2 && !cond3 && !cond1){ //ori 找到了cp，但是dec和ori不一致
+          trajID_need_fix.insert(i);
+        }
+        else if (cond3 && !cond4){
           trajID_need_fix.insert(i);
         }
       }
@@ -1234,8 +1378,11 @@ int main(int argc, char ** argv){
           switch(obj)
           {
             case 0:
-              if (t1.back()[0] != -1 || t1.size() != t_config.max_length){
+              if (t1.back()[0] != -1 && t1.size() != t_config.max_length){
                 success = (get_cell_offset_3d(findLastNonNegativeOne(t1).data(), r3, r2, r1) == get_cell_offset_3d(findLastNonNegativeOne(temp_trajs_check).data(), r3, r2, r1));
+              }
+              else if(t1.back()[0] == -1){
+                success = (temp_trajs_check.back()[0] == -1);
               }
               else{
                 success = true;
@@ -1316,7 +1463,7 @@ int main(int argc, char ** argv){
           }
           else{
             //成功修正当前trajectory
-            printf("fix traj %zu successfully\n",current_trajID);
+            //printf("fix traj %zu successfully\n",current_trajID);
             trajs_dec[current_trajID] = temp_trajs_check;
           }
         }
@@ -1408,11 +1555,21 @@ int main(int argc, char ** argv){
               if (get_cell_offset_3d(ori_last_inside.data(), r3, r2, r1) != get_cell_offset_3d(dec_last_inside.data(), r3, r2, r1)){
                 wrong ++;
                 trajID_need_fix_next.insert(i);
-                printf("Trajectory %ld is wrong!!!\n", i);
-                printf("first ori:(%f,%f.%f), second ori(%f,%f,%f): last ori:(%f,%f,%f)\n",t1[0][0],t1[0][1],t1[0][2],t1[1][0],t1[1][1],t1[1][2],t1.back()[0],t1.back()[1],t1.back()[2]);
-                printf("first dec:(%f,%f,%f), second dec(%f,%f,%f): last dec:(%f,%f,%f)\n",t2[0][0],t2[0][1],t2[0][2],t2[1][0],t2[1][1],t2[1][2],t2.back()[0],t2.back()[1],t2.back()[2]);
-                printf("ori length: %zu, dec length: %zu\n", t1.size(), t2.size());
+                // printf("add traj %ld\n",i);
+                // printf("Trajectory %ld is wrong!!!\n", i);
+                // printf("first ori:(%f,%f.%f), second ori(%f,%f,%f): last ori:(%f,%f,%f)\n",t1[0][0],t1[0][1],t1[0][2],t1[1][0],t1[1][1],t1[1][2],t1.back()[0],t1.back()[1],t1.back()[2]);
+                // printf("first dec:(%f,%f,%f), second dec(%f,%f,%f): last dec:(%f,%f,%f)\n",t2[0][0],t2[0][1],t2[0][2],t2[1][0],t2[1][1],t2[1][2],t2.back()[0],t2.back()[1],t2.back()[2]);
+                // printf("ori length: %zu, dec length: %zu\n", t1.size(), t2.size());
               }
+            }
+            else if (cond4 && !cond5){
+              wrong ++;
+              trajID_need_fix_next.insert(i);
+              // printf("add traj %ld\n",i);
+              // printf("Trajectory %ld is wrong!!!\n", i);
+              // printf("first ori:(%f,%f.%f), second ori(%f,%f,%f): last ori:(%f,%f,%f)\n",t1[0][0],t1[0][1],t1[0][2],t1[1][0],t1[1][1],t1[1][2],t1.back()[0],t1.back()[1],t1.back()[2]);
+              // printf("first dec:(%f,%f,%f), second dec(%f,%f,%f): last dec:(%f,%f,%f)\n",t2[0][0],t2[0][1],t2[0][2],t2[1][0],t2[1][1],t2[1][2],t2.back()[0],t2.back()[1],t2.back()[2]);
+              // printf("ori length: %zu, dec length: %zu\n", t1.size(), t2.size());
             }
             break;
           
@@ -1423,10 +1580,11 @@ int main(int argc, char ** argv){
               if(get_cell_offset_3d(ori_last_inside.data(), r3, r2, r1) != get_cell_offset_3d(dec_last_inside.data(), r3, r2, r1)){
                 wrong ++;
                 trajID_need_fix_next.insert(i);
-                printf("Trajectory %ld is wrong!!!\n", i);
-                printf("first ori:(%f,%f.%f), second ori(%f,%f,%f): last ori:(%f,%f,%f)\n",t1[0][0],t1[0][1],t1[0][2],t1[1][0],t1[1][1],t1[1][2],t1.back()[0],t1.back()[1],t1.back()[2]);
-                printf("first dec:(%f,%f,%f), second dec(%f,%f,%f): last dec:(%f,%f,%f)\n",t2[0][0],t2[0][1],t2[0][2],t2[1][0],t2[1][1],t2[1][2],t2.back()[0],t2.back()[1],t2.back()[2]);
-                printf("ori length: %zu, dec length: %zu\n", t1.size(), t2.size());
+                // printf("add traj %ld\n",i);
+                // printf("Trajectory %ld is wrong!!!\n", i);
+                // printf("first ori:(%f,%f.%f), second ori(%f,%f,%f): last ori:(%f,%f,%f)\n",t1[0][0],t1[0][1],t1[0][2],t1[1][0],t1[1][1],t1[1][2],t1.back()[0],t1.back()[1],t1.back()[2]);
+                // printf("first dec:(%f,%f,%f), second dec(%f,%f,%f): last dec:(%f,%f,%f)\n",t2[0][0],t2[0][1],t2[0][2],t2[1][0],t2[1][1],t2[1][2],t2.back()[0],t2.back()[1],t2.back()[2]);
+                // printf("ori length: %zu, dec length: %zu\n", t1.size(), t2.size());
               }
             }
             else if (cond2){ //original reach limit
@@ -1434,10 +1592,11 @@ int main(int argc, char ** argv){
               if (get_cell_offset_3d(t1.back().data(),r3,r2,r1) != get_cell_offset_3d(dec_last_inside.data(),r3,r2,r1)){
                 wrong ++;
                 trajID_need_fix_next.insert(i);
-                printf("Trajectory %ld is wrong!!!\n", i);
-                printf("first ori:(%f,%f.%f), second ori(%f,%f,%f): last ori:(%f,%f,%f)\n",t1[0][0],t1[0][1],t1[0][2],t1[1][0],t1[1][1],t1[1][2],t1.back()[0],t1.back()[1],t1.back()[2]);
-                printf("first dec:(%f,%f,%f), second dec(%f,%f,%f): last dec:(%f,%f,%f)\n",t2[0][0],t2[0][1],t2[0][2],t2[1][0],t2[1][1],t2[1][2],t2.back()[0],t2.back()[1],t2.back()[2]);
-                printf("ori length: %zu, dec length: %zu\n", t1.size(), t2.size());
+                // printf("add traj %ld\n",i);
+                // printf("Trajectory %ld is wrong!!!\n", i);
+                // printf("first ori:(%f,%f.%f), second ori(%f,%f,%f): last ori:(%f,%f,%f)\n",t1[0][0],t1[0][1],t1[0][2],t1[1][0],t1[1][1],t1[1][2],t1.back()[0],t1.back()[1],t1.back()[2]);
+                // printf("first dec:(%f,%f,%f), second dec(%f,%f,%f): last dec:(%f,%f,%f)\n",t2[0][0],t2[0][1],t2[0][2],t2[1][0],t2[1][1],t2[1][2],t2.back()[0],t2.back()[1],t2.back()[2]);
+                // printf("ori length: %zu, dec length: %zu\n", t1.size(), t2.size());
               }
             }
             else if (!cond2 && !cond4){ //found cp
@@ -1446,10 +1605,11 @@ int main(int argc, char ** argv){
               if(get_cell_offset_3d(ori_last_inside.data(),r3,r2,r1) != get_cell_offset_3d(dec_last_inside.data(),r3,r2,r1)){
                 wrong ++;
                 trajID_need_fix_next.insert(i);
-                printf("Trajectory %ld is wrong!!!\n", i);
-                printf("first ori:(%f,%f.%f), second ori(%f,%f,%f): last ori:(%f,%f,%f)\n",t1[0][0],t1[0][1],t1[0][2],t1[1][0],t1[1][1],t1[1][2],t1.back()[0],t1.back()[1],t1.back()[2]);
-                printf("first dec:(%f,%f,%f), second dec(%f,%f,%f): last dec:(%f,%f,%f)\n",t2[0][0],t2[0][1],t2[0][2],t2[1][0],t2[1][1],t2[1][2],t2.back()[0],t2.back()[1],t2.back()[2]);
-                printf("ori length: %zu, dec length: %zu\n", t1.size(), t2.size());
+                // printf("add traj %ld\n",i);
+                // printf("Trajectory %ld is wrong!!!\n", i);
+                // printf("first ori:(%f,%f.%f), second ori(%f,%f,%f): last ori:(%f,%f,%f)\n",t1[0][0],t1[0][1],t1[0][2],t1[1][0],t1[1][1],t1[1][2],t1.back()[0],t1.back()[1],t1.back()[2]);
+                // printf("first dec:(%f,%f,%f), second dec(%f,%f,%f): last dec:(%f,%f,%f)\n",t2[0][0],t2[0][1],t2[0][2],t2[1][0],t2[1][1],t2[1][2],t2.back()[0],t2.back()[1],t2.back()[2]);
+                // printf("ori length: %zu, dec length: %zu\n", t1.size(), t2.size());
               }
             }
             break;
@@ -1465,10 +1625,11 @@ int main(int argc, char ** argv){
               if (!cond1){
                 wrong ++;
                 trajID_need_fix_next.insert(i);
-                printf("Trajectory %ld is wrong!!!\n", i);
-                printf("first ori:(%f,%f.%f), second ori(%f,%f,%f): last ori:(%f,%f,%f)\n",t1[0][0],t1[0][1],t1[0][2],t1[1][0],t1[1][1],t1[1][2],t1.back()[0],t1.back()[1],t1.back()[2]);
-                printf("first dec:(%f,%f,%f), second dec(%f,%f,%f): last dec:(%f,%f,%f)\n",t2[0][0],t2[0][1],t2[0][2],t2[1][0],t2[1][1],t2[1][2],t2.back()[0],t2.back()[1],t2.back()[2]);
-                printf("ori length: %zu, dec length: %zu\n", t1.size(), t2.size());
+                // printf("add traj %ld\n",i);
+                // printf("Trajectory %ld is wrong!!!\n", i);
+                // printf("first ori:(%f,%f.%f), second ori(%f,%f,%f): last ori:(%f,%f,%f)\n",t1[0][0],t1[0][1],t1[0][2],t1[1][0],t1[1][1],t1[1][2],t1.back()[0],t1.back()[1],t1.back()[2]);
+                // printf("first dec:(%f,%f,%f), second dec(%f,%f,%f): last dec:(%f,%f,%f)\n",t2[0][0],t2[0][1],t2[0][2],t2[1][0],t2[1][1],t2[1][2],t2.back()[0],t2.back()[1],t2.back()[2]);
+                // printf("ori length: %zu, dec length: %zu\n", t1.size(), t2.size());
               }
             }
             break;
@@ -1496,30 +1657,41 @@ int main(int argc, char ** argv){
       }
 
     }while (!stop);
+    auto end_alg_time = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> elapsed_alg_time = end_alg_time - start_alg_time;
     printf("traj_ori_begain time: %f\n", traj_ori_begin_elapsed.count());
     printf("traj_dec_begin time: %f\n", traj_dec_begin_elapsed.count()); 
     printf("compare & init_queue time: %f\n", init_queue_elapsed.count());
     printf("total round: %d\n", current_round);
-    for (auto t:index_time_vec){
-      printf("index_time: %f\n", t);
-    }
+    // for (auto t:index_time_vec){
+    //   printf("index_time: %f\n", t);
+    // }
     printf("sum of index_time: %f\n", std::accumulate(index_time_vec.begin(), index_time_vec.end(), 0.0));
-    for (auto t:re_cal_trajs_time_vec){
-      printf("re_cal_trajs_time: %f\n", t);
-    }
+    // for (auto t:re_cal_trajs_time_vec){
+    //   printf("re_cal_trajs_time: %f\n", t);
+    // }
     printf("sum of re_cal_trajs_time: %f\n", std::accumulate(re_cal_trajs_time_vec.begin(), re_cal_trajs_time_vec.end(), 0.0));
-    for (auto t:compare_time_vec){
-      printf("compare & update_queue_time: %f\n", t);
-    }
+    // for (auto t:compare_time_vec){
+    //   printf("compare & update_queue_time: %f\n", t);
+    // }
     printf("sum of compare & update_queue_time: %f\n", std::accumulate(compare_time_vec.begin(), compare_time_vec.end(), 0.0));
 
-    for(auto t:trajID_need_fix_next_vec){
-      printf("trajID_need_fix_next: %d\n", t);
-    }
+    // for(auto t:trajID_need_fix_next_vec){
+    //   printf("trajID_need_fix_next: %d\n", t);
+    // }
+    printf("BEGIN Compression Ratio: %f\n", begin_cr);
+    printf("====================================\n");
+    printf("%d\n",current_round);
+    printf("%f\n",elapsed_alg_time.count());
+    printf("%f\n",traj_ori_begin_elapsed.count() + traj_dec_begin_elapsed.count());
+    printf("%f\n",init_queue_elapsed.count());
+    printf("%f\n",std::accumulate(index_time_vec.begin(), index_time_vec.end(), 0.0));
+    printf("%f\n",std::accumulate(re_cal_trajs_time_vec.begin(), re_cal_trajs_time_vec.end(), 0.0));
+    printf("%f\n",std::accumulate(compare_time_vec.begin(), compare_time_vec.end(), 0.0));
 
     // now final check
-    printf("verifying the final decompressed data...\n");
-    printf("BEGIN Compression Ratio: %f\n", begin_cr);
+    // printf("verifying the final decompressed data...\n");
+    // printf("BEGIN Compression Ratio: %f\n", begin_cr);
     bool write_flag = true;
     final_check(U, V, W, r1, r2, r3, max_eb,obj,t_config,total_thread,final_vertex_need_to_lossless,file_out_dir);   
 }

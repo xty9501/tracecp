@@ -44,7 +44,7 @@ static const int tet_coords[6][4][3] = {
 
 template<typename Container>
 bool inside(const Container& x, int DH, int DW) {
-  if (x[0] <=0 || x[0] > DW-1 || x[1] <= 0 || x[1] > DH-1) return false;
+  if (x[0] <=0 || x[0] >= DW-1 || x[1] <= 0 || x[1] >= DH-1) return false;
   return true;
 }
 
@@ -64,7 +64,13 @@ inline bool is_upper(const std::array<double, 2> x){
 inline size_t get_cell_offset(const double *x, const int DW, const int DH){
   int x0 = floor(x[0]);
   int y0 = floor(x[1]);
+  std::array<int, 2> x0y0 = {x0, y0};
   size_t cell_offset = 2*(y0 * (DW-1) + x0);
+  if (!inside(x0y0, DH, DW)){
+    cell_offset = 0;//default value
+    return cell_offset;
+  }
+
   if (!is_upper({x[0], x[1]})){
     cell_offset += 1;
   }
@@ -185,6 +191,9 @@ std::array<size_t, 3> get_three_offsets(const T& x, const int DW, const int DH){
   size_t x0 = floor(x[0]); 
   size_t y0 = floor(x[1]);
   std::array<size_t, 3> result;
+  if(!inside(x, DH, DW)){
+    return {0, 0, 0};
+  }
   if (is_upper({x[0], x[1]})){
     result[0] = y0 * DW + x0;
     result[1] = y0 * DW + x0 + DW;
