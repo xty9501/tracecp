@@ -179,3 +179,20 @@ compute_critical_points(const T * U, const T * V, int r1, int r2){
 
 // This should follow immediately after the template definition
 template std::unordered_map<size_t, critical_point_t> compute_critical_points<float>(float const*, float const*, int, int);
+
+
+
+int check_cp(double v[3][2]){
+  // numeric check cp
+  double cond;
+  double mu[3];
+  for(int i=0; i<3; i++){ //skip if any of the vertex is 0 //
+    if((v[i][0] == 0) && (v[i][1] == 0)){ 
+      return -1; 
+      } 
+    } 
+  bool succ =  ftk::inverse_lerp_s2v2(v, mu, &cond);
+  if (!succ) return -1;
+  return 1;
+}
+

@@ -63,6 +63,19 @@ std::array<double, 2> findLastNonNegativeOne(const std::vector<std::array<double
 double euclideanDistance(const std::array<double, 2>& p1, const std::array<double, 2>& p2) {
     return std::sqrt(std::pow(p1[0] - p2[0], 2) + std::pow(p1[1] - p2[1], 2));
 }
+
+double MaxeuclideanDistance(const std::vector<std::array<double, 2>>& vec1, const std::vector<std::array<double, 2>>& vec2) {
+    double max_distance = 0;
+    for (int i = 0; i < vec1.size(); i++) {
+        double distance = euclideanDistance(vec1[i], vec2[i]);
+        if (distance > max_distance) {
+            max_distance = distance;
+        }
+    }
+    return max_distance;
+}
+
+
 double calculateEDR2D(const std::vector<std::array<double, 2>>& seq1, const std::vector<std::array<double, 2>>& seq2, double threshold) {
     size_t len1 = seq1.size();
     size_t len2 = seq2.size();
@@ -104,19 +117,16 @@ double frechetDistance(const vector<array<double, 2>>& P, const vector<array<dou
     dp[0][0] = euclideanDistance(P[0], Q[0]);
 
     // 计算第一列
-    #pragma omp parallel for
     for (int i = 1; i < n; i++) {
         dp[i][0] = max(dp[i-1][0], euclideanDistance(P[i], Q[0]));
     }
 
     // 计算第一行
-    #pragma omp parallel for
     for (int j = 1; j < m; j++) {
         dp[0][j] = max(dp[0][j-1], euclideanDistance(P[0], Q[j]));
     }
 
     // 使用OpenMP并行化主循环
-    #pragma omp parallel for collapse(2)
     for (int i = 1; i < n; i++) {
         for (int j = 1; j < m; j++) {
             dp[i][j] = max(min({dp[i-1][j], dp[i][j-1], dp[i-1][j-1]}), euclideanDistance(P[i], Q[j]));
@@ -163,12 +173,7 @@ void calculateStatistics(const vector<double>& data, double& minVal, double& max
     stdevVal = sqrt(varianceSum / data.size());
 }
 
-std::array<double,2> calcululateIntersections(const std::array<double,2>& p1, const std::array<double,2>& p2){
-  double slope = (p2[1] - p1[1]) / (p2[0] - p1[0]);
-  double y_intercept = p1[1] - slope * p1[0];
-  double x_intercept = -y_intercept / slope;
-  return {x_intercept, y_intercept};
-}
+
 
 std::pair<std::array<double, 2>, std::array<double, 2>> findLastTwoNonNegativeOne(const std::vector<std::array<double, 2>>& vec) {
     std::array<double, 2> last_valid_point = {-1, -1};
@@ -192,6 +197,26 @@ std::pair<std::array<double, 2>, std::array<double, 2>> findLastTwoNonNegativeOn
     return {second_last_valid_point, last_valid_point};  // 返回一对坐标
 }
 
+bool LastTwoPointsAreEqual(const std::vector<std::array<double, 2>>& vec) {
+    if (vec.size() < 2) return false;
+    return vec[vec.size()-1] == vec[vec.size()-2];
+    // const auto& last = vec[vec.size()-1];      // 最后一个点
+    // const auto& second_last = vec[vec.size()-2]; // 倒数第二个点
+
+    // return std::fabs(last[0] - second_last[0]) < 1e-4 && 
+    //        std::fabs(last[1] - second_last[1]) < 1e-4;
+}
+
+bool SearchElementFromBack(const std::vector<std::array<double, 2>>& vec, const std::array<double, 2>& target) {
+    for (auto it = vec.rbegin(); it != vec.rend(); ++it) {
+        if (*it == target) {
+            return true;
+        }
+    }
+    return false;
+}
+
+
 typedef struct traj_config{
   double h;
   double eps;
@@ -200,7 +225,7 @@ typedef struct traj_config{
 
 
 template<typename Type>
-void verify(Type * ori_data, Type * data, size_t num_elements){
+void verify(Type * ori_data, Type * data, size_t num_elements, double &nrmse){
     size_t i = 0;
     Type Max = 0, Min = 0, diffMax = 0;
     Max = ori_data[0];
@@ -246,7 +271,7 @@ void verify(Type * ori_data, Type * data, size_t num_elements){
     double mse = sum/num_elements;
     double range = Max - Min;
     double psnr = 20*log10(range)-10*log10(mse);
-    double nrmse = sqrt(mse)/range;
+    nrmse = sqrt(mse)/range;
 
     printf ("Min=%.20G, Max=%.20G, range=%.20G\n", Min, Max, range);
     printf ("Max absolute error = %.10f\n", diffMax);
@@ -370,7 +395,7 @@ void write_current_state_data(std::string file_path, const T * U, const T * V, T
 
 template<typename T>
 void
-fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_config,int totoal_thread, int obj, std::string file_dir = ""){
+fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_config,int totoal_thread, int obj,std::string eb_type,double threshold,double threshold_outside, double threshold_max_iter, std::string file_dir = ""){
   //bool write_flag = true;
   int DW = r2;
   int DH = r1;
@@ -392,7 +417,10 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
   // }
 
   int NUM_ITER = 0;
-  const int MAX_ITER = 2000;
+  // double threshold = 0.5;
+  // double threshold_outside = 0.5;
+  // double threshold_max_iter = 0.5;
+
   //std::map<size_t, double> trajID_direction_map; //用来存储每个traj对应的方向
   //std::set<size_t> current_diff_traj_id;
   // std::unordered_map<size_t,int> current_diff_traj_id;
@@ -402,13 +430,48 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
   std::vector<double> index_time_vec;
   std::vector<double> re_cal_trajs_time_vec;
   std::vector<int> trajID_need_fix_next_vec;
-  
+  std::vector<std::array<int,3>> trajID_need_fix_next_detail_vec; //0:outside, 1.reach max iter, 2.find cp
+  std::array<int,3> origin_traj_detail;
+  std::vector<int> fixed_cpsz_trajID;
+  //get cp for original data
+  auto critical_points_ori = compute_critical_points(U, V, r1, r2);
+  if (file_dir != ""){
+    record_criticalpoints(file_dir + "critical_points_ori", critical_points_ori);
+  }
+  //exit(0);
+
+  auto cpsz_comp_start = std::chrono::high_resolution_clock::now();
   size_t result_size = 0;
   unsigned char * result = NULL;
   double current_pwr_eb = 0;
-  result = sz_compress_cp_preserve_2d_fix(U, V, r1, r2, result_size, false, max_pwr_eb, current_pwr_eb);
+  if(eb_type == "rel"){
+    //****original version of cpsz********
+    result = sz_compress_cp_preserve_2d_fix(U, V, r1, r2, result_size, false, max_pwr_eb, current_pwr_eb);
+  }
+  else if (eb_type == "abs"){
+    //****** cpsz with absolute error bound ******
+    result = sz_compress_cp_preserve_2d_online_abs_record_vertex(U, V, r1, r2, result_size, false, max_pwr_eb);
+  }
+  else{
+    printf("eb_type must be rel or abs\n");
+    exit(0);
+  }
+
+  //***** use cpsz+st2 **********
+  //result = sz_compress_cp_preserve_2d_st2_fix(U, V, r1, r2, result_size, false, max_pwr_eb, current_pwr_eb, critical_points_ori);
+  
+  //****** cpsz with absolute error bound ******
+  
+  
   unsigned char * result_after_lossless = NULL;
   size_t lossless_outsize = sz_lossless_compress(ZSTD_COMPRESSOR, 3, result, result_size, &result_after_lossless);
+  free(result);
+
+  auto cpsz_comp_end = std::chrono::high_resolution_clock::now();
+  std::chrono::duration<double> cpsz_comp_duration = cpsz_comp_end - cpsz_comp_start;
+  printf("cpsz Compress time: %f\n", cpsz_comp_duration.count());
+
+  auto cpsz_decomp_start = std::chrono::high_resolution_clock::now();
   size_t lossless_output = sz_lossless_decompress(ZSTD_COMPRESSOR, result_after_lossless, lossless_outsize, &result, result_size);
   float * dec_U = NULL;
   float * dec_V = NULL;
@@ -416,14 +479,69 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
   // calculate compression ratio
   printf("BEGIN Compressed size(original) = %zu, ratio = %f\n", lossless_outsize, (2*r1*r2*sizeof(float)) * 1.0/lossless_outsize);
   double cr_ori = (2*r1*r2*sizeof(float)) * 1.0/lossless_outsize; 
-  // init a unordered_map, key is the index of cell, value is an array which contains the index of trajectory that goes through this cell
-  std::unordered_map<size_t, std::set<int>> cellID_trajIDs_map_ori;
-  std::unordered_map<size_t, std::set<int>> cellID_trajIDs_map_dec;
 
-  //get cp for original data
-  auto critical_points_ori = compute_critical_points(U, V, r1, r2);
+  auto cpsz_decomp_end = std::chrono::high_resolution_clock::now();
+  std::chrono::duration<double> cpsz_decomp_duration = cpsz_decomp_end - cpsz_decomp_start;
+  printf("cpsz Decompress time: %f\n", cpsz_decomp_duration.count());
+
+  // exit(0);
+
+
+  double nrmse_u, nrmse_v,psnr_overall,psnr_cpsz_overall;
+  verify(U, dec_U, r1*r2, nrmse_u);
+  verify(V, dec_V, r1*r2, nrmse_v);
+  psnr_cpsz_overall = 20 * log10(sqrt(2) / sqrt(nrmse_u*nrmse_u + nrmse_v*nrmse_v));
+
+
   //get cp for decompressed data
   auto critical_points_dec = compute_critical_points(dec_U, dec_V, r1, r2);
+  //check two have same cp
+  //check if all cretical_points_ori in critical_points_dec
+  for (const auto& cpd:critical_points_ori){
+    auto cp = cpd.second;
+    if (critical_points_dec.find(cpd.first) == critical_points_dec.end()){
+      printf("critical point %ld not in critical_points_dec\n", cpd.first);
+      printf("critical point %ld, x: %f, y: %f, type: %d\n", cpd.first, cp.x[0], cp.x[1], cp.type);
+    }
+  }
+  //检查多出来的cp
+  for (const auto& cpd:critical_points_dec){
+    auto cp = cpd.second;
+    if (critical_points_ori.find(cpd.first) == critical_points_ori.end()){
+      printf("critical point %ld not in critical_points_ori\n", cpd.first);
+      printf("critical point %ld, x: %f, y: %f, type: %d\n", cpd.first, cp.x[0], cp.x[1], cp.type);
+      //print cp.X matrix,which is 3x2
+      // printf("cp.X matrix:\n");
+      // for (int i = 0; i < 3; ++i){
+      //   for (int j = 0; j < 2; ++j){
+      //     printf("%f ", cp.X[i][j]);
+      //   }
+      //   printf("\n");
+      // }
+      printf("cp.V matrix:\n");
+      for (int i = 0; i < 3; ++i){
+        for (int j = 0; j < 2; ++j){
+          printf("%f ", cp.V[i][j]);
+        }
+        printf("\n");
+      }
+    }
+  }
+    
+  if (critical_points_ori.size() != critical_points_dec.size()){
+    printf("critical_points_ori size: %ld, critical_points_dec size: %ld\n", critical_points_ori.size(), critical_points_dec.size());
+    printf("critical points size not equal\n");
+    exit(0);
+  }
+  //check if all key in critical_points_ori is in critical_points_dec
+  for (const auto& cpd:critical_points_ori){
+    if (critical_points_dec.find(cpd.first) == critical_points_dec.end()){
+      printf("critical point %ld not in critical_points_dec\n", cpd.first);
+      printf("critical point %ld, x: %f, y: %f, type: %d\n", cpd.first, cpd.second.x[0], cpd.second.x[1], cpd.second.type);
+    }
+  }
+  printf("critical_points_ori size: %ld, critical_points_dec size: %ld\n", critical_points_ori.size(), critical_points_dec.size());
+  // exit(0);
 
   //replace all vertex in the boundary to dec_U, dec_V
   // for (size_t i = 0; i < r1; ++i){
@@ -465,7 +583,6 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
   //*************先计算一次整体的traj_ori 和traj_dec,后续只需增量修改*************
   //get trajectory for original data
   
-  std::vector<int> index_ori;
   std::set<size_t> vertex_ori;
   // std::unordered_map<size_t,std::vector<size_t>> vertex_ori_map;
   printf("calculating trajectory for original data...\n");
@@ -534,7 +651,6 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
       //check if inside
       std::array<double, 2> seed = {directions[k][1], directions[k][2]};
       //size_t current_traj_index = trajID_counter++;
-      //result_return = trajectory(pt, seed, directions[i][0] * t_config.h, t_config.max_length, DH, DW, critical_points_ori, grad_ori, index_ori, vertex_ori, cellID_trajIDs_map_ori, current_traj_index);
       result_return = trajectory_parallel(pt, seed, directions[k][0] * t_config.h, t_config.max_length, DH, DW, critical_points_ori, grad_ori,thread_lossless_index,thread_id);
       trajs_ori[j *4 + k] = result_return;
       trajID_direction_vector[j*4 + k] = directions[k][0];
@@ -560,8 +676,8 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
     }
 
   
-  //get trajectory for decompressed data
-  std::vector<int> index_dec;
+
+    //*************计算解压缩数据的traj_dec*************
   std::set<size_t> vertex_dec;
   printf("calculating trajectory for decompressed data...\n");
   start = std::chrono::high_resolution_clock::now();
@@ -581,7 +697,7 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
       traj.reserve(expected_size); // 预分配容量
   }
 
-  //std::atomic<size_t> trajID_counter(0);
+
   std::vector<std::set<size_t>> thread_lossless_index_dec(totoal_thread);
   #pragma omp parallel for reduction(+:dec_saddle_count)
   for(size_t j = 0; j < keys.size(); ++j){
@@ -627,7 +743,6 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
         //exit(0);
       }
       // size_t current_traj_index = trajs_dec.size();
-      // result_return = trajectory(pt, seed, directions[i][0]* t_config.h, t_config.max_length, DH, DW, critical_points_dec, grad_dec, index_dec, vertex_dec, cellID_trajIDs_map_dec, current_traj_index);
       // trajs_dec.push_back(result_return);
       result_return = trajectory_parallel(pt, seed, directions[i][0] * t_config.h, t_config.max_length, DH, DW, critical_points_dec, grad_dec,thread_lossless_index_dec,thread_id);
       trajs_dec[j * 4 + i] = result_return;
@@ -642,105 +757,75 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
   end = std::chrono::high_resolution_clock::now();
   std::chrono::duration<double> traj_dec_begin_elapsed = end - start;
   printf("Time for decompressed trajectory calculation: %f\n", traj_dec_begin_elapsed.count());
-  printf("dec_saddle_count: %ld\n", dec_saddle_count);
-  printf("size of trajs_dec: %ld\n", trajs_dec.size());
-  printf("size of vertex_dec: %ld\n", vertex_dec.size());
+  // printf("dec_saddle_count: %ld\n", dec_saddle_count);
+  // printf("size of trajs_dec: %ld\n", trajs_dec.size());
+  // printf("size of vertex_dec: %ld\n", vertex_dec.size());
 
-  //检查一下这两个trajs_ori和trajs_dec是前三个坐标一致，为了验证顺序是否一致（不算时间）
-  // for(size_t i = 0; i < trajs_ori.size(); ++i){
-  //   auto t1 = trajs_ori[i];
-  //   auto t2 = trajs_dec[i];
-  //   if (t1[0][0] != t2[0][0] || t1[0][1] != t2[0][1] || t1[1][0] != t2[1][0] || t1[1][1] != t2[1][1]){
-  //     printf("Trajectory ori %ld is diff to dec\n", i);
-  //     printf("first ori:(%f,%f), second ori(%f,%f): last ori:(%f,%f)\n",t1[0][0],t1[0][1],t1[1][0],t1[1][1],t1.back()[0],t1.back()[1]);
-  //     printf("first dec:(%f,%f), second dec(%f,%f): last dec:(%f,%f)\n",t2[0][0],t2[0][1],t2[1][0],t2[1][1],t2.back()[0],t2.back()[1]);
-  //     printf("ori length: %zu, dec length: %zu\n", t1.size(), t2.size());
-  //     exit(0);
-  //   }
-  // }
+  //write cpsz trajectory to file
+  if(file_dir != ""){
+    save_trajs_to_binary(trajs_dec, file_dir + "cpsz_traj.bin");
+    //write cpsz data
+    writefile((file_dir + "decU_cpsz.bin").c_str(), dec_U, r1*r2);
+    writefile((file_dir + "decV_cpsz.bin").c_str(), dec_V, r1*r2);
+  }
+  
+  // exit(0);
 
   // 计算哪里有问题（init queue）
   std::set<size_t> trajID_need_fix = {};
   auto init_queue_start = std::chrono::high_resolution_clock::now();
-
+  int num_outside = 0;
+  int num_max_iter = 0;
+  int num_find_cp = 0;
+  int wrong_num_outside = 0;
+  int wrong_num_max_iter = 0;
+  int wrong_num_find_cp = 0;
   switch(obj){
     case 0:
       for(size_t i =0; i< trajs_ori.size(); ++i){
         auto t1 = trajs_ori[i];
         auto t2 = trajs_dec[i];
         bool cond1 = get_cell_offset(t1.back().data(), DW, DH) == get_cell_offset(t2.back().data(), DW, DH); //ori and dec reach same cp
-        bool cond2 = t1.size() == t_config.max_length; //ori reach max
-        bool cond3 = t1.back()[0] == -1; //ori outside
-        bool cond4 = t2.back()[0] == -1; //dec outside
-        // if (!cond2 && !cond3 && !cond1){ //ori 找到了cp，但是dec和ori不一致
-        //   trajID_need_fix.insert(i);
-        // }
-        // if (cond3 && !cond4){ //ori outside, dec inside
-        //   trajID_need_fix.insert(i);
-        // }
-        if (cond3){
+        bool cond2 = (t1.size() == t_config.max_length); //ori reach max
+        if (LastTwoPointsAreEqual(t1)){
+          num_outside ++;
           //ori outside
-          auto last_inside_ori = findLastNonNegativeOne(t1);
-          auto last_inside_dec = findLastNonNegativeOne(t2);
-          //每一个t2从后往前找，看有没有cell跟last_inside_ori一样的，如果没有，就insert
-          if (!cond4){ //没出去就直接加了
+          if (!LastTwoPointsAreEqual(t2)){
+            //dec inside
+            wrong_num_outside ++;
             trajID_need_fix.insert(i);
           }
-          for(int j = t2.size()-1; j >= 0; --j){
-            if (get_cell_offset(last_inside_ori.data(), DW, DH) == get_cell_offset(t2[j].data(), DW, DH)){
-              break;
-            }
-            if (j == 0){
+          else{
+            //dec outside
+            if (euclideanDistance(t1.back(), t2.back()) >= threshold_outside){
+              wrong_num_outside ++;
               trajID_need_fix.insert(i);
             }
           }
-          // if (get_cell_offset(last_inside_ori.data(), DW, DH) != get_cell_offset(last_inside_dec.data(), DW, DH)){
-          //   trajID_need_fix.insert(i);
-          //   //printf("ori pos: (%f, %f), dec pos: (%f, %f), dist: %f\n", last_inside[0], last_inside[1], last_inside_dec[0], last_inside_dec[1], euclideanDistance(last_inside, last_inside_dec));
-          // }
         }
         else if (cond2){
-          //ori reach max,dont care dec
-          continue;
+          num_max_iter ++;
+          //ori reach max
+          //这里的判断是｜｜ 不是&&！！
+          // if ((euclideanDistance(t1.back(), t2.back()) > threshold_max_iter)|| (t2.size() != t_config.max_length)){
+          if (t2.size() != t_config.max_length){
+            //dec not reach max, add
+            wrong_num_max_iter ++;
+            trajID_need_fix.insert(i);
+          }
+          else{
+            //dec reach max, need to check distance
+            if (euclideanDistance(t1.back(), t2.back()) >= threshold_max_iter){
+              wrong_num_max_iter ++;
+              trajID_need_fix.insert(i);
+            }
+          }
         }
-        else if (!cond2 && !cond3){
-          //ori inside, not reach max, ie found cp
+        else {
+          num_find_cp ++;
+          //reach cp
           if (!cond1){
-            trajID_need_fix.insert(i);
-            //printf("ori found cp but different cell with dec, ori pos: (%f, %f), dec pos: (%f, %f)\n", t1.back()[0], t1.back()[1], t2.back()[0], t2.back()[1]);
-          }
-        }
-      }
-      break;
-    case 1:
-      for(size_t i=0;i<trajs_ori.size(); ++i){
-        auto t1 = trajs_ori[i];
-        auto t2 = trajs_dec[i];
-        bool cond2 = t1.size() == t_config.max_length;
-        bool cond3 = t2.size() == t_config.max_length;
-        bool cond4 = t1.back()[0] == -1;
-        bool cond5 = t2.back()[0] == -1;
-        if(!cond2 && !cond4){ //inside and not reach max, ie found cp
-          std::array<double, 2>  ori_last_inside = findLastNonNegativeOne(t1);
-          std::array<double, 2>  dec_last_inside = findLastNonNegativeOne(t2);
-          if (get_cell_offset(ori_last_inside.data(), DW, DH) != get_cell_offset(dec_last_inside.data(), DW, DH)){
-            trajID_need_fix.insert(i);
-        
-          }
-
-        }
-        else if (cond2){ //original reach limit
-          //找到dec最后一个非(-1,-1)的点
-          std::array<double, 2>  dec_last_inside = findLastNonNegativeOne(t2);
-          if (get_cell_offset(t1.back().data(), DW, DH) != get_cell_offset(dec_last_inside.data(), DW, DH)){
-            trajID_need_fix.insert(i);
-          }
-        }
-        else if (cond4){// original outside
-          //遍历找到t1最后一个非(-1,-1)的点
-          std::array<double, 2>  ori_last_inside = findLastNonNegativeOne(t1);
-          std::array<double, 2>  dec_last_inside = findLastNonNegativeOne(t2);
-          if (get_cell_offset(ori_last_inside.data(), DW, DH) != get_cell_offset(dec_last_inside.data(), DW, DH)){
+            wrong_num_find_cp ++;
             trajID_need_fix.insert(i);
           }
         }
@@ -756,8 +841,9 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
         auto t2 = trajs_dec[i];
         bool cond2 = t1.size() == t_config.max_length;
         bool cond3 = t2.size() == t_config.max_length;
-        bool cond4 = t1.back()[0] == -1;
-        bool cond5 = t2.back()[0] == -1;
+        // bool cond4 = t1.back()[0] == -1;
+        // bool cond5 = t2.back()[0] == -1;
+        bool cond6 = get_cell_offset(t1.back().data(), DW, DH) == get_cell_offset(t2.back().data(), DW, DH);
         // if (cond4){
         //   //ori outside
         //   auto last_inside = findLastNonNegativeOne(t1);
@@ -767,21 +853,34 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
         //   }
         // }
 
-        if(cond4){
-          //ori outside
-          auto last_inside_ori = findLastNonNegativeOne(t1);
-          auto last_inside_dec = findLastNonNegativeOne(t2);
-          //每一个t2从后往前找，看有没有cell跟last_inside_ori一样的，如果没有，就insert
-          if (!cond5){ //没出去就直接加了
-            trajID_need_fix.insert(i);
-          }
-          for(int j = t2.size()-1; j >= 0; --j){
-            if (get_cell_offset(last_inside_ori.data(), DW, DH) == get_cell_offset(t2[j].data(), DW, DH)){
-              break;
+        // if(cond4){
+        //   //ori outside
+        //   auto last_inside_ori = findLastNonNegativeOne(t1);
+        //   auto last_inside_dec = findLastNonNegativeOne(t2);
+        //   //每一个t2从后往前找，看有没有cell跟last_inside_ori一样的，如果没有，就insert
+        //   if (!cond5){ //没出去就直接加了
+        //     trajID_need_fix.insert(i);
+        //   }
+        //   for(int j = t2.size()-1; j >= 0; --j){
+        //     if (get_cell_offset(last_inside_ori.data(), DW, DH) == get_cell_offset(t2[j].data(), DW, DH)){
+        //       break;
+        //     }
+        //     if (j == 0){
+        //       trajID_need_fix.insert(i);
+        //     }
+        //   }
+        // }
+        if (LastTwoPointsAreEqual(t1)) {
+          if (!LastTwoPointsAreEqual(t2)) {
+            if (SearchElementFromBack(t2, t1.back())) {
+              continue;
             }
-            if (j == 0){
+            else {
               trajID_need_fix.insert(i);
             }
+          }
+          else if (get_cell_offset(t1.back().data(), DW, DH) != get_cell_offset(t2.back().data(), DW, DH)){
+            trajID_need_fix.insert(i);
           }
         }
 
@@ -792,11 +891,11 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
             trajID_need_fix.insert(i);
           }
         }
-        else if (!cond2 && !cond4){
+        else{
           //ori inside, not reach max, ie found cp
-          std::array<double, 2>  ori_last_inside = findLastNonNegativeOne(t1);
-          std::array<double, 2>  dec_last_inside = findLastNonNegativeOne(t2);
-          if (get_cell_offset(ori_last_inside.data(), DW, DH) != get_cell_offset(dec_last_inside.data(), DW, DH)){
+          // std::array<double, 2>  ori_last_inside = findLastNonNegativeOne(t1);
+          // std::array<double, 2>  dec_last_inside = findLastNonNegativeOne(t2);
+          if (!cond6){
             trajID_need_fix.insert(i);
           }
         }
@@ -811,17 +910,43 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
   if (trajID_need_fix.size() == 0){
     stop = true;
     printf("No need to fix!\n");
+    if (file_dir != ""){
+      // printf("writing original and decompressed trajs to file...\n");
+      printf("writing original and decompressed trajs to file...\n");
+      save_trajs_to_binary(trajs_ori, file_dir + "ori_traj.bin");
+      save_trajs_to_binary(trajs_dec, file_dir + "dec_traj.bin");
+
+    }
     exit(0);
   }
   else{
     printf("trajID_need_fix size: %ld\n", trajID_need_fix.size());
+    bool write_cpsz_wrong_trajs_flag = true;
+    if (write_cpsz_wrong_trajs_flag && file_dir != ""){
+      std::vector<std::vector<std::array<double, 2>>> wrong_trajs_ori;
+      std::vector<std::vector<std::array<double, 2>>> wrong_trajs_cpsz;
+      for (const auto& trajID:trajID_need_fix){
+        wrong_trajs_ori.push_back(trajs_ori[trajID]);
+        wrong_trajs_cpsz.push_back(trajs_dec[trajID]);
+        fixed_cpsz_trajID.push_back(trajID);
+      }
+      save_trajs_to_binary(wrong_trajs_ori, file_dir + "wrong_trajs_ori.bin");
+      save_trajs_to_binary(wrong_trajs_cpsz, file_dir + "wrong_trajs_cpsz.bin");
+
+    }
     trajID_need_fix_next_vec.push_back(trajID_need_fix.size());
+    trajID_need_fix_next_detail_vec.push_back({wrong_num_outside, wrong_num_max_iter, wrong_num_find_cp});
+    origin_traj_detail = {num_outside, num_max_iter, num_find_cp};
   }
 
+  //*************开始修复轨迹*************    //*************开始修复轨迹*************
   int current_round = 0;
-  double temp_trajs_ori_time = 0;
   do
   {
+    if (current_round >=30){
+      printf("current_round >= 30, exit\n");
+      exit(0);
+    }
     printf("begin fix traj,current_round: %d\n", current_round++);
     std::set<size_t> trajID_need_fix_next;
     //fix trajectory
@@ -834,6 +959,41 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
     
     std::vector<std::set<size_t>> local_all_vertex_for_all_diff_traj(totoal_thread);
 
+
+/*
+    #pragma omp parallel for
+    //先把所有max_length的traj直接lossless
+    for(size_t i=0;i<trajID_need_fix_vector.size(); ++i){
+      auto current_trajID = trajID_need_fix_vector[i];
+      auto t1 = trajs_ori[current_trajID];
+      auto t2 = trajs_dec[current_trajID];
+      if (t1.size() == t_config.max_length){
+        double direction = trajID_direction_vector[current_trajID];
+        std::vector<int> temp_index_ori;
+        std::set<size_t> temp_vertexID;
+        // auto temp_trajs_ori = trajectory(t1[0].data(), t1[1], direction * t_config.h, t_config.max_length, DH, DW, critical_points_ori, grad_ori,temp_index_ori, temp_vertexID);
+        auto temp_trajs_ori = trajectory_parallel(t1[0].data(), t1[1], direction * t_config.h, t_config.max_length, DH, DW, critical_points_ori, grad_ori,local_all_vertex_for_all_diff_traj,omp_get_thread_num());
+        for (auto o:temp_vertexID){
+          dec_U[o] = U[o];
+          dec_V[o] = V[o];
+          //同时更新grad_dec
+          //o 转化为坐标
+          int x = o % DW;
+          int y = o / DW;
+          grad_dec(0, x, y) = U[o];
+          grad_dec(1, x, y) = V[o];
+          local_all_vertex_for_all_diff_traj[omp_get_thread_num()].insert(o);
+        }
+      }
+    }
+    //汇总all_vertex_for_all_diff_traj
+    for (const auto& local_set:local_all_vertex_for_all_diff_traj){
+      all_vertex_for_all_diff_traj.insert(local_set.begin(), local_set.end());
+    }
+
+    printf("all max_iter traj lossless!!, all_vertex_for_all_diff_traj size: %ld\n", all_vertex_for_all_diff_traj.size());
+*/  
+
     #pragma omp parallel for
     for (size_t i=0;i<trajID_need_fix_vector.size(); ++i){
       auto current_trajID = trajID_need_fix_vector[i];
@@ -843,9 +1003,8 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
       auto t1 = trajs_ori[current_trajID];
       auto t2 = trajs_dec[current_trajID];
       int start_fix_index = 0;
-      int end_fix_index = t1.size() - 1;
-      double threshold = 1.4142;
-      
+      //int end_fix_index = t1.size() - 1;
+      int end_fix_index = 1;
       int thread_id = omp_get_thread_num();
 
       //find the first different point
@@ -854,7 +1013,7 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
       //for (size_t j = start_fix_index; j < max_index; ++j){
         auto p1 = t1[j];
         auto p2 = t2[j];
-        if (p1[0] > 0 && p2[0] > 0){
+        if (j < t1.size() - 1 && j < t2.size() - 1){
           double dist = sqrt(pow(p1[0] - p2[0], 2) + pow(p1[1] - p2[1], 2));
           //auto p1_offset = get_cell_offset(p1.data(), DW, DH);
           //auto p2_offset = get_cell_offset(p2.data(), DW, DH);
@@ -866,36 +1025,38 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
           }
         }
       }
-      end_fix_index = std::min(end_fix_index, static_cast<int>(t1.size() - 1));
+      if (t1.size() == t_config.max_length){
+        end_fix_index = t1.size();
+      }
+      end_fix_index = std::min(end_fix_index, static_cast<int>(t1.size())); //t1.size() - 1;
     
       while (!success){
         double direction = trajID_direction_vector[current_trajID];
-        std::vector<int> temp_index_ori;
-        std::vector<int> temp_index_check;
         //std::unordered_map<size_t, std::set<int>> temp_cellID_trajIDs_map;//需要临时的一个map统计修正的traj经过那些cellID
         std::set<size_t> temp_vertexID;//临时变量记录经过的vertexID
         std::set<size_t> temp_vertexID_check;
-        std::unordered_map<size_t,double> rollback_dec_u; //记录需要回滚的dec数据
-        std::unordered_map<size_t,double> rollback_dec_v;
+        // std::unordered_map<size_t,double> rollback_dec_u; //记录需要回滚的dec数据
+        // std::unordered_map<size_t,double> rollback_dec_v;
+        // std::set<size_t> rollback_vertexID;
         //计算一次rk4直到终止点，统计经过的cellID，然后替换数据
+        
         /* 使用简单的版本*/
         auto temp_trajs_ori_time_start = std::chrono::high_resolution_clock::now();
-        end_fix_index = std::min(end_fix_index + 1,t_config.max_length);
-        auto temp_trajs_ori = trajectory(t1[0].data(), t1[1], direction * t_config.h, end_fix_index, DH, DW, critical_points_ori, grad_ori,temp_index_ori, temp_vertexID);
+        end_fix_index = std::min(end_fix_index,t_config.max_length);
+        auto temp_trajs_ori = trajectory(t1[0].data(), t1[1], direction * t_config.h, end_fix_index, DH, DW, critical_points_ori, grad_ori,temp_vertexID);
         
         //auto temp_trajs_ori_time_end = std::chrono::high_resolution_clock::now();
 
         //此时temp_vertexID记录了从起点到分岔点需要经过的所有vertex
-        for (auto o:temp_vertexID){
-          rollback_dec_u[o] = dec_U[o];
-          rollback_dec_v[o] = dec_V[o];
-          local_all_vertex_for_all_diff_traj[thread_id].insert(o);
-        }
-        auto current_divergence_pos = temp_trajs_ori.back();
+        // for (auto o:temp_vertexID){
+        //   rollback_dec_u[o] = dec_U[o];
+        //   rollback_dec_v[o] = dec_V[o];
+        //   local_all_vertex_for_all_diff_traj[thread_id].insert(o);
+        //   // rollback_vertexID.insert(o);
+        // }
+        // auto current_divergence_pos = temp_trajs_ori.back();
         //printf("current_divergence_pos ori data(temp_trajs_ori last element): (%f,%f)\n", current_divergence_pos[0], current_divergence_pos[1]);
         //printf("current_end_fix_index: %d, t1.size(): %zu, t2.size(): %zu\n", end_fix_index, t1.size(), t2.size());
-        // #pragma omp critical
-        // {
         for (auto o:temp_vertexID){ // 更新dec_U, dec_V
           dec_U[o] = U[o];
           dec_V[o] = V[o];
@@ -905,86 +1066,109 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
           int y = o / DW;
           grad_dec(0, x, y) = U[o];
           grad_dec(1, x, y) = V[o];
+          local_all_vertex_for_all_diff_traj[thread_id].insert(o);
         }
         //检查是不是修正成功
-        //std::unordered_map<size_t, std::set<int>> temp_cellID_trajIDs_map_dec;
-        //std::set<size_t> temp_var;
-        //auto temp_trajs_check = trajectory(t2[0].data(), t2[1], direction * t_config.h, t_config.max_length, DH, DW, critical_points_dec, grad_dec,temp_index, temp_var,temp_cellID_trajIDs_map_dec,current_trajID);
-        //auto temp_trajs_check = trajectory(t2[0].data(), t2[1], direction * t_config.h, t_config.max_length, DH, DW, critical_points_dec, grad_dec,temp_index, temp_var,temp_cellID_trajIDs_map_dec,current_trajID);
         /*
         1. 这里使用简单的traj计算，避免过度开销
         2. 不从0开始，而是从end_fix_index开始，走max_length-end_fix_index+2步
         */
-
         //auto temp_debug = trajectory(t2[0].data(), t2[1],direction * t_config.h,end_fix_index, DH, DW, critical_points_dec, grad_dec,temp_index_check);
-        
-        //printf("current_divergence_pos dec data: (%f,%f)\n", temp_debug.back()[0], temp_debug.back()[1]);
-        //auto temp_trajs_check = trajectory(t2[0].data(), t2[1], direction * t_config.h, t_config.max_length, DH, DW, critical_points_dec, grad_dec,temp_index_check);
-        // auto temp_trajs_check = trajectory(current_divergence_pos.data(), current_divergence_pos, direction * t_config.h, t1.size()-end_fix_index+2, DH, DW, critical_points_dec, grad_dec,temp_index_check);
-        auto temp_trajs_check = trajectory(t1[0].data(), t1[1], direction * t_config.h, t_config.max_length, DH, DW, critical_points_dec, grad_dec,temp_index_check,temp_vertexID_check);
-        //printf("temp_trajs_check last element: (%f,%f), max_iter-end_fix + 2 = %d\n", temp_trajs_check.back()[0], temp_trajs_check.back()[1], t_config.max_length-end_fix_index+2);
-        //printf("ori last element: (%f,%f)\n", t1.back()[0], t1.back()[1]);
+
+        auto temp_trajs_check = trajectory(t1[0].data(), t1[1], direction * t_config.h, end_fix_index, DH, DW, critical_points_dec, grad_dec,temp_vertexID_check);
 
       
         //success = (get_cell_offset(findLastNonNegativeOne(t1).data(), DW, DH) == get_cell_offset(findLastNonNegativeOne(temp_trajs_check).data(), DW, DH));
         switch (obj)
         {
           case 0:
-            if (t1.back()[0] == -1){
-              if (temp_trajs_check.back()[0] != -1){
+            // if (LastTwoPointsAreEqual(t1)){
+            //   if (!LastTwoPointsAreEqual(temp_trajs_check)){
+            //     if (SearchElementFromBack(temp_trajs_check, t1.back())){
+            //       success = true;
+            //     }
+            //     else{
+            //       success = false;
+            //     }
+            //   }
+            //   else if (get_cell_offset(t1.back().data(), DW, DH) != get_cell_offset(temp_trajs_check.back().data(), DW, DH)){
+            //     success = false;
+            //   }
+            //   else{
+            //     success = true;
+            //   }
+            // }
+            if (LastTwoPointsAreEqual(t1)){
+              //ori outside
+              if (!LastTwoPointsAreEqual(temp_trajs_check)){
+                //dec inside
                 success = false;
               }
-              //ori outside, dec last non(-1,-1) point should be close
-              auto last_inside_ori = findLastNonNegativeOne(t1);
-              for(int j = temp_trajs_check.size()-1; j >= 0; --j){
-                if (get_cell_offset(last_inside_ori.data(), DW, DH) == get_cell_offset(temp_trajs_check[j].data(), DW, DH)){
-                  success = true;
-                  break;
-                }
-                if (j == 0){//not found
-                  success = false;
-                }
+              else{
+                //dec outside
+                success = (euclideanDistance(t1.back(), temp_trajs_check.back()) < threshold_outside);
               }
-              //success = (get_cell_offset(findLastNonNegativeOne(t1).data(), DW, DH) == get_cell_offset(findLastNonNegativeOne(temp_trajs_check).data(), DW, DH));
             }
             else if (t1.size() == t_config.max_length){
-              //ori reach max, dont care dec
-              success = true;
-              }
-            else if (t1.size() != t_config.max_length && t1.back()[0] != -1){
-              //ori inside, not reach max, ie found cp
-              success = (get_cell_offset(t1.back().data(), DW, DH) == get_cell_offset(temp_trajs_check.back().data(), DW, DH));
-            }
-            break;
-          case 1:
-            success = (get_cell_offset(findLastNonNegativeOne(t1).data(), DW, DH) == get_cell_offset(findLastNonNegativeOne(temp_trajs_check).data(), DW, DH));
-            break;
-          case 2:
-            // if (t1.back()[0] == -1){
-            //   //ori outside, dec last non(-1,-1) point should be close
-            //   success = (get_cell_offset(findLastNonNegativeOne(t1).data(), DW, DH) == get_cell_offset(findLastNonNegativeOne(temp_trajs_check).data(), DW, DH));
-            // }
-            if(t1.back()[0] == -1){
-              if (temp_trajs_check.back()[0] != -1){
-                success = false;
-              }
-              //ori outside, dec last non(-1,-1) point should be close
-              auto last_inside_ori = findLastNonNegativeOne(t1);
-              for(int j = temp_trajs_check.size()-1; j >= 0; --j){
-                if (get_cell_offset(last_inside_ori.data(), DW, DH) == get_cell_offset(temp_trajs_check[j].data(), DW, DH)){
-                  success = true;
-                  break;
-                }
-                if (j == 0){//not found
+              //这里的判断是｜｜ 不是&&！！
+              //success = ((euclideanDistance(t1.back(), temp_trajs_check.back()) < threshold_max_iter) || (temp_trajs_check.size() == t_config.max_length));
+              if ((temp_trajs_check.size() == t_config.max_length)){
+                if (euclideanDistance(t1.back(), temp_trajs_check.back()) >= threshold_max_iter){
                   success = false;
                 }
+                else{
+                  success = true;
+                }
+              }
+              // if (!success){
+              //   printf("phase2 (check succc) ID: %ld, t1 size: %ld, t2 size: %ld,distance: %f\n", current_trajID, t1.size(), temp_trajs_check.size(), euclideanDistance(t1.back(), temp_trajs_check.back()));
+              // }
+            }
+            else{
+              //reach cp
+              if (get_cell_offset(t1.back().data(), DW, DH) == get_cell_offset(temp_trajs_check.back().data(), DW, DH)){
+                success = true;
+              }
+            }
+            break;
+          case 2:
+            // if(t1.back()[0] == -1){
+            //   if (temp_trajs_check.back()[0] != -1){
+            //     success = false;
+            //   }
+            //   //ori outside, dec last non(-1,-1) point should be close
+            //   auto last_inside_ori = findLastNonNegativeOne(t1);
+            //   for(int j = temp_trajs_check.size()-1; j >= 0; --j){
+            //     if (get_cell_offset(last_inside_ori.data(), DW, DH) == get_cell_offset(temp_trajs_check[j].data(), DW, DH)){
+            //       success = true;
+            //       break;
+            //     }
+            //     if (j == 0){//not found
+            //       success = false;
+            //     }
+            //   }
+            // }
+            if (LastTwoPointsAreEqual(t1)){
+              if (!LastTwoPointsAreEqual(temp_trajs_check)){
+                if (SearchElementFromBack(temp_trajs_check, t1.back())){
+                  success = true;
+                }
+                else{
+                  success = false;
+                }
+              }
+              else if (get_cell_offset(t1.back().data(), DW, DH) != get_cell_offset(temp_trajs_check.back().data(), DW, DH)){
+                success = false;
+              }
+              else{
+                success = true;
               }
             }
             else if (t1.size() == t_config.max_length){
               //ori reach max, dec should reach max as well
               success = (temp_trajs_check.size() == t_config.max_length);
             }
-            else if (t1.size() != t_config.max_length && t1.back()[0] != -1){
+            else{
               //ori inside, not reach max, ie found cp
               success = (get_cell_offset(t1.back().data(), DW, DH) == get_cell_offset(temp_trajs_check.back().data(), DW, DH));
             }
@@ -993,21 +1177,17 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
       
         if (!success){
           //rollback
-          //printf("trajID: %ld not fixed, current end_fix_index: %d\n", current_trajID, end_fix_index);
-          // if(end_fix_index >=(t1.size()-1)){
-          //   printf("BEFORE ERASE: local_all_vertex_for_all_diff_traj size: %ld\n", local_all_vertex_for_all_diff_traj[thread_id].size());
-          //   printf("temp_vertexID size: %ld\n", temp_vertexID.size());
+          // for (auto o:temp_vertexID){
+          //   dec_U[o] = rollback_dec_u[o];
+          //   dec_V[o] = rollback_dec_v[o];
+          //   int x = o % DW;
+          //   int y = o / DW;
+          //   grad_dec(0, x, y) = dec_U[o];
+          //   grad_dec(1, x, y) = dec_V[o];
+          //   local_all_vertex_for_all_diff_traj[thread_id].erase(o);
+          //   // rollback_vertexID.erase(o);
           // }
-          for (auto o:temp_vertexID){
-            dec_U[o] = rollback_dec_u[o];
-            dec_V[o] = rollback_dec_v[o];
-            int x = o % DW;
-            int y = o / DW;
-            grad_dec(0, x, y) = dec_U[o];
-            grad_dec(1, x, y) = dec_V[o];
-            local_all_vertex_for_all_diff_traj[thread_id].erase(o);
-          }
-          if (end_fix_index >= t_config.max_length){ //(t1.size()-1)
+          if (end_fix_index >= static_cast<int>(t1.size())){ //(t1.size()-1)
 
             printf("t_config.max_length: %d,end_fix_index%d\n", t_config.max_length, end_fix_index);
             printf("error: current end_fix_index is %d, current ID: %ld\n", end_fix_index, current_trajID);
@@ -1021,19 +1201,23 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
             printf("ori last-1 : (%f,%f), temp_trajs_ori last-1: (%f,%f), temp_trajs_check last-1: (%f,%f)\n", t1[t1.size()-2][0], t1[t1.size()-2][1],temp_trajs_ori[temp_trajs_ori.size()-2][0], temp_trajs_ori[temp_trajs_ori.size()-2][1],temp_trajs_check[temp_trajs_check.size()-2][0], temp_trajs_check[temp_trajs_check.size()-2][1]);
             printf("ori last : (%f,%f), temp_trajs_ori last: (%f,%f), temp_trajs_check last: (%f,%f)\n", t1.back()[0], t1.back()[1],temp_trajs_ori.back()[0], temp_trajs_ori.back()[1],temp_trajs_check.back()[0], temp_trajs_check.back()[1]);
             printf("t1 size %zu, temp_trajs_ori size: %zu, temp_trajs_check size: %zu\n", t1.size(), temp_trajs_ori.size(), temp_trajs_check.size());
-            printf("check temp_trajs_check last is cp: %d\n",check_pt_is_cp(temp_trajs_check.back(),critical_points_dec));//(0.001559,442.715650)
+            //printf("check temp_trajs_check last is cp: %d\n",check_pt_is_cp(temp_trajs_check.back(),critical_points_dec));//(0.001559,442.715650)
             //trajID_need_fix_next.insert(current_trajID);
             //trajs_dec[current_trajID] = temp_trajs_check;
             break;  
           }
-          end_fix_index = std::min(end_fix_index + 10,t_config.max_length);
-          //end_fix_index = std::min(end_fix_index + 10,static_cast<int>(t1.size() - 1));
+          // end_fix_index = std::min(end_fix_index + 10,static_cast<int>(t1.size()));
+          
+          
+          end_fix_index = std::min(end_fix_index + 10,static_cast<int>(t1.size())); //t1.size() - 1
         }
         else{
           //修正成功当前trajectory
           //printf("fix traj %zu successfully\n",current_trajID);
           //更新trajs_dec
-          trajs_dec[current_trajID] = temp_trajs_check;       
+          trajs_dec[current_trajID] = temp_trajs_check;
+          // local_all_vertex_for_all_diff_traj[thread_id].insert(rollback_vertexID.begin(), rollback_vertexID.end()); 
+          break;     
         }
       }
     } 
@@ -1056,6 +1240,9 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
     //用原来的trajs_dec 替换
     //set trajs_dec to empty
     trajs_dec.resize(keys_dec.size() * 4);
+    for (auto& traj : trajs_dec) {
+        traj.resize(expected_size,{0.0,0.0});
+    }
 
     // std::vector<std::vector<std::array<double, 2>>> trajs_dec_next(keys.size() * 4);
     // for (auto& traj : trajs_dec_next) {
@@ -1063,7 +1250,6 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
     // }
     std::vector<std::set<size_t>> thread_index_dec_next(totoal_thread);
     std::set<size_t> vertex_dec_next;
-    //这个容易并行
     #pragma omp parallel for
     // for(const auto& p:critical_points_dec){
     for(size_t j = 0; j < keys_dec.size(); ++j){
@@ -1111,132 +1297,123 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
     re_cal_trajs_time_vec.push_back(elapsed_recal.count());
     //compare the trajectory
     printf("comparing.... double check if all trajectories are fixed...,total trajectory: %ld\n",trajs_ori.size());
-    size_t outside_count = 0;
-    size_t hit_max_iter = 0;
+    // size_t outside_count = 0;
+    // size_t hit_max_iter = 0;
     size_t wrong = 0;
-    size_t correct = 0;
+    // size_t correct = 0;
+    int wrong_num_outside = 0;
+    int wrong_num_max_iter = 0;
+    int wrong_num_find_cp = 0;
     //这个for不需要并行
     auto comp_start = std::chrono::high_resolution_clock::now();
     for(size_t i=0;i < trajs_ori.size(); ++i){
       auto t1 = trajs_ori[i];
       auto t2 = trajs_dec[i];
       bool cond1 = get_cell_offset(t1.back().data(), DW, DH) == get_cell_offset(t2.back().data(), DW, DH);
-      bool cond2 = t1.size() == t_config.max_length;
+      bool cond2 = (t1.size() == t_config.max_length);
       bool cond3 = t2.size() == t_config.max_length;
-      bool cond4 = t1.back()[0] == -1;
-      bool cond5 = t2.back()[0] == -1;
+      // bool cond4 = t1.back()[0] == -1;
+      // bool cond5 = t2.back()[0] == -1;
       switch (obj)
       {
       case 0:
-        if (cond4){ // original outside
-          auto ori_last_inside = findLastNonNegativeOne(t1);
-          auto dec_last_inside = findLastNonNegativeOne(t2);
-          if (!cond5){ //dec inside
-            wrong ++;
-            trajID_need_fix_next.insert(i);
-          }
-          for(int j = t2.size()-1; j >= 0; --j){
-            if (get_cell_offset(ori_last_inside.data(), DW, DH) == get_cell_offset(t2[j].data(), DW, DH)){
-              break;
-            }
-            if (j == 0){ //not found
-              wrong ++;
-              trajID_need_fix_next.insert(i);
-            }
-          }
-          // if (get_cell_offset(ori_last_inside.data(), DW, DH) != get_cell_offset(dec_last_inside.data(), DW, DH)){
-          //   wrong ++;
-          //   trajID_need_fix_next.insert(i);
-          // }
-        }
-        else if (cond2){ //original reach limit
-          continue;
-        }
-        else if (!cond2 && !cond4){ //inside and not reach max, ie found cp
-          if (!cond1){
-            wrong ++;
-            trajID_need_fix_next.insert(i);
-          }
-        }
-        break;
-      
-      case 1:
-        if (cond4){ // original outside
-          auto ori_last_inside = findLastNonNegativeOne(t1);
-          auto dec_last_inside = findLastNonNegativeOne(t2);
-          if (get_cell_offset(ori_last_inside.data(), DW, DH) != get_cell_offset(dec_last_inside.data(), DW, DH)){
-            wrong ++;
-            trajID_need_fix_next.insert(i);
-            // printf("Trajectory %ld is wrong!!!\n", i);
-            // printf("first ori:(%f,%f), second ori(%f,%f): last ori:(%f,%f)\n",t1[0][0],t1[0][1],t1[1][0],t1[1][1],t1.back()[0],t1.back()[1]);
-            // printf("first dec:(%f,%f), second dec(%f,%f): last dec:(%f,%f)\n",t2[0][0],t2[0][1],t2[1][0],t2[1][1],t2.back()[0],t2.back()[1]);
-            // printf("ori length: %zu, dec length: %zu\n", t1.size(), t2.size());
-          }
-        }
-        else if (cond2){ //original reach limit
-          auto dec_last_inside = findLastNonNegativeOne(t2);
-          if (get_cell_offset(t1.back().data(), DW, DH) != get_cell_offset(dec_last_inside.data(), DW, DH)){
-            wrong ++;
-            trajID_need_fix_next.insert(i);
-            // printf("Trajectory %ld is wrong!!!\n", i);
-            // printf("first ori:(%f,%f), second ori(%f,%f): last ori:(%f,%f)\n",t1[0][0],t1[0][1],t1[1][0],t1[1][1],t1.back()[0],t1.back()[1]);
-            // printf("first dec:(%f,%f), second dec(%f,%f): last dec:(%f,%f)\n",t2[0][0],t2[0][1],t2[1][0],t2[1][1],t2.back()[0],t2.back()[1]);
-            // printf("ori length: %zu, dec length: %zu\n", t1.size(), t2.size());
-          }
-        }
-        else if (!cond2 && !cond4){ //inside and not reach max, ie found cp
-          auto ori_last_inside = findLastNonNegativeOne(t1);
-          auto dec_last_inside = findLastNonNegativeOne(t2);
-          if (get_cell_offset(ori_last_inside.data(), DW, DH) != get_cell_offset(dec_last_inside.data(), DW, DH)){
-            wrong ++;
-            trajID_need_fix_next.insert(i);
-            // printf("Trajectory %ld is wrong!!!\n", i);
-            // printf("first ori:(%f,%f), second ori(%f,%f): last ori:(%f,%f)\n",t1[0][0],t1[0][1],t1[1][0],t1[1][1],t1.back()[0],t1.back()[1]);
-            // printf("first dec:(%f,%f), second dec(%f,%f): last dec:(%f,%f)\n",t2[0][0],t2[0][1],t2[1][0],t2[1][1],t2.back()[0],t2.back()[1]);
-            // printf("ori length: %zu, dec length: %zu\n", t1.size(), t2.size());
-          }
-        }
-        break;
-      
-      case 2:
-        // if (cond2 && cond3){
-        //   continue;
-        // }
-        // else if (cond4 && cond5){
-        //   continue;
-        // }
-        // else{
-        //   if (!cond1){
+        // if (LastTwoPointsAreEqual(t1)){
+        //   if (!LastTwoPointsAreEqual(t2)){
+        //     if (SearchElementFromBack(t2, t1.back())){
+        //       continue;
+        //     }
+        //     else{
+        //       wrong ++;
+        //       trajID_need_fix_next.insert(i);
+        //     }
+        //   }
+        //   else if (!SearchElementFromBack(t2, t1.back())){
         //     wrong ++;
         //     trajID_need_fix_next.insert(i);
-        //     // printf("Trajectory %ld is wrong!!!\n", i);
-        //     // printf("first ori:(%f,%f), second ori(%f,%f): last ori:(%f,%f)\n",t1[0][0],t1[0][1],t1[1][0],t1[1][1],t1.back()[0],t1.back()[1]);
-        //     // printf("first dec:(%f,%f), second dec(%f,%f): last dec:(%f,%f)\n",t2[0][0],t2[0][1],t2[1][0],t2[1][1],t2.back()[0],t2.back()[1]);
-        //     // printf("ori length: %zu, dec length: %zu\n", t1.size(), t2.size());
         //   }
         // }
-        if (cond4){
-          //ori outside
-          // auto last_inside = findLastNonNegativeOne(t1);
-          // auto last_inside_dec = findLastNonNegativeOne(t2);
-          // if (get_cell_offset(last_inside.data(), DW, DH) != get_cell_offset(last_inside_dec.data(), DW, DH)){
-          //   wrong ++;
-          //   trajID_need_fix_next.insert(i);
-          // }
-          auto ori_last_inside = findLastNonNegativeOne(t1);
-          auto dec_last_inside = findLastNonNegativeOne(t2);
-          if (!cond5){ //dec inside
+        if (LastTwoPointsAreEqual(t1)){
+
+          if (!LastTwoPointsAreEqual(t2)){
             wrong ++;
+            wrong_num_outside ++;
             trajID_need_fix_next.insert(i);
           }
-          for(int j = t2.size()-1; j >= 0; --j){
-            if (get_cell_offset(ori_last_inside.data(), DW, DH) == get_cell_offset(t2[j].data(), DW, DH)){
-              break;
+          else{
+            if (euclideanDistance(t1.back(), t2.back()) > threshold_outside){
+              wrong ++;
+              wrong_num_outside ++;
+              trajID_need_fix_next.insert(i);
             }
-            if (j == 0){ //not found
+          }
+        }
+        else if (cond2){
+
+          //这里的判断是｜｜ 不是&&！！
+          // if ((euclideanDistance(t1.back(), t2.back()) > threshold_max_iter) || (t2.size() != t_config.max_length)){
+          if (t2.size() != t_config.max_length){
+            //dec not reach max, add
+            wrong ++;
+            wrong_num_max_iter ++;
+            trajID_need_fix_next.insert(i);
+          }
+          else{
+            //dec reach max, need to check distance
+            if (euclideanDistance(t1.back(), t2.back()) >= threshold_max_iter){
+              wrong ++;
+              wrong_num_max_iter ++;
+              trajID_need_fix_next.insert(i);
+            }
+          }
+        }
+        else{
+          num_find_cp ++;
+          if (!cond1){
+            wrong ++;
+            wrong_num_find_cp ++;
+            trajID_need_fix_next.insert(i);
+          }
+        }
+        break;
+
+      case 2:
+        // if (cond4){
+        //   //ori outside
+        //   // auto last_inside = findLastNonNegativeOne(t1);
+        //   // auto last_inside_dec = findLastNonNegativeOne(t2);
+        //   // if (get_cell_offset(last_inside.data(), DW, DH) != get_cell_offset(last_inside_dec.data(), DW, DH)){
+        //   //   wrong ++;
+        //   //   trajID_need_fix_next.insert(i);
+        //   // }
+        //   auto ori_last_inside = findLastNonNegativeOne(t1);
+        //   auto dec_last_inside = findLastNonNegativeOne(t2);
+        //   if (!cond5){ //dec inside
+        //     wrong ++;
+        //     trajID_need_fix_next.insert(i);
+        //   }
+        //   for(int j = t2.size()-1; j >= 0; --j){
+        //     if (get_cell_offset(ori_last_inside.data(), DW, DH) == get_cell_offset(t2[j].data(), DW, DH)){
+        //       break;
+        //     }
+        //     if (j == 0){ //not found
+        //       wrong ++;
+        //       trajID_need_fix_next.insert(i);
+        //     }
+        //   }
+        // }
+        if (LastTwoPointsAreEqual(t1)){
+          if (!LastTwoPointsAreEqual(t2)){
+            if (SearchElementFromBack(t2, t1.back())){
+              continue;
+            }
+            else{
               wrong ++;
               trajID_need_fix_next.insert(i);
             }
+          }
+          else if (!SearchElementFromBack(t2, t1.back())){
+            wrong ++;
+            trajID_need_fix_next.insert(i);
           }
         }
         else if (cond2){
@@ -1246,7 +1423,7 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
             trajID_need_fix_next.insert(i);
           }
         }
-        else if (!cond2 && !cond4){
+        else{
           //ori inside, not reach max, ie found cp
           if (get_cell_offset(t1.back().data(), DW, DH) != get_cell_offset(t2.back().data(), DW, DH)){
             wrong ++;
@@ -1258,7 +1435,7 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
       }
 
     }
-    //printf("wrong: %ld\n", wrong);
+    printf("wrong: %ld\n", wrong);
     auto comp_end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> comp_elapsed = comp_end - comp_start;
     compare_time_vec.push_back(comp_elapsed.count());
@@ -1270,23 +1447,23 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
     else{
       //printf("trajID_need_fix_next size: %ld\n", trajID_need_fix_next.size());
       trajID_need_fix_next_vec.push_back(trajID_need_fix_next.size());
+      trajID_need_fix_next_detail_vec.push_back({wrong_num_outside, wrong_num_max_iter, wrong_num_find_cp});
       //清空trajID_need_fix，然后把trajID_need_fix_next赋值给trajID_need_fix
       trajID_need_fix.clear();
       //printf("before change trajID_need_fix size(should be 0): %ld\n", trajID_need_fix.size());
       for(auto o:trajID_need_fix_next){
         trajID_need_fix.insert(o);
       }
-      if (trajID_need_fix.size() < 5){
-        for (auto o:trajID_need_fix){
-          printf("trajID %d\n", o);
-          printf("ori first: (%f,%f), dec first: (%f,%f)\n", trajs_ori[o][0][0], trajs_ori[o][0][1], trajs_dec[o][0][0], trajs_dec[o][0][1]);
-          printf("ori last-1: (%f,%f), dec last-1: (%f,%f)\n", trajs_ori[o][trajs_ori[o].size()-2][0], trajs_ori[o][trajs_ori[o].size()-2][1], trajs_dec[o][trajs_dec[o].size()-2][0], trajs_dec[o][trajs_dec[o].size()-2][1]);
-          printf("ori last: (%f,%f), dec last: (%f,%f)\n", trajs_ori[o].back()[0], trajs_ori[o].back()[1], trajs_dec[o].back()[0], trajs_dec[o].back()[1]);
-          printf("ori size: %zu, dec size: %zu\n", trajs_ori[o].size(), trajs_dec[o].size());
-        }
-      }
+      // if (trajID_need_fix.size() < 5){
+      //   for (auto o:trajID_need_fix){
+      //     printf("trajID %d\n", o);
+      //     printf("ori first: (%f,%f), dec first: (%f,%f)\n", trajs_ori[o][0][0], trajs_ori[o][0][1], trajs_dec[o][0][0], trajs_dec[o][0][1]);
+      //     printf("ori last-1: (%f,%f), dec last-1: (%f,%f)\n", trajs_ori[o][trajs_ori[o].size()-2][0], trajs_ori[o][trajs_ori[o].size()-2][1], trajs_dec[o][trajs_dec[o].size()-2][0], trajs_dec[o][trajs_dec[o].size()-2][1]);
+      //     printf("ori last: (%f,%f), dec last: (%f,%f)\n", trajs_ori[o].back()[0], trajs_ori[o].back()[1], trajs_dec[o].back()[0], trajs_dec[o].back()[1]);
+      //     printf("ori size: %zu, dec size: %zu\n", trajs_ori[o].size(), trajs_dec[o].size());
+      //   }
+      // }
       trajID_need_fix_next.clear();
-      //printf("after change trajID_need_fix size(should be 1+ wrong): %ld\n", trajID_need_fix.size());
     }
     
 
@@ -1314,8 +1491,12 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
   // }
   printf("sum of compare & update_queue_time: %f\n", std::accumulate(compare_time_vec.begin(), compare_time_vec.end(), 0.0));
 
-  for(auto t:trajID_need_fix_next_vec){
+  printf("origin_traj_detail: outside: %d, max_iter: %d, find_cp: %d\n", origin_traj_detail[0], origin_traj_detail[1], origin_traj_detail[2]);
+  for (auto t:trajID_need_fix_next_vec){
     printf("trajID_need_fix_next: %d\n", t);
+  }
+  for(auto t:trajID_need_fix_next_detail_vec){
+    printf("trajID_need_fix_next_detail: wrong outside: %d, wrong max_iter: %d, wrong find_cp: %d\n", t[0], t[1], t[2]);
   }
 
 
@@ -1325,24 +1506,18 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
   //check compression ratio
   unsigned char * final_result = NULL;
   size_t final_result_size = 0;
+  if(eb_type == "rel"){
   final_result = sz_compress_cp_preserve_2d_record_vertex(U, V, r1, r2, final_result_size, false, max_pwr_eb, all_vertex_for_all_diff_traj);
 
+  }
+  else{
+    final_result = sz_compress_cp_preserve_2d_online_abs_record_vertex(U, V, r1, r2, final_result_size, true, max_pwr_eb, all_vertex_for_all_diff_traj);
+  }
   printf("checkpt1\n");
   unsigned char * result_after_zstd = NULL;
   size_t result_after_zstd_size = sz_lossless_compress(ZSTD_COMPRESSOR, 3, final_result, final_result_size, &result_after_zstd);
-  printf("checkpt2\n");
-  printf("BEGIN Compression ratio = %f\n", cr_ori);
-  printf("FINAL Compressed size = %zu, ratio = %f\n", result_after_zstd_size, (2*r1*r2*sizeof(float)) * 1.0/result_after_zstd_size);
-  printf("====================================\n");
-  printf("%d\n",current_round);
-  printf("%f\n",elapsed_fix.count());
-  printf("%f\n",(traj_ori_begin_elapsed.count() + traj_dec_begin_elapsed.count()));
-  printf("%f\n",init_queue_elapsed.count());
-  printf("%f\n",std::accumulate(index_time_vec.begin(), index_time_vec.end(), 0.0));
-  printf("%f\n",std::accumulate(re_cal_trajs_time_vec.begin(), re_cal_trajs_time_vec.end(), 0.0));
-  printf("%f\n",std::accumulate(compare_time_vec.begin(), compare_time_vec.end(), 0.0));
-  printf("%f\n",result_after_zstd_size, (2*r1*r2*sizeof(float)) * 1.0/result_after_zstd_size);
-  printf("====================================\n");
+
+
   free(final_result);
   size_t zstd_decompressed_size = sz_lossless_decompress(ZSTD_COMPRESSOR, result_after_zstd, result_after_zstd_size, &final_result, final_result_size);
   //printf("final lossless output size %zu, final_result_size %zu\n",final_lossless_output,final_result_size);//should be same with cpsz出来的大小
@@ -1352,12 +1527,41 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
   float * final_dec_V = NULL;
   sz_decompress_cp_preserve_2d_online_record_vertex<float>(final_result, r1, r2, final_dec_U, final_dec_V);
   printf("verifying...\n");
-  //verify(U, final_dec_U, r1*r2);
-  double lossless_sum_u = 0;
-  for(auto p:all_vertex_for_all_diff_traj){
-    lossless_sum_u += U[p];
+ 
+  verify(U, final_dec_U, r1*r2,nrmse_u);
+  verify(V, final_dec_V, r1*r2,nrmse_v);
+
+  psnr_overall = 20 * log10(sqrt(2) / sqrt(nrmse_u*nrmse_u + nrmse_v*nrmse_v));
+  //printf("nrmse_u: %f, nrmse_v: %f, psnr_overall: %f\n", nrmse_u, nrmse_v, psnr_overall);
+  printf("====================================\n");
+  printf("original trajs detail: outside: %d, max_iter: %d, find_cp: %d\n", origin_traj_detail[0], origin_traj_detail[1], origin_traj_detail[2]);
+  printf("BEGIN Compression ratio = %f\n", cr_ori);
+  printf("psnr_overall_cpsz: %f\n",psnr_cpsz_overall);
+  printf("FINAL Compressed ratio = %f\n",(2*r1*r2*sizeof(float)) * 1.0/result_after_zstd_size);
+  printf("psnr_overall: %f\n", psnr_overall);
+  printf("comp time: %f\n", cpsz_comp_duration.count());
+  printf("decomp time: %f\n", cpsz_decomp_duration.count());
+  printf("%f\n",elapsed_fix.count());
+  printf("%d\n",current_round);
+  for (int i = 0; i < trajID_need_fix_next_vec.size(); ++i){
+    printf("trajID_need_fix_next: %d, wrong outside: %d, wrong max_iter: %d, wrong find_cp: %d\n", trajID_need_fix_next_vec[i], trajID_need_fix_next_detail_vec[i][0], trajID_need_fix_next_detail_vec[i][1], trajID_need_fix_next_detail_vec[i][2]);
   }
-  printf("lossless_sum_u_for_all_vertex_for_all_diff_traj: %f\n", lossless_sum_u);
+  // for (auto t:trajID_need_fix_next_vec){
+  //   printf("trajID_need_fix_next: %d\n", t);
+  // }
+  // for(auto t:trajID_need_fix_next_detail_vec){
+  //   printf("trajID_need_fix_next_detail: wrong outside: %d, wrong max_iter: %d, wrong find_cp: %d\n", t[0], t[1], t[2]);
+  // }
+  
+  // printf("%f\n",(traj_ori_begin_elapsed.count() + traj_dec_begin_elapsed.count()));
+  // printf("%f\n",init_queue_elapsed.count());
+  // printf("%f\n",std::accumulate(index_time_vec.begin(), index_time_vec.end(), 0.0));
+  // printf("%f\n",std::accumulate(re_cal_trajs_time_vec.begin(), re_cal_trajs_time_vec.end(), 0.0));
+  // printf("%f\n",std::accumulate(compare_time_vec.begin(), compare_time_vec.end(), 0.0));
+  // printf("%f\n",result_after_zstd_size, (2*r1*r2*sizeof(float)) * 1.0/result_after_zstd_size);
+  printf("====================================\n");
+  printf("# of all_vertex_for_all_diff_traj: %ld\n", all_vertex_for_all_diff_traj.size());
+  
   //检查all_vertex_for_all_diff_traj对应的点是否一致
   for (auto o:all_vertex_for_all_diff_traj){
     if (U[o] != final_dec_U[o] || V[o] != final_dec_V[o]){
@@ -1375,178 +1579,348 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
   refill_gradient(0, r1, r2, final_dec_U, grad_final);
   refill_gradient(1, r1, r2, final_dec_V, grad_final);
   auto critical_points_final =compute_critical_points(final_dec_U, final_dec_V, r1, r2);
-  std::vector<std::vector<std::array<double, 2>>> final_check_ori;
-  std::vector<std::vector<std::array<double, 2>>> final_check_dec;
-  std::vector<int> index_tmp;
-  std::vector<int> index_final;
-  std::set<size_t> vertex_final;
-  for(const auto& p:critical_points_final){
-    auto cp = p.second;
-    if (cp.type == SADDLE){
-      auto eigvec = cp.eig_vec;
-      auto eigval = cp.eig;
-      auto pt = cp.x;
-      std::array<std::array<double, 3>, 4> directions;//first is direction(1 or -1), next 2 are seed point
-      for (int i = 0; i < 2; i++){
-          if (eigval[i].real() > 0){
-            directions[i][0] = 1;
-            directions[i][1] = t_config.eps * eigvec[i][0] + pt[0];
-            directions[i][2] = t_config.eps * eigvec[i][1] + pt[1];
-            directions[i+2][0] = 1;
-            directions[i+2][1] = -1 * t_config.eps * eigvec[i][0] + pt[0];
-            directions[i+2][2] = -1 * t_config.eps * eigvec[i][1] + pt[1];
-          }
-          else{
-            directions[i][0] = -1;
-            directions[i][1] = t_config.eps * eigvec[i][0] + pt[0];
-            directions[i][2] = t_config.eps * eigvec[i][1] + pt[1];
-            directions[i+2][0] = -1;
-            directions[i+2][1] = -1 * t_config.eps * eigvec[i][0] + pt[0];
-            directions[i+2][2] = -1 * t_config.eps * eigvec[i][1] + pt[1];
-          }
+  
+  //check if all critical points are exactly preserved
+  // for (auto cp:critical_points_final){
+  //   auto ID = cp.first;
+  //   auto coord = cp.second.x;
+  //   for (auto cp_ori:critical_points_ori){
+  //     if (cp_ori.first == ID){
+  //       if (cp_ori.second.x[0] != coord[0] || cp_ori.second.x[1] != coord[1] || cp_ori.second.type != cp.second.type){
+  //         printf("critical point %ld is diff\n", ID);
+  //         printf("ori: (%f,%f), dec: (%f,%f)\n", cp_ori.second.x[0], cp_ori.second.x[1], coord[0], coord[1]);
+  //         exit(0);
+  //       }
+  //     }
+  //   }
+  // }
+
+ // 并行check************************************************
+
+  std::vector<size_t> keys_final_check;
+  for (const auto&p : critical_points_final){
+    if (p.second.type == SADDLE){
+      keys_final_check.push_back(p.first);
+    }
+  }
+  printf("keys size(# of saddle): %ld\n", keys.size());
+  std::vector<std::vector<std::array<double, 2>>> trajs_final_check(keys.size() * 4);//指定长度为saddle的个数*4，因为每个saddle有4个方向
+  printf("trajs_ori size: %ld\n", trajs_final_check.size());
+  // /*这里一定要加上去，不然由于动态扩容会产生额外开销*/
+  for (auto& traj : trajs_final_check) {
+      // traj.reserve(expected_size,{0.0, 0.0}); // 预分配容量
+      traj.resize(expected_size, {0.0, 0.0});
+  }
+
+  //std::atomic<size_t> trajID_counter(0);
+  std::vector<std::set<size_t>> thread_lossless_index_final_check(totoal_thread);
+  #pragma omp parallel for
+  // for(const auto& p:critical_points_ori){
+  for(size_t j = 0; j < keys.size(); ++j){
+    auto key = keys[j];
+    auto &cp = critical_points_final[key];
+    //auto cp = p.second;
+    if (cp.type != SADDLE){
+      printf("not saddle point\n");
+      exit(0);
+    }
+    int thread_id = omp_get_thread_num();
+    //printf("key: %ld, thread: %d\n", key, thread_id);
+    ori_saddle_count ++;
+    auto eigvec = cp.eig_vec;
+    auto eigval = cp.eig;
+    auto pt = cp.x;
+    std::array<std::array<double, 3>, 4> directions;//first is direction(1 or -1), next 2 are seed point
+    for (int i = 0; i < 2; ++i){
+            if (eigval[i].real() > 0){
+              directions[i][0] = 1;
+              directions[i][1] = t_config.eps * eigvec[i][0] + pt[0];
+              directions[i][2] = t_config.eps * eigvec[i][1] + pt[1];
+              directions[i+2][0] = 1;
+              directions[i+2][1] = -1 * t_config.eps * eigvec[i][0] + pt[0];
+              directions[i+2][2] = -1 * t_config.eps * eigvec[i][1] + pt[1];
+            }
+            else{
+              directions[i][0] = -1;
+              directions[i][1] = t_config.eps * eigvec[i][0] + pt[0];
+              directions[i][2] = t_config.eps * eigvec[i][1] + pt[1];
+              directions[i+2][0] = -1;
+              directions[i+2][1] = -1 * t_config.eps * eigvec[i][0] + pt[0];
+              directions[i+2][2] = -1 * t_config.eps * eigvec[i][1] + pt[1];
+            }
+    }
+
+
+    for (int k = 0; k < 4; ++k) {
+      std::vector<std::array<double, 2>> result_return;
+      //check if inside
+      std::array<double, 2> seed = {directions[k][1], directions[k][2]};
+      //size_t current_traj_index = trajID_counter++;
+      result_return = trajectory_parallel(pt, seed, directions[k][0] * t_config.h, t_config.max_length, DH, DW, critical_points_final, grad_final,thread_lossless_index_final_check,thread_id);
+      trajs_final_check[j *4 + k] = result_return;
+
+    }
+  }
+
+  //if file_dir is empty, then not write
+  if (file_dir != ""){
+  // printf("writing original and decompressed trajs to file...\n");
+    save_trajs_to_binary(trajs_ori, file_dir + "ori_traj.bin");
+    save_trajs_to_binary(trajs_final_check, file_dir + "dec_traj.bin");
+    writefile((file_dir + "decU.bin").c_str(), final_dec_U, r1*r2);
+    writefile((file_dir + "decV.bin").c_str(), final_dec_V, r1*r2);
+    std::vector<std::vector<std::array<double, 2>>> fixed_cpsz_trajs;
+    for (auto o:fixed_cpsz_trajID){
+      fixed_cpsz_trajs.push_back(trajs_dec[o]);
+    }
+    save_trajs_to_binary(fixed_cpsz_trajs, file_dir + "fixed_cpsz_traj.bin");
+  }
+
+
+  //check if all trajectories are fixed
+  bool terminate = false;
+  for (size_t i = 0; i < trajs_final_check.size(); ++i){
+    auto t1 = trajs_ori[i];
+    auto t2 = trajs_final_check[i];
+    if (LastTwoPointsAreEqual(t1)){
+      //ori outside
+      if (euclideanDistance(t1.back(),t2.back()) > threshold_outside){
+        printf("some trajectories not fixed(case0-0)\n");
+        printf("ori length: %zu, dec length: %zu\n", t1.size(), t2.size());
+        printf("ori first %f,%f, dec first %f,%f\n", t1[0][0], t1[0][1], t2[0][0], t2[0][1]);
+        printf("ori last-1 %f,%f, dec last-1 %f,%f\n", t1[t1.size()-2][0], t1[t1.size()-2][1], t2[t2.size()-2][0], t2[t2.size()-2][1]);
+        printf("ori last %f,%f, dec last %f,%f\n", t1.back()[0], t1.back()[1], t2.back()[0], t2.back()[1]);
+        terminate = true;
       }
-
-      for (int i = 0; i < 4; i ++) {
-        std::vector<std::array<double, 2>> result_return;
-        //check if inside
-        std::array<double, 2> seed = {directions[i][1], directions[i][2]};
-        double pos[2] = {cp.x[0], cp.x[1]};
-        std::vector<std::array<double, 2>> result_return_ori = trajectory(pos, seed, directions[i][0] * t_config.h, t_config.max_length, DH, DW, critical_points_final, grad_ori, index_tmp);
-        std::vector<std::array<double, 2>> result_return_dec = trajectory(pos, seed, directions[i][0] * t_config.h, t_config.max_length, DH, DW, critical_points_final, grad_final, index_final);
-        final_check_ori.push_back(result_return_ori);
-        final_check_dec.push_back(result_return_dec);
-        switch (obj)
-        {
-        case 0:
-          if (result_return_ori.back()[0] == -1){
-            if(result_return_dec.back()[0] != -1){
-              printf("some trajectories not fixed(case0-0)\n");
-              printf("ori length: %zu, dec length: %zu\n", result_return_ori.size(), result_return_dec.size());
-              printf("ori first %f,%f, dec first %f,%f\n", result_return_ori[0][0], result_return_ori[0][1], result_return_dec[0][0], result_return_dec[0][1]);
-              printf("ori last-1 %f,%f, dec last-1 %f,%f\n", result_return_ori[result_return_ori.size()-2][0], result_return_ori[result_return_ori.size()-2][1], result_return_dec[result_return_dec.size()-2][0], result_return_dec[result_return_dec.size()-2][1]);
-              printf("ori last %f,%f, dec last %f,%f\n", result_return_ori.back()[0], result_return_ori.back()[1], result_return_dec.back()[0], result_return_dec.back()[1]);
-              exit(0);
-            }
-            auto ori_last_inside = findLastNonNegativeOne(result_return_ori);
-            auto dec_last_inside = findLastNonNegativeOne(result_return_dec);
-            for(int j = result_return_dec.size()-1; j >= 0; --j){
-              if (get_cell_offset(ori_last_inside.data(), DW, DH) == get_cell_offset(result_return_dec[j].data(), DW, DH)){
-                break;
-              }
-              if (j == 0){ //not found
-                printf("some trajectories not fixed(case0-1)\n");
-                printf("ori length: %zu, dec length: %zu\n", result_return_ori.size(), result_return_dec.size());
-                printf("ori first %f,%f, dec first %f,%f\n", result_return_ori[0][0], result_return_ori[0][1], result_return_dec[0][0], result_return_dec[0][1]);
-                printf("ori last-1 %f,%f, dec last-1 %f,%f\n", result_return_ori[result_return_ori.size()-2][0], result_return_ori[result_return_ori.size()-2][1], result_return_dec[result_return_dec.size()-2][0], result_return_dec[result_return_dec.size()-2][1]);
-                printf("ori last %f,%f, dec last %f,%f\n", result_return_ori.back()[0], result_return_ori.back()[1], result_return_dec.back()[0], result_return_dec.back()[1]);
-                exit(0);
-              }
-            }
-            // if (get_cell_offset(ori_last_inside.data(), DW, DH) != get_cell_offset(dec_last_inside.data(), DW, DH)){
-            //   printf("some trajectories not fixed(case0-0)\n");
-            //   printf("ori length: %zu, dec length: %zu\n", result_return_ori.size(), result_return_dec.size());
-            //   printf("ori first %f,%f, dec first %f,%f\n", result_return_ori[0][0], result_return_ori[0][1], result_return_dec[0][0], result_return_dec[0][1]);
-            //   printf("ori last-1 %f,%f, dec last-1 %f,%f\n", result_return_ori[result_return_ori.size()-2][0], result_return_ori[result_return_ori.size()-2][1], result_return_dec[result_return_dec.size()-2][0], result_return_dec[result_return_dec.size()-2][1]);
-            //   printf("ori last %f,%f, dec last %f,%f\n", result_return_ori.back()[0], result_return_ori.back()[1], result_return_dec.back()[0], result_return_dec.back()[1]);
-            //   exit(0);
-            // }
+    }
+    else if (t1.size() == t_config.max_length){
+      //ori reach max, dec should satisfy distance
+      if(euclideanDistance(t1.back(),t2.back()) > threshold_max_iter){
+        printf("some trajectories not fixed(case0-1)\n");
+        printf("trajID: %ld\n", i);
+        printf("ori length: %zu, dec length: %zu\n", t1.size(), t2.size());
+        printf("ori first %f,%f, dec first %f,%f\n", t1[0][0], t1[0][1], t2[0][0], t2[0][1]);
+        printf("ori second %f,%f, dec second %f,%f\n", t1[1][0], t1[1][1], t2[1][0], t2[1][1]);
+        printf("ori last-1 %f,%f, dec last-1 %f,%f\n", t1[t1.size()-2][0], t1[t1.size()-2][1], t2[t2.size()-2][0], t2[t2.size()-2][1]);
+        printf("ori last %f,%f, dec last %f,%f,dist: %f\n", t1.back()[0], t1.back()[1], t2.back()[0], t2.back()[1], euclideanDistance(t1.back(),t2.back()));
+        terminate = true;
+        //print all t1,t2 when different
+        for (int i = 0; i < t_config.max_length; ++i){
+          if (t1[i][0] != t2[i][0] || t1[i][1] != t2[i][1]){
+            printf("different start from indx: %d, ori: (%f,%f), dec: (%f,%f)\n", i, t1[i][0], t1[i][1], t2[i][0], t2[i][1]);
+            // break;
+            exit(0);
           }
-          else if (result_return_ori.size() == t_config.max_length){
-            continue;
-          }
-          else if (result_return_ori.size() != t_config.max_length && result_return_ori.back()[0] != -1){
-            //inside and not reach max, ie found cp
-            if (get_cell_offset(result_return_ori.back().data(), DW, DH) != get_cell_offset(result_return_dec.back().data(), DW, DH)){
-              printf("some trajectories not fixed(case0-2\n");
-              printf("ori length: %zu, dec length: %zu\n", result_return_ori.size(), result_return_dec.size());
-              printf("ori first %f,%f, dec first %f,%f\n", result_return_ori[0][0], result_return_ori[0][1], result_return_dec[0][0], result_return_dec[0][1]);
-              printf("ori last-1 %f,%f, dec last-1 %f,%f\n", result_return_ori[result_return_ori.size()-2][0], result_return_ori[result_return_ori.size()-2][1], result_return_dec[result_return_dec.size()-2][0], result_return_dec[result_return_dec.size()-2][1]);
-              printf("ori last %f,%f, dec last %f,%f\n", result_return_ori.back()[0], result_return_ori.back()[1], result_return_dec.back()[0], result_return_dec.back()[1]);
-              exit(0);
-            }
-          }
-          break;
-        
-        case 2:
-          if (result_return_ori.back()[0] == -1){
-            if(result_return_dec.back()[0] != -1){
-              printf("some trajectories not fixed(case2-0)\n");
-              printf("ori length: %zu, dec length: %zu\n", result_return_ori.size(), result_return_dec.size());
-              printf("ori first %f,%f, dec first %f,%f\n", result_return_ori[0][0], result_return_ori[0][1], result_return_dec[0][0], result_return_dec[0][1]);
-              printf("ori last-1 %f,%f, dec last-1 %f,%f\n", result_return_ori[result_return_ori.size()-2][0], result_return_ori[result_return_ori.size()-2][1], result_return_dec[result_return_dec.size()-2][0], result_return_dec[result_return_dec.size()-2][1]);
-              printf("ori last %f,%f, dec last %f,%f\n", result_return_ori.back()[0], result_return_ori.back()[1], result_return_dec.back()[0], result_return_dec.back()[1]);
-              exit(0);
-            }
-            auto ori_last_inside = findLastNonNegativeOne(result_return_ori);
-            auto dec_last_inside = findLastNonNegativeOne(result_return_dec);
-            for(int j = result_return_dec.size()-1; j >= 0; --j){
-              if (get_cell_offset(ori_last_inside.data(), DW, DH) == get_cell_offset(result_return_dec[j].data(), DW, DH)){
-                break;
-              }
-              if (j == 0){ //not found
-                printf("some trajectories not fixed(case2-1)\n");
-                printf("ori length: %zu, dec length: %zu\n", result_return_ori.size(), result_return_dec.size());
-                printf("ori first %f,%f, dec first %f,%f\n", result_return_ori[0][0], result_return_ori[0][1], result_return_dec[0][0], result_return_dec[0][1]);
-                printf("ori last-1 %f,%f, dec last-1 %f,%f\n", result_return_ori[result_return_ori.size()-2][0], result_return_ori[result_return_ori.size()-2][1], result_return_dec[result_return_dec.size()-2][0], result_return_dec[result_return_dec.size()-2][1]);
-                printf("ori last %f,%f, dec last %f,%f\n", result_return_ori.back()[0], result_return_ori.back()[1], result_return_dec.back()[0], result_return_dec.back()[1]);
-                exit(0);
-              }
-            }
-            // if (get_cell_offset(ori_last_inside.data(), DW, DH) != get_cell_offset(dec_last_inside.data(), DW, DH)){
-            //   printf("some trajectories not fixed(case2-0)\n");
-            //   printf("ori length: %zu, dec length: %zu\n", result_return_ori.size(), result_return_dec.size());
-            //   printf("ori first %f,%f, dec first %f,%f\n", result_return_ori[0][0], result_return_ori[0][1], result_return_dec[0][0], result_return_dec[0][1]);
-            //   printf("ori last-1 %f,%f, dec last-1 %f,%f\n", result_return_ori[result_return_ori.size()-2][0], result_return_ori[result_return_ori.size()-2][1], result_return_dec[result_return_dec.size()-2][0], result_return_dec[result_return_dec.size()-2][1]);
-            //   printf("ori last %f,%f, dec last %f,%f\n", result_return_ori.back()[0], result_return_ori.back()[1], result_return_dec.back()[0], result_return_dec.back()[1]);
-            //   exit(0);
-            // }
-          }
-          else if (result_return_ori.size() == t_config.max_length){
-            if (result_return_dec.size() != t_config.max_length){
-              printf("some trajectories not fixed(case2-2)\n");
-              printf("ori length: %zu, dec length: %zu\n", result_return_ori.size(), result_return_dec.size());
-              printf("ori first %f,%f, dec first %f,%f\n", result_return_ori[0][0], result_return_ori[0][1], result_return_dec[0][0], result_return_dec[0][1]);
-              printf("ori last-1 %f,%f, dec last-1 %f,%f\n", result_return_ori[result_return_ori.size()-2][0], result_return_ori[result_return_ori.size()-2][1], result_return_dec[result_return_dec.size()-2][0], result_return_dec[result_return_dec.size()-2][1]);
-              printf("ori last %f,%f, dec last %f,%f\n", result_return_ori.back()[0], result_return_ori.back()[1], result_return_dec.back()[0], result_return_dec.back()[1]);
-              exit(0);
-            }
-          }
-          else if (result_return_ori.size() != t_config.max_length && result_return_ori.back()[0] != -1){
-            //inside and not reach max, ie found cp
-            if (get_cell_offset(result_return_ori.back().data(), DW, DH) != get_cell_offset(result_return_dec.back().data(), DW, DH)){
-              printf("some trajectories not fixed(case2-3\n");
-              printf("ori length: %zu, dec length: %zu\n", result_return_ori.size(), result_return_dec.size());
-              printf("ori first %f,%f, dec first %f,%f\n", result_return_ori[0][0], result_return_ori[0][1], result_return_dec[0][0], result_return_dec[0][1]);
-              printf("ori last-1 %f,%f, dec last-1 %f,%f\n", result_return_ori[result_return_ori.size()-2][0], result_return_ori[result_return_ori.size()-2][1], result_return_dec[result_return_dec.size()-2][0], result_return_dec[result_return_dec.size()-2][1]);
-              printf("ori last %f,%f, dec last %f,%f\n", result_return_ori.back()[0], result_return_ori.back()[1], result_return_dec.back()[0], result_return_dec.back()[1]);
-              exit(0);
-            }
-          }
-          break;
         }
-
 
       }
     }
+    else{
+      //ori inside, not reach max, ie found cp
+      if (get_cell_offset(t1.back().data(), DW, DH) != get_cell_offset(t2.back().data(), DW, DH)){
+        printf("some trajectories not fixed(case0-2)\n");
+        printf("ori length: %zu, dec length: %zu\n", t1.size(), t2.size());
+        printf("ori first %f,%f, dec first %f,%f\n", t1[0][0], t1[0][1], t2[0][0], t2[0][1]);
+        printf("ori last-1 %f,%f, dec last-1 %f,%f\n", t1[t1.size()-2][0], t1[t1.size()-2][1], t2[t2.size()-2][0], t2[t2.size()-2][1]);
+        printf("ori last %f,%f, dec last %f,%f\n", t1.back()[0], t1.back()[1], t2.back()[0], t2.back()[1]);
+        terminate = true;
+      }
+    }
   }
-  printf("all pass!\n");
+  if (terminate){
+    printf("some trajectories not fixed\n");
+    exit(0);
+  }
+  else{
+    printf("all passed!\n");
+  }
+  // exit(0);
+
+
+
+  // std::vector<std::vector<std::array<double, 2>>> final_check_ori;
+  // std::vector<std::vector<std::array<double, 2>>> final_check_dec;
+  // std::vector<int> index_tmp;
+  // std::vector<int> index_final;
+  // std::set<size_t> vertex_final;
+  // for(const auto& p:critical_points_final){
+  //   auto cp = p.second;
+  //   if (cp.type == SADDLE){
+  //     auto eigvec = cp.eig_vec;
+  //     auto eigval = cp.eig;
+  //     auto pt = cp.x;
+  //     std::array<std::array<double, 3>, 4> directions;//first is direction(1 or -1), next 2 are seed point
+  //     for (int i = 0; i < 2; i++){
+  //         if (eigval[i].real() > 0){
+  //           directions[i][0] = 1;
+  //           directions[i][1] = t_config.eps * eigvec[i][0] + pt[0];
+  //           directions[i][2] = t_config.eps * eigvec[i][1] + pt[1];
+  //           directions[i+2][0] = 1;
+  //           directions[i+2][1] = -1 * t_config.eps * eigvec[i][0] + pt[0];
+  //           directions[i+2][2] = -1 * t_config.eps * eigvec[i][1] + pt[1];
+  //         }
+  //         else{
+  //           directions[i][0] = -1;
+  //           directions[i][1] = t_config.eps * eigvec[i][0] + pt[0];
+  //           directions[i][2] = t_config.eps * eigvec[i][1] + pt[1];
+  //           directions[i+2][0] = -1;
+  //           directions[i+2][1] = -1 * t_config.eps * eigvec[i][0] + pt[0];
+  //           directions[i+2][2] = -1 * t_config.eps * eigvec[i][1] + pt[1];
+  //         }
+  //     }
+
+  //     for (int i = 0; i < 4; i ++) {
+  //       std::vector<std::array<double, 2>> result_return;
+  //       //check if inside
+  //       std::array<double, 2> seed = {directions[i][1], directions[i][2]};
+  //       double pos[2] = {cp.x[0], cp.x[1]};
+  //       std::set<size_t> temp1,temp2;
+  //       std::vector<std::array<double, 2>> result_return_ori = trajectory(pos, seed, directions[i][0] * t_config.h, t_config.max_length, DH, DW, critical_points_final, grad_ori, index_tmp,temp1);
+  //       std::vector<std::array<double, 2>> result_return_dec = trajectory(pos, seed, directions[i][0] * t_config.h, t_config.max_length, DH, DW, critical_points_final, grad_final, index_final,temp2);
+  //       final_check_ori.push_back(result_return_ori);
+  //       final_check_dec.push_back(result_return_dec);
+  //       bool terminate = false;
+  //       switch (obj)
+  //       {
+  //       case 0:
+  //         // if (LastTwoPointsAreEqual(result_return_ori)){
+  //         //   //outside
+  //         //   if(!SearchElementFromBack(result_return_dec, result_return_ori.back())){
+  //         //     printf("some trajectories not fixed(case0-0)\n");
+  //         //     printf("ori length: %zu, dec length: %zu\n", result_return_ori.size(), result_return_dec.size());
+  //         //     printf("ori first %f,%f, dec first %f,%f\n", result_return_ori[0][0], result_return_ori[0][1], result_return_dec[0][0], result_return_dec[0][1]);
+  //         //     printf("ori last-1 %f,%f, dec last-1 %f,%f\n", result_return_ori[result_return_ori.size()-2][0], result_return_ori[result_return_ori.size()-2][1], result_return_dec[result_return_dec.size()-2][0], result_return_dec[result_return_dec.size()-2][1]);
+  //         //     printf("ori last %f,%f, dec last %f,%f\n", result_return_ori.back()[0], result_return_ori.back()[1], result_return_dec.back()[0], result_return_dec.back()[1]);
+  //         //     exit(0);
+  //         //   }
+  //         // }
+  //         if (LastTwoPointsAreEqual(result_return_ori)){
+  //           if (euclideanDistance(result_return_ori.back(),result_return_dec.back()) > threshold_outside){
+  //             printf("some trajectories not fixed(case0-0)\n");
+  //             printf("ori length: %zu, dec length: %zu\n", result_return_ori.size(), result_return_dec.size());
+  //             printf("ori first %f,%f, dec first %f,%f\n", result_return_ori[0][0], result_return_ori[0][1], result_return_dec[0][0], result_return_dec[0][1]);
+  //             printf("ori last-1 %f,%f, dec last-1 %f,%f\n", result_return_ori[result_return_ori.size()-2][0], result_return_ori[result_return_ori.size()-2][1], result_return_dec[result_return_dec.size()-2][0], result_return_dec[result_return_dec.size()-2][1]);
+  //             printf("ori last %f,%f, dec last %f,%f\n", result_return_ori.back()[0], result_return_ori.back()[1], result_return_dec.back()[0], result_return_dec.back()[1]);
+  //             terminate = true;
+  //           }
+  //         }
+  //         else if (result_return_ori.size() == t_config.max_length){
+  //           if (euclideanDistance(result_return_ori.back(),result_return_dec.back()) > threshold_max_iter){
+  //             printf("some trajectories not fixed(case0-1)\n");
+  //             printf("ori length: %zu, dec length: %zu\n", result_return_ori.size(), result_return_dec.size());
+  //             printf("ori first %f,%f, dec first %f,%f\n", result_return_ori[0][0], result_return_ori[0][1], result_return_dec[0][0], result_return_dec[0][1]);
+  //             printf("ori last-1 %f,%f, dec last-1 %f,%f\n", result_return_ori[result_return_ori.size()-2][0], result_return_ori[result_return_ori.size()-2][1], result_return_dec[result_return_dec.size()-2][0], result_return_dec[result_return_dec.size()-2][1]);
+  //             printf("ori last %f,%f, dec last %f,%f\n", result_return_ori.back()[0], result_return_ori.back()[1], result_return_dec.back()[0], result_return_dec.back()[1]);
+  //             printf("distance: %f\n", euclideanDistance(result_return_ori.back(),result_return_dec.back()));
+  //             //print all result_return_ori, result_return_dec
+  //             for (size_t i = 0; i < result_return_ori.size(); ++i){
+  //               printf("ori: (%f,%f), dec: (%f,%f)\n", result_return_ori[i][0], result_return_ori[i][1], result_return_dec[i][0], result_return_dec[i][1]);
+  //             }
+  //             printf("====================================\n");
+  //             terminate = true;
+  //           }
+  //         }
+  //         else{
+  //           //inside and not reach max, ie found cp
+  //           if(get_cell_offset(result_return_ori.back().data(), DW, DH) != get_cell_offset(result_return_dec.back().data(), DW, DH)){
+  //             printf("some trajectories not fixed(case0-2)\n");
+  //             printf("ori length: %zu, dec length: %zu\n", result_return_ori.size(), result_return_dec.size());
+  //             printf("ori first %f,%f, dec first %f,%f\n", result_return_ori[0][0], result_return_ori[0][1], result_return_dec[0][0], result_return_dec[0][1]);
+  //             printf("ori last-1 %f,%f, dec last-1 %f,%f\n", result_return_ori[result_return_ori.size()-2][0], result_return_ori[result_return_ori.size()-2][1], result_return_dec[result_return_dec.size()-2][0], result_return_dec[result_return_dec.size()-2][1]);
+  //             printf("ori last %f,%f, dec last %f,%f\n", result_return_ori.back()[0], result_return_ori.back()[1], result_return_dec.back()[0], result_return_dec.back()[1]);
+  //             terminate = true;
+  //           }
+  //         }
+  //         break;
+        
+  //       case 2:
+  //         // if (result_return_ori.back()[0] == -1){
+  //         //   if(result_return_dec.back()[0] != -1){
+  //         //     printf("some trajectories not fixed(case2-0)\n");
+  //         //     printf("ori length: %zu, dec length: %zu\n", result_return_ori.size(), result_return_dec.size());
+  //         //     printf("ori first %f,%f, dec first %f,%f\n", result_return_ori[0][0], result_return_ori[0][1], result_return_dec[0][0], result_return_dec[0][1]);
+  //         //     printf("ori last-1 %f,%f, dec last-1 %f,%f\n", result_return_ori[result_return_ori.size()-2][0], result_return_ori[result_return_ori.size()-2][1], result_return_dec[result_return_dec.size()-2][0], result_return_dec[result_return_dec.size()-2][1]);
+  //         //     printf("ori last %f,%f, dec last %f,%f\n", result_return_ori.back()[0], result_return_ori.back()[1], result_return_dec.back()[0], result_return_dec.back()[1]);
+  //         //     exit(0);
+  //         //   }
+  //         //   auto ori_last_inside = findLastNonNegativeOne(result_return_ori);
+  //         //   auto dec_last_inside = findLastNonNegativeOne(result_return_dec);
+  //         //   for(int j = result_return_dec.size()-1; j >= 0; --j){
+  //         //     if (get_cell_offset(ori_last_inside.data(), DW, DH) == get_cell_offset(result_return_dec[j].data(), DW, DH)){
+  //         //       break;
+  //         //     }
+  //         //     if (j == 0){ //not found
+  //         //       printf("some trajectories not fixed(case2-1)\n");
+  //         //       printf("ori length: %zu, dec length: %zu\n", result_return_ori.size(), result_return_dec.size());
+  //         //       printf("ori first %f,%f, dec first %f,%f\n", result_return_ori[0][0], result_return_ori[0][1], result_return_dec[0][0], result_return_dec[0][1]);
+  //         //       printf("ori last-1 %f,%f, dec last-1 %f,%f\n", result_return_ori[result_return_ori.size()-2][0], result_return_ori[result_return_ori.size()-2][1], result_return_dec[result_return_dec.size()-2][0], result_return_dec[result_return_dec.size()-2][1]);
+  //         //       printf("ori last %f,%f, dec last %f,%f\n", result_return_ori.back()[0], result_return_ori.back()[1], result_return_dec.back()[0], result_return_dec.back()[1]);
+  //         //       exit(0);
+  //         //     }
+  //         //   }
+  //         // }
+  //         if (LastTwoPointsAreEqual(result_return_ori)){
+  //           //outside
+  //           if(!SearchElementFromBack(result_return_dec, result_return_ori.back())){
+  //             printf("some trajectories not fixed(case0-0)\n");
+  //             printf("ori length: %zu, dec length: %zu\n", result_return_ori.size(), result_return_dec.size());
+  //             printf("ori first %f,%f, dec first %f,%f\n", result_return_ori[0][0], result_return_ori[0][1], result_return_dec[0][0], result_return_dec[0][1]);
+  //             printf("ori last-1 %f,%f, dec last-1 %f,%f\n", result_return_ori[result_return_ori.size()-2][0], result_return_ori[result_return_ori.size()-2][1], result_return_dec[result_return_dec.size()-2][0], result_return_dec[result_return_dec.size()-2][1]);
+  //             printf("ori last %f,%f, dec last %f,%f\n", result_return_ori.back()[0], result_return_ori.back()[1], result_return_dec.back()[0], result_return_dec.back()[1]);
+  //             exit(0);
+  //           }
+  //         }
+  //         else if (result_return_ori.size() == t_config.max_length){
+  //           if (result_return_dec.size() != t_config.max_length){
+  //             printf("some trajectories not fixed(case2-2)\n");
+  //             printf("ori length: %zu, dec length: %zu\n", result_return_ori.size(), result_return_dec.size());
+  //             printf("ori first %f,%f, dec first %f,%f\n", result_return_ori[0][0], result_return_ori[0][1], result_return_dec[0][0], result_return_dec[0][1]);
+  //             printf("ori last-1 %f,%f, dec last-1 %f,%f\n", result_return_ori[result_return_ori.size()-2][0], result_return_ori[result_return_ori.size()-2][1], result_return_dec[result_return_dec.size()-2][0], result_return_dec[result_return_dec.size()-2][1]);
+  //             printf("ori last %f,%f, dec last %f,%f\n", result_return_ori.back()[0], result_return_ori.back()[1], result_return_dec.back()[0], result_return_dec.back()[1]);
+  //             exit(0);
+  //           }
+  //         }
+  //         else{
+  //           //inside and not reach max, ie found cp
+  //           if (get_cell_offset(result_return_ori.back().data(), DW, DH) != get_cell_offset(result_return_dec.back().data(), DW, DH)){
+  //             printf("some trajectories not fixed(case2-3\n");
+  //             printf("ori length: %zu, dec length: %zu\n", result_return_ori.size(), result_return_dec.size());
+  //             printf("ori first %f,%f, dec first %f,%f\n", result_return_ori[0][0], result_return_ori[0][1], result_return_dec[0][0], result_return_dec[0][1]);
+  //             printf("ori last-1 %f,%f, dec last-1 %f,%f\n", result_return_ori[result_return_ori.size()-2][0], result_return_ori[result_return_ori.size()-2][1], result_return_dec[result_return_dec.size()-2][0], result_return_dec[result_return_dec.size()-2][1]);
+  //             printf("ori last %f,%f, dec last %f,%f\n", result_return_ori.back()[0], result_return_ori.back()[1], result_return_dec.back()[0], result_return_dec.back()[1]);
+  //             exit(0);
+  //           }
+  //         }
+  //         break;
+  //       }
+
+
+  //     }
+  //   }
+  // }
+  // if (!terminate){
+  // printf("all pass!\n");
+  // }
+  // else{
+  //   printf("some trajectories not fixed\n");
+  // }
   //calculate frechet distance
-  int numTrajectories = final_check_ori.size();
+  int numTrajectories = trajs_ori.size();
   vector<double> frechetDistances(numTrajectories, -1);
   auto frechetDis_time_start = std::chrono::high_resolution_clock::now();
   double max_distance = -1.0;
   int max_index = -1;
   #pragma omp parallel for
   for (int i = 0; i < numTrajectories; i++) {
-    auto t1 = final_check_ori[i];
-    auto t2 = final_check_dec[i];
-    //remove (-1,-1) from t1 and t2,from the end
-    while (t1.back()[0] == -1){
-      t1.pop_back();
-    }
-    while (t2.back()[0] == -1){
-      t2.pop_back();
-    }
+    auto t1 = trajs_ori[i];
+    auto t2 = trajs_final_check[i];
+    // //remove (-1,-1) from t1 and t2,from the end
+    // while (t1.back()[0] == -1){
+    //   t1.pop_back();
+    // }
+    // while (t2.back()[0] == -1){
+    //   t2.pop_back();
+    // }
     frechetDistances[i] = frechetDistance(t1, t2);
     #pragma omp critical
     {
@@ -1560,14 +1934,23 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
   std::chrono::duration<double> frechetDis_time_elapsed = frechetDis_time_end - frechetDis_time_start;
   printf("frechetDis_time: %f\n", frechetDis_time_elapsed.count());
   //print max distance and start point， end point
-  printf("max_distance start point ori: %f,%f\n", final_check_ori[max_index][0][0], final_check_ori[max_index][0][1]);
-  printf("max_distance start point dec: %f,%f\n", final_check_dec[max_index][0][0], final_check_dec[max_index][0][1]);
-  printf("max_distance end point ori: %f,%f\n", final_check_ori[max_index].back()[0], final_check_ori[max_index].back()[1]);
-  printf("max_distance end point dec: %f,%f\n", final_check_dec[max_index].back()[0], final_check_dec[max_index].back()[1]);
-  printf("dec length: %zu, ori length: %zu\n", final_check_dec[max_index].size(), final_check_ori[max_index].size());
+  printf("max_distance start point ori: %f,%f\n", trajs_ori[max_index][0][0], trajs_ori[max_index][0][1]);
+  printf("max_distance start point dec: %f,%f\n", trajs_final_check[max_index][0][0], trajs_final_check[max_index][0][1]);
+  printf("max_distance end point -1 ori: %f,%f\n", trajs_ori[max_index][trajs_ori[max_index].size()-2][0], trajs_ori[max_index][trajs_ori[max_index].size()-2][1]);
+  printf("max_distance end point -1 dec: %f,%f\n", trajs_final_check[max_index][trajs_final_check[max_index].size()-2][0], trajs_final_check[max_index][trajs_final_check[max_index].size()-2][1]);
+  printf("max_distance end point ori: %f,%f\n", trajs_ori[max_index].back()[0], trajs_ori[max_index].back()[1]);
+  printf("max_distance end point dec: %f,%f\n", trajs_final_check[max_index].back()[0], trajs_final_check[max_index].back()[1]);
+  printf("dec length: %zu, ori length: %zu\n", trajs_final_check[max_index].size(), trajs_ori[max_index].size());
   //calculate statistics
   double minVal, maxVal, medianVal, meanVal, stdevVal;
   calculateStatistics(frechetDistances, minVal, maxVal, medianVal, meanVal, stdevVal);
+
+  std::vector<std::vector<std::array<double, 2>>> max_distance_traj;
+  max_distance_traj.push_back(trajs_ori[max_index]);
+  max_distance_traj.push_back(trajs_final_check[max_index]);
+  if (file_dir != ""){
+    save_trajs_to_binary(max_distance_traj, file_dir + "max_distance_traj.bin");
+  }
 
   //print boxplot data
   printf("Statistics data===============\n");
@@ -1582,12 +1965,7 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
 
 
 
-  //if file_dir is empty, then not write
-  if (file_dir != ""){
-    // printf("writing original and decompressed trajs to file...\n");
-    // save_trajs_to_binary(final_check_ori, file_dir + "ori_traj.bin");
-    // save_trajs_to_binary(final_check_dec, file_dir + "dec_traj.bin");
-  }
+
 
   free(result_after_zstd);
 
@@ -1610,10 +1988,22 @@ int main(int argc, char **argv){
   //traj_config t_config = {0.05, 0.01, 2000};
   traj_config t_config = {h, eps, max_length};
   //double max_eb = 0.01;
-  //int objectives = 0;
-  int obj = atoi(argv[9]);
+  int obj = 0;
+  std::string eb_type = argv[9];
+  //int obj = atoi(argv[9]);
   int total_thread = atoi(argv[10]);
-  std::string file_out_dir = argv[11];
+
+  double threshold = atof(argv[11]);
+  double threshold_outside = atof(argv[12]);
+  double threshold_max_iter = atof(argv[13]);
+  std::string file_out_dir;
+  if (argc == 15){
+    file_out_dir = argv[14];
+  }
+  else{
+    file_out_dir = "";
+  }
+  
   omp_set_num_threads(total_thread);
   /*
   objectives0: only garantee those trajectories that reach cp are correct
@@ -1622,7 +2012,7 @@ int main(int argc, char **argv){
 
   */
   //fix_traj(u, v,DH, DW, max_eb, t_config, obj);
-  fix_traj_v2(u, v,DH, DW, max_eb, t_config, total_thread,obj, file_out_dir);
+  fix_traj_v2(u, v,DH, DW, max_eb, t_config, total_thread,obj,eb_type,threshold,threshold_outside,threshold_max_iter, file_out_dir);
 
   free(u);
   free(v);

@@ -44,10 +44,19 @@ static const int tet_coords[6][4][3] = {
 
 template<typename Container>
 bool inside(const Container& x, int DH, int DW) {
-  if (x[0] <=0 || x[0] >= DW-1 || x[1] <= 0 || x[1] >= DH-1) return false;
+  return (x[0] >= 0 && x[0] < DW-1 && x[1] >= 0 && x[1] < DH-1);
+}
+
+template<typename Container>
+inline bool inside(const Container& x, int DH, int DW, int DD) {
+  if (x[0]<=0 || x[0]>=DW-1 || x[1]<=0 || x[1]>=DH-1 || x[2]<=0 || x[2]>=DD-1) return false;
   return true;
 }
 
+template<typename Container>
+inline bool inside_domain(const Container& x, int DH, int DW, int DD) {
+    return (x[0] >= 0 && x[0] < DW-1 && x[1] >= 0 && x[1] < DH-1 && x[2] >= 0 && x[2] < DD-1);
+}
 
 
 inline bool is_upper(const std::array<double, 2> x){
@@ -134,6 +143,12 @@ size_t get_cell_offset_3d(const T *x_, const int DW, const int DH, const int DD)
     int x0 = std::floor(x);
     int y0 = std::floor(y);
     int z0 = std::floor(z);
+    // 检查是否出界：x0 + 1, y0 + 1, z0 + 1 不得超过 DW-1, DH-1, DD-1
+    if (x0 < 0 || x0 >= DW - 1 || y0 < 0 || y0 >= DH - 1 || z0 < 0 || z0 >= DD - 1) {
+      std::ostringstream oss;
+      oss << "Coordinates are out of bounds: x_ = [" << x_[0] << ", " << x_[1] << ", " << x_[2] << "]";
+      throw std::runtime_error(oss.str());
+    }
     double x_delta = x - x0;
     double y_delta = y - y0;
     double z_delta = z - z0;
@@ -179,6 +194,8 @@ size_t get_cell_offset_3d(const T *x_, const int DW, const int DH, const int DD)
       return 5+ (x0 + y0 * DW + z0 * DW * DH)*6;
     }
     else{
+      //print out
+      std::cerr << "Error: " << "x: " << x << ", y: " << y << ", z: " << z << std::endl;
       throw std::runtime_error("Could not get_cell_offset_3d");
     }
 }
@@ -191,9 +208,9 @@ std::array<size_t, 3> get_three_offsets(const T& x, const int DW, const int DH){
   size_t x0 = floor(x[0]); 
   size_t y0 = floor(x[1]);
   std::array<size_t, 3> result;
-  if(!inside(x, DH, DW)){
-    return {0, 0, 0};
-  }
+  if (x0 < 0 || x0 >= DW-1 || y0 < 0 || y0 >= DH-1){
+    throw std::runtime_error("Coordinates are out of bounds in get_three_offsets.");
+    }
   if (is_upper({x[0], x[1]})){
     result[0] = y0 * DW + x0;
     result[1] = y0 * DW + x0 + DW;
@@ -252,9 +269,16 @@ std::array<size_t,4> get_four_offsets(const T& x_, const int DW, const int DH,co
   double x = x_[0];
   double y = x_[1];
   double z = x_[2];
-  size_t x0 = std::floor(x);
-  size_t y0 = std::floor(y);
-  size_t z0 = std::floor(z);
+  int x0 = std::floor(x);
+  int y0 = std::floor(y);
+  int z0 = std::floor(z);
+  std::array<int, 3> x0y0z0 = {x0, y0, z0};
+  // if (x0 < 0 || x0 >= DW-1 || y0 < 0 || y0 >= DH-1 || z0 < 0 || z0 >= DD-1){
+  //   return {0, 0, 0, 0};
+  // }
+  if (x0 < 0 || x0 >= DW-1 || y0 < 0 || y0 >= DH-1 || z0 < 0 || z0 >= DD-1) {
+      throw std::runtime_error("Coordinates are out of bounds in get_four_offsets.");
+  }
 
   Point V0(x0, y0, z0); //（0，0，0）
   Point V1(x0 + 1, y0, z0); //（1，0，0）
@@ -276,22 +300,22 @@ std::array<size_t,4> get_four_offsets(const T& x_, const int DW, const int DH,co
   double y_delta = y - y0;
   double z_delta = z - z0;
   if (x_delta <= y_delta && y_delta <= z_delta){
-    return {x0+y0*DW+z0*DW*DH, x0+y0*DW+(z0+1)*DW*DH, x0+(y0+1)*DW+(z0+1)*DW*DH, (x0+1)+(y0+1)*DW+(z0+1)*DW*DH};
+    return {static_cast<size_t>(x0+y0*DW+z0*DW*DH), static_cast<size_t>(x0+y0*DW+(z0+1)*DW*DH), static_cast<size_t>(x0+(y0+1)*DW+(z0+1)*DW*DH), static_cast<size_t>((x0+1)+(y0+1)*DW+(z0+1)*DW*DH)};
   }
   else if (y_delta <= x_delta && x_delta <= z_delta){
-    return {x0+y0*DW+z0*DW*DH, x0+y0*DW+(z0+1)*DW*DH, (x0+1)+y0*DW+(z0+1)*DW*DH, (x0+1)+(y0+1)*DW+(z0+1)*DW*DH};
+    return {static_cast<size_t>(x0+y0*DW+z0*DW*DH), static_cast<size_t>(x0+y0*DW+(z0+1)*DW*DH), static_cast<size_t>((x0+1)+y0*DW+(z0+1)*DW*DH), static_cast<size_t>((x0+1)+(y0+1)*DW+(z0+1)*DW*DH)};
   }
   else if (x_delta <= z_delta && x_delta <= y_delta){
-    return {x0+y0*DW+z0*DW*DH, x0+(y0+1)*DW+z0*DW*DH, x0+(y0+1)*DW+(z0+1)*DW*DH, (x0+1)+(y0+1)*DW+(z0+1)*DW*DH};
+    return {static_cast<size_t>(x0+y0*DW+z0*DW*DH), static_cast<size_t>(x0+(y0+1)*DW+z0*DW*DH), static_cast<size_t>(x0+(y0+1)*DW+(z0+1)*DW*DH), static_cast<size_t>((x0+1)+(y0+1)*DW+(z0+1)*DW*DH)};
   }
   else if (z_delta <= x_delta && x_delta <= y_delta){
-    return {x0+y0*DW+z0*DW*DH, x0+(y0+1)*DW+z0*DW*DH, (x0+1)+(y0+1)*DW+z0*DW*DH, (x0+1)+(y0+1)*DW+(z0+1)*DW*DH};
+    return {static_cast<size_t>(x0+y0*DW+z0*DW*DH), static_cast<size_t>(x0+(y0+1)*DW+z0*DW*DH), static_cast<size_t>((x0+1)+(y0+1)*DW+z0*DW*DH), static_cast<size_t>((x0+1)+(y0+1)*DW+(z0+1)*DW*DH)};
   }
   else if (y_delta <= z_delta && z_delta <= x_delta){
-    return {x0+y0*DW+z0*DW*DH, (x0+1)+y0*DW+z0*DW*DH, (x0+1)+y0*DW+(z0+1)*DW*DH, (x0+1)+(y0+1)*DW+(z0+1)*DW*DH};
+    return {static_cast<size_t>(x0+y0*DW+z0*DW*DH), static_cast<size_t>((x0+1)+y0*DW+z0*DW*DH), static_cast<size_t>((x0+1)+y0*DW+(z0+1)*DW*DH), static_cast<size_t>((x0+1)+(y0+1)*DW+(z0+1)*DW*DH)};
   }
   else if (z_delta <= y_delta && y_delta <= x_delta){
-    return {x0+y0*DW+z0*DW*DH, (x0+1)+y0*DW+z0*DW*DH, (x0+1)+(y0+1)*DW+z0*DW*DH, (x0+1)+(y0+1)*DW+(z0+1)*DW*DH};
+    return {static_cast<size_t>(x0+y0*DW+z0*DW*DH), static_cast<size_t>((x0+1)+y0*DW+z0*DW*DH), static_cast<size_t>((x0+1)+(y0+1)*DW+z0*DW*DH), static_cast<size_t>((x0+1)+(y0+1)*DW+(z0+1)*DW*DH)};
   }
   else{
     throw std::runtime_error("could not determine the cell offset");

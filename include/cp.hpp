@@ -104,3 +104,4 @@ template<typename T>
 std::unordered_map<size_t, critical_point_t>
 compute_critical_points(const T * U, const T * V, int r1, int r2);
 
+int check_cp(double v[3][2]);

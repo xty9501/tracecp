@@ -9,8 +9,10 @@ project(traceview)
 set(CMAKE_BUILD_TYPE "Debug")
 
 # 查找 FTK 包
-#find_package(FTK REQUIRED HINTS "/home/mxi235/CP/ftk/install/lib64/cmake/FTK/")
-find_package(FTK REQUIRED HINTS "/home/mxi235/test_cpsz/cpSZ/external/ftk/install/lib64/cmake/FTK")
+# find_package(FTK REQUIRED HINTS "/home/mxi235/CP/ftk/install/lib64/cmake/FTK")
+
+find_package(FTK REQUIRED HINTS "/home/mxi235/test_cpsz/cpSZ_debug/external/ftk/install/lib64/cmake/FTK")
+#find_package(FTK REQUIRED HINTS "/home/mxi235/test_cpsz/cpSZ/external/ftk/install/lib64/cmake/FTK") #ok
 # 查找zstd包
 find_package(zstd REQUIRED)
 # 查找 Eigen3 包
@@ -32,13 +34,14 @@ file(GLOB SOURCES "src/*.cpp")
 
 # 添加可执行文件
 add_executable(test ${SOURCES} ../tests/main.cpp src/cp.cpp src/advect.cpp)
-add_executable(single_traj ${SOURCES} tests/single_traj.cpp src/interp.cpp src/utilsIO.cpp include/advect.hpp include/utils.hpp include/cp.hpp)
+# add_executable(single_traj ${SOURCES} tests/single_traj.cpp src/interp.cpp src/utilsIO.cpp include/advect.hpp include/utils.hpp include/cp.hpp)
 add_executable(test3d ${SOURCES} tests/main3d.cpp src/interp.cpp src/utilsIO.cpp include/advect.hpp include/utils.hpp include/cp.hpp)
-
+add_executable(naive2d ${SOURCES} ../tests/naive2d.cpp src/cp.cpp src/advect.cpp)
 # 链接库
 target_link_libraries(test PUBLIC FTK::libftk zstd::libzstd_shared)
-target_link_libraries(single_traj PUBLIC FTK::libftk zstd::libzstd_shared)
+# target_link_libraries(single_traj PUBLIC FTK::libftk zstd::libzstd_shared)
 target_link_libraries(test3d PUBLIC FTK::libftk zstd::libzstd_shared Eigen3::Eigen)
+target_link_libraries(naive2d PUBLIC FTK::libftk zstd::libzstd_shared )
 
 # 查找 OpenMP 包
 find_package(OpenMP REQUIRED)
@@ -51,8 +54,9 @@ if(OpenMP_CXX_FOUND)
     
     # 链接 OpenMP 库
     target_link_libraries(test PUBLIC OpenMP::OpenMP_CXX)
-    target_link_libraries(single_traj PUBLIC OpenMP::OpenMP_CXX)
-    # target_link_libraries(test3d PUBLIC OpenMP::OpenMP_CXX)
+    # target_link_libraries(single_traj PUBLIC OpenMP::OpenMP_CXX)
+    target_link_libraries(test3d PUBLIC OpenMP::OpenMP_CXX)
+    target_link_libraries(naive2d PUBLIC OpenMP::OpenMP_CXX)
 else()
     message(FATAL_ERROR "OpenMP not found, but it is required for this project.")
 endif()

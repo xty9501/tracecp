@@ -81,9 +81,18 @@ Type * readfile(const char * file, size_t& num){
 
 template<typename Type>
 void writefile(const char * file, Type * data, size_t num_elements){
-  std::ofstream fout(file, std::ios::binary);
-  fout.write(reinterpret_cast<const char*>(&data[0]), num_elements*sizeof(Type));
-  fout.close();
+    std::ofstream fout(file, std::ios::binary);
+    if (!fout.is_open()) {
+    std::cerr << "Error: Could not open file " << file << " for writing." << std::endl;
+    return;
+    }
+    if (!data) {
+    std::cerr << "Error: data pointer is null." << std::endl;
+    fout.close();
+    return;
+    }
+    fout.write(reinterpret_cast<const char*>(&data[0]), num_elements*sizeof(Type));
+    fout.close();
 }
 
 //write trajectory to file  

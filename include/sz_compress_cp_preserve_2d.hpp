@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <unordered_map>
 #include <set>
+#include "cp.hpp"
 
 // #define DEFAULT_EB 0.1
 
@@ -39,5 +40,12 @@ template<typename T>
 unsigned char *
 sz_compress_cp_preserve_2d_record_vertex(const T * U, const T * V, size_t r1, size_t r2, size_t& compressed_size, bool transpose=false, double max_pwr_eb = 0.01,const std::set<size_t> &index_need_to_fix = {});
 
+template<typename T>
+unsigned char *
+sz_compress_cp_preserve_2d_st2_fix(const T * U, const T * V, size_t r1, size_t r2, size_t& compressed_size, bool transpose=false, double max_pwr_eb = 0.01, double modified_eb = 0 ,std::unordered_map<size_t, critical_point_t> & critical_points = {},const std::set<size_t> &index_need_to_fix = {});
+
+template<typename T>
+unsigned char *
+sz_compress_cp_preserve_2d_online_abs_record_vertex(const T * U, const T * V, size_t r1, size_t r2, size_t& compressed_size, bool transpose=false, double max_pwr_eb = 0.01,const std::set<size_t> &index_need_to_fix = {});
 
 #endif

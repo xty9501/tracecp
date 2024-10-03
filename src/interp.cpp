@@ -33,8 +33,16 @@ void barycent3d(const Point& X0, const Point& X1, const Point& X2, const Point& 
 
     Eigen::Vector4d B;
     B << p[0], p[1], p[2], 1.0;
+    if (std::fabs(A.determinant()) < 1e-9) {
+        //set lambda to 1,0,0,0
+        throw std::runtime_error("Degenerate tetrahedron: cannot calculate barycentric coordinates");
+        exit(0);
+    }
 
-    lambda = A.inverse() * B;
+    // 使用更高效的 LU 分解来解线性方程组，而不是直接求逆
+    lambda = A.partialPivLu().solve(B);
+
+    // lambda = A.inverse() * B;
 }
 
 // 判断点是否在四面体内并返回重心坐标
@@ -143,7 +151,7 @@ void interp3d_new(const double p[3],double *v, const ftk::ndarray<float> &grad){
     double x_delta = p[0] - x0;
     double y_delta = p[1] - y0;
     double z_delta = p[2] - z0;
-    Point pt = {p[0], p[1], p[2]};
+    Point pt(p[0], p[1], p[2]);
     Tetrahedron simplex;
     if (x_delta <= y_delta && y_delta <= z_delta){
         simplex = {

@@ -65,6 +65,30 @@ struct critical_point_t_3d {
   critical_point_t_3d(){}
 };
 
+struct thresholds
+{
+  double threshold_div;
+  double threshold_out;
+  double threshold_max;
+};
+struct result_struct
+{
+  double pre_compute_cp_time_;
+  double begin_cr_;
+  double psnr_cpsz_overall_;
+  int current_round_;
+  double elapsed_alg_time_;
+  double cpsz_comp_time_;
+  double cpsz_decomp_time_;
+  int rounds_;
+  // pass trajID_need_fix_next_vec
+  std::vector<int> trajID_need_fix_next_vec_;
+  //trajID_need_fix_next_detail_vec
+  std::vector<std::array<int,3>> trajID_need_fix_next_detail_vec_;
+  std::array<int,3> origin_traj_detail_;
+
+};
+
 #define SINGULAR 0
 #define STABLE_SOURCE 1
 #define UNSTABLE_SOURCE 2
@@ -88,19 +112,15 @@ double frechetDistance(const vector<array<double, 3>>& P, const vector<array<dou
     dp[0][0] = euclideanDistance(P[0], Q[0]);
 
     // 计算第一列
-    #pragma omp parallel for
     for (int i = 1; i < n; i++) {
         dp[i][0] = max(dp[i-1][0], euclideanDistance(P[i], Q[0]));
     }
 
     // 计算第一行
-    #pragma omp parallel for
     for (int j = 1; j < m; j++) {
         dp[0][j] = max(dp[0][j-1], euclideanDistance(P[0], Q[j]));
     }
 
-    // 并行化主循环
-    #pragma omp parallel for collapse(2)
     for (int i = 1; i < n; i++) {
         for (int j = 1; j < m; j++) {
             dp[i][j] = max(min({dp[i-1][j], dp[i][j-1], dp[i-1][j-1]}), euclideanDistance(P[i], Q[j]));
@@ -148,19 +168,63 @@ void calculateStatistics(const vector<double>& data, double& minVal, double& max
     stdevVal = sqrt(varianceSum / data.size());
 }
 
-
-bool compare_trajectory(const std::vector<std::array<double, 3>>& traj1, const std::vector<std::array<double, 3>>& traj2) {
-    size_t len = std::min(traj1.size(), traj2.size());
-    for (size_t i = 0; i < len; ++i) {
-        if (traj1[i][0] != traj2[i][0])
-            return traj1[i][0] < traj2[i][0]; // 先比较第 i 个坐标的 x
-        if (traj1[i][1] != traj2[i][1])
-            return traj1[i][1] < traj2[i][1]; // 如果 x 相同，再比较 y
-        if (traj1[i][2] != traj2[i][2])
-            return traj1[i][2] < traj2[i][2]; // 如果 x 和 y 相同，再比较 z
+template<typename Type>
+void verify(Type * ori_data, Type * data, size_t num_elements, double &nrmse){
+    size_t i = 0;
+    Type Max = 0, Min = 0, diffMax = 0;
+    Max = ori_data[0];
+    Min = ori_data[0];
+    diffMax = fabs(data[0] - ori_data[0]);
+    size_t k = 0;
+    double sum1 = 0, sum2 = 0;
+    for (i = 0; i < num_elements; i++){
+        sum1 += ori_data[i];
+        sum2 += data[i];
     }
-    return traj1.size() < traj2.size(); // 如果所有坐标都相同，较短的轨迹排在前面
+    double mean1 = sum1/num_elements;
+    double mean2 = sum2/num_elements;
+
+    double sum3 = 0, sum4 = 0;
+    double sum = 0, prodSum = 0, relerr = 0;
+
+    double maxpw_relerr = 0; 
+    for (i = 0; i < num_elements; i++){
+        if (Max < ori_data[i]) Max = ori_data[i];
+        if (Min > ori_data[i]) Min = ori_data[i];
+        
+        Type err = fabs(data[i] - ori_data[i]);
+        if(ori_data[i]!=0 && fabs(ori_data[i])>1)
+        {
+            relerr = err/fabs(ori_data[i]);
+            if(maxpw_relerr<relerr)
+                maxpw_relerr = relerr;
+        }
+
+        if (diffMax < err)
+            diffMax = err;
+        prodSum += (ori_data[i]-mean1)*(data[i]-mean2);
+        sum3 += (ori_data[i] - mean1)*(ori_data[i]-mean1);
+        sum4 += (data[i] - mean2)*(data[i]-mean2);
+        sum += err*err; 
+    }
+    double std1 = sqrt(sum3/num_elements);
+    double std2 = sqrt(sum4/num_elements);
+    double ee = prodSum/num_elements;
+    double acEff = ee/std1/std2;
+
+    double mse = sum/num_elements;
+    double range = Max - Min;
+    double psnr = 20*log10(range)-10*log10(mse);
+    nrmse = sqrt(mse)/range;
+
+    printf ("Min=%.20G, Max=%.20G, range=%.20G\n", Min, Max, range);
+    printf ("Max absolute error = %.10f\n", diffMax);
+    printf ("Max relative error = %f\n", diffMax/(Max-Min));
+    printf ("Max pw relative error = %f\n", maxpw_relerr);
+    printf ("PSNR = %f, NRMSE= %.20G\n", psnr,nrmse);
+    printf ("acEff=%f\n", acEff);   
 }
+
 
 std::array<double, 3> findLastNonNegativeOne(const std::vector<std::array<double, 3>>& vec) {
     for (auto it = vec.rbegin(); it != vec.rend(); ++it) {
@@ -169,7 +233,76 @@ std::array<double, 3> findLastNonNegativeOne(const std::vector<std::array<double
         }
     }
     // 如果没有找到非 (-1, -1) 的点，可以返回一个特定的值，例如 {-1, -1}
-    return {-1, -1, -1};
+    return vec.back();
+}
+
+bool LastTwoPointsAreEqual(const std::vector<std::array<double, 3>>& vec) {
+    if (vec.size() < 2) return false;
+    return vec[vec.size()-1] == vec[vec.size()-2];
+}
+
+bool SearchElementFromBack(const std::vector<std::array<double, 3>>& vec, const std::array<double, 3>& target) {
+    for (auto it = vec.rbegin(); it != vec.rend(); ++it) {
+        if (*it == target) {
+            return true;
+        }
+    }
+    return false;
+}
+int SearchElementFromBackIndex(const std::vector<std::array<double, 3>>& vec, const std::array<double, 3>& target) {
+    for (int i = vec.size()-1; i >= 0; i--) {
+        if (vec[i] == target) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+std::string findClosestFace(const std::array<double, 3>& point, int DW, int DH, int DD) {
+    double x = point[0];
+    double y = point[1];
+    double z = point[2];
+
+    // 计算点到六个面的距离
+    double d_left = x;
+    double d_right = DW - x;
+    double d_front = DH - y;
+    double d_back = y;
+    double d_top = DD - z;
+    double d_bottom = z;
+
+    // 找到最小的距离并对应的面
+    double min_distance = d_left;
+    std::string closest_face = "left";
+
+    if (d_right < min_distance) {
+        min_distance = d_right;
+        closest_face = "right";
+    }
+    if (d_front < min_distance) {
+        min_distance = d_front;
+        closest_face = "front";
+    }
+    if (d_back < min_distance) {
+        min_distance = d_back;
+        closest_face = "back";
+    }
+    if (d_top < min_distance) {
+        min_distance = d_top;
+        closest_face = "top";
+    }
+    if (d_bottom < min_distance) {
+        min_distance = d_bottom;
+        closest_face = "bottom";
+    }
+
+    return closest_face;
+}
+
+bool OutSameEdge(const std::array<double, 3>& p1, const std::array<double, 3>& p2, int DW, int DH, int DD){
+    std::string face1 = findClosestFace(p1, DW, DH, DD);
+    std::string face2 = findClosestFace(p2, DW, DH, DD);
+    return face1 == face2;
 }
 
 template<typename T>
@@ -358,37 +491,66 @@ compute_critical_points(const T * U, const T * V, const T * W, int r1, int r2, i
 }
 
 
-
-template<typename Container>
-inline bool inside(const Container& x, int DH, int DW, int DD) {
-  return (x[0] > 0 && x[0] < DW-1 && x[1] > 0 && x[1] < DH-1 && x[2] > 0 && x[2] < DD-1);
-}
 template<typename Type>
-std::array<Type, 3> newRK4_3d(const Type * x, const Type * v, const ftk::ndarray<float> &data,  Type h, const int DW, const int DH, const int DD, std::set<size_t>& lossless_index) {
+void updateOffsets(const Type* p, const int DW, const int DH, const int DD, std::vector<std::set<size_t>>& thread_lossless_index,int thread_id) {
+    auto coords = get_four_offsets(p, DW, DH, DD);
+    thread_lossless_index[thread_id].insert(coords.begin(), coords.end());
+}
+
+
+
+template<typename Type>
+std::array<Type, 3> newRK4_3d(const Type * x, const Type * v, const ftk::ndarray<float> &data,  Type h, const int DW, const int DH, const int DD, std::set<size_t>& lossless_index, bool verbose = false) {
   // x and y are positions, and h is the step size
-  double rk1[3] = {0};
-  const double p1[3] = {x[0], x[1],x[2]};
+  double rk1[3] = {0}, rk2[3] = {0}, rk3[3] = {0}, rk4[3] = {0};
+  double p1[3] = {x[0], x[1],x[2]};
+  double p2[3] = {0}, p3[3] = {0}, p4[3] = {0};
+  std::array<Type, 3> result = {0,0,0};
 
-  auto coords_p1 = get_four_offsets(x, DW, DH,DD);
-  // for (auto offset:coords_p1){
-  //   lossless_index.insert(offset);
-  // }
 
-  if(!inside(p1, DH, DW, DD)){
+  if(!inside_domain(p1, DH, DW, DD)){
     //return std::array<Type, 2>{x[0], x[1]};
-    return std::array<Type, 3>{-1, -1,-1};
+    //return std::array<Type, 3>{-1, -1,-1};
+    //改成如果出界就返回当前位置
+    if (verbose){
+    std::cout << "p1: " << p1[0] << " " << p1[1] << " " << p1[2] << std::endl;
+    std::cout << "p2: " << p2[0] << " " << p2[1] << " " << p2[2] << std::endl;
+    std::cout << "p3: " << p3[0] << " " << p3[1] << " " << p3[2] << std::endl;
+    std::cout << "p4: " << p4[0] << " " << p4[1] << " " << p4[2] << std::endl;
+    std::cout << "rk1: " << rk1[0] << " " << rk1[1] << " " << rk1[2] << std::endl;
+    std::cout << "rk2: " << rk2[0] << " " << rk2[1] << " " << rk2[2] << std::endl;
+    std::cout << "rk3: " << rk3[0] << " " << rk3[1] << " " << rk3[2] << std::endl;
+    std::cout << "rk4: " << rk4[0] << " " << rk4[1] << " " << rk4[2] << std::endl;
+    std::cout << "result: " << result[0] << " " << result[1] << " " << result[2] << std::endl;
+    }
+    return {x[0], x[1], x[2]};
   }
   interp3d_new(p1, rk1,data);
-  // coords = get_four_offsets(p1, DW, DH,DD);
+  auto coords_p1 = get_four_offsets(p1, DW, DH,DD);
   // for (auto offset:coords){
   //   lossless_index.insert(offset);
   // }
   
-  double rk2[3] = {0};
-  const double p2[3] = {x[0] + 0.5 * h * rk1[0], x[1] + 0.5 * h * rk1[1],x[2] + 0.5 * h * rk1[2]};
-  if (!inside(p2, DH, DW, DD)){
+  // p2 = {x[0] + 0.5 * h * rk1[0], x[1] + 0.5 * h * rk1[1],x[2] + 0.5 * h * rk1[2]};
+  p2[0] = x[0] + 0.5 * h * rk1[0];
+  p2[1] = x[1] + 0.5 * h * rk1[1];
+  p2[2] = x[2] + 0.5 * h * rk1[2];
+  if (!inside_domain(p2, DH, DW, DD)){
     //return std::array<Type, 2>{p1[0], p1[1]};
-    return std::array<Type, 3>{-1, -1,-1};
+    // return std::array<Type, 3>{-1, -1,-1};
+    if (verbose){
+    std::cout << "p1: " << p1[0] << " " << p1[1] << " " << p1[2] << std::endl;
+    std::cout << "p2: " << p2[0] << " " << p2[1] << " " << p2[2] << std::endl;
+    std::cout << "p3: " << p3[0] << " " << p3[1] << " " << p3[2] << std::endl;
+    std::cout << "p4: " << p4[0] << " " << p4[1] << " " << p4[2] << std::endl;
+    std::cout << "rk1: " << rk1[0] << " " << rk1[1] << " " << rk1[2] << std::endl;
+    std::cout << "rk2: " << rk2[0] << " " << rk2[1] << " " << rk2[2] << std::endl;
+    std::cout << "rk3: " << rk3[0] << " " << rk3[1] << " " << rk3[2] << std::endl;
+    std::cout << "rk4: " << rk4[0] << " " << rk4[1] << " " << rk4[2] << std::endl;
+    std::cout << "result: " << result[0] << " " << result[1] << " " << result[2] << std::endl;
+    }
+    //lossless_index.insert(coords_p1.begin(), coords_p1.end());
+    return {x[0], x[1], x[2]};
   }
   interp3d_new(p2, rk2,data);
   auto coords_p2 = get_four_offsets(p2, DW, DH,DD);
@@ -396,10 +558,26 @@ std::array<Type, 3> newRK4_3d(const Type * x, const Type * v, const ftk::ndarray
   //   lossless_index.insert(offset);
   // }
   
-  double rk3[3] = {0};
-  const double p3[3] = {x[0] + 0.5 * h * rk2[0], x[1] + 0.5 * h * rk2[1],x[2] + 0.5 * h * rk2[2]};
-  if (!inside(p3, DH, DW, DD)){
-    return std::array<Type, 3>{-1, -1,-1};
+  // p3 = {x[0] + 0.5 * h * rk2[0], x[1] + 0.5 * h * rk2[1],x[2] + 0.5 * h * rk2[2]};
+  p3[0] = x[0] + 0.5 * h * rk2[0];
+  p3[1] = x[1] + 0.5 * h * rk2[1];
+  p3[2] = x[2] + 0.5 * h * rk2[2];
+  if (!inside_domain(p3, DH, DW, DD)){
+    // return std::array<Type, 3>{-1, -1,-1};
+    if (verbose){
+    std::cout << "p1: " << p1[0] << " " << p1[1] << " " << p1[2] << std::endl;
+    std::cout << "p2: " << p2[0] << " " << p2[1] << " " << p2[2] << std::endl;
+    std::cout << "p3: " << p3[0] << " " << p3[1] << " " << p3[2] << std::endl;
+    std::cout << "p4: " << p4[0] << " " << p4[1] << " " << p4[2] << std::endl;
+    std::cout << "rk1: " << rk1[0] << " " << rk1[1] << " " << rk1[2] << std::endl;
+    std::cout << "rk2: " << rk2[0] << " " << rk2[1] << " " << rk2[2] << std::endl;
+    std::cout << "rk3: " << rk3[0] << " " << rk3[1] << " " << rk3[2] << std::endl;
+    std::cout << "rk4: " << rk4[0] << " " << rk4[1] << " " << rk4[2] << std::endl;
+    std::cout << "result: " << result[0] << " " << result[1] << " " << result[2] << std::endl;
+    }
+    //lossless_index.insert(coords_p1.begin(), coords_p1.end());
+    //lossless_index.insert(coords_p2.begin(), coords_p2.end());
+    return {x[0], x[1], x[2]};
   }
   interp3d_new(p3, rk3,data);
   auto coords_p3 = get_four_offsets(p3, DW, DH,DD);
@@ -407,78 +585,166 @@ std::array<Type, 3> newRK4_3d(const Type * x, const Type * v, const ftk::ndarray
   //   lossless_index.insert(offset);
   // }
   
-  double rk4[3] = {0};
-  const double p4[3] = {x[0] + h * rk3[0], x[1] + h * rk3[1],x[2] + h * rk3[2]};
-  if (!inside(p4, DH, DW,DD)){
-    return std::array<Type, 3>{-1, -1,-1};
+  // p4 = {x[0] + h * rk3[0], x[1] + h * rk3[1],x[2] + h * rk3[2]};
+  p4[0] = x[0] + h * rk3[0];
+  p4[1] = x[1] + h * rk3[1];
+  p4[2] = x[2] + h * rk3[2];
+  if (!inside_domain(p4, DH, DW,DD)){
+    // return std::array<Type, 3>{-1, -1,-1};
+    if (verbose){
+    std::cout << "p1: " << p1[0] << " " << p1[1] << " " << p1[2] << std::endl;
+    std::cout << "p2: " << p2[0] << " " << p2[1] << " " << p2[2] << std::endl;
+    std::cout << "p3: " << p3[0] << " " << p3[1] << " " << p3[2] << std::endl;
+    std::cout << "p4: " << p4[0] << " " << p4[1] << " " << p4[2] << std::endl;
+    std::cout << "rk1: " << rk1[0] << " " << rk1[1] << " " << rk1[2] << std::endl;
+    std::cout << "rk2: " << rk2[0] << " " << rk2[1] << " " << rk2[2] << std::endl;
+    std::cout << "rk3: " << rk3[0] << " " << rk3[1] << " " << rk3[2] << std::endl;
+    std::cout << "rk4: " << rk4[0] << " " << rk4[1] << " " << rk4[2] << std::endl;
+    std::cout << "result: " << result[0] << " " << result[1] << " " << result[2] << std::endl;
+    }
+    //lossless_index.insert(coords_p1.begin(), coords_p1.end());
+    //lossless_index.insert(coords_p2.begin(), coords_p2.end());
+    //lossless_index.insert(coords_p3.begin(), coords_p3.end());
+    return {x[0], x[1], x[2]};
   }
   interp3d_new(p4, rk4,data);
   auto coords_p4 = get_four_offsets(p4, DW, DH,DD);
   // for (auto offset:coords_p4){
   //   lossless_index.insert(offset);
   // }
+
   
   Type next_x = x[0] + h * (rk1[0] + 2 * rk2[0] + 2 * rk3[0] + rk4[0]) / 6.0;
   Type next_y = x[1] + h * (rk1[1] + 2 * rk2[1] + 2 * rk3[1] + rk4[1]) / 6.0;
   Type next_z = x[2] + h * (rk1[2] + 2 * rk2[2] + 2 * rk3[2] + rk4[2]) / 6.0;
-  if (!inside(std::array<Type, 3>{next_x, next_y,next_z}, DH, DW,DD)){
-    return std::array<Type, 3>{-1, -1,-1};
+  result[0] = next_x;
+  result[1] = next_y;
+  result[2] = next_z;
+  if (!inside_domain(result, DH, DW,DD)){
+    // return std::array<Type, 3>{-1, -1,-1};
+    if (verbose){
+    std::cout << "p1: " << p1[0] << " " << p1[1] << " " << p1[2] << std::endl;
+    std::cout << "p2: " << p2[0] << " " << p2[1] << " " << p2[2] << std::endl;
+    std::cout << "p3: " << p3[0] << " " << p3[1] << " " << p3[2] << std::endl;
+    std::cout << "p4: " << p4[0] << " " << p4[1] << " " << p4[2] << std::endl;
+    std::cout << "rk1: " << rk1[0] << " " << rk1[1] << " " << rk1[2] << std::endl;
+    std::cout << "rk2: " << rk2[0] << " " << rk2[1] << " " << rk2[2] << std::endl;
+    std::cout << "rk3: " << rk3[0] << " " << rk3[1] << " " << rk3[2] << std::endl;
+    std::cout << "rk4: " << rk4[0] << " " << rk4[1] << " " << rk4[2] << std::endl;
+    std::cout << "result: " << result[0] << " " << result[1] << " " << result[2] << std::endl;
+    }
+    //lossless_index.insert(coords_p1.begin(), coords_p1.end());
+    //lossless_index.insert(coords_p2.begin(), coords_p2.end());
+    //lossless_index.insert(coords_p3.begin(), coords_p3.end());
+    //lossless_index.insert(coords_p4.begin(), coords_p4.end());
+    return {x[0], x[1],x[2]};
   }
-  std::array<Type, 3> result = {next_x, next_y,next_z};
   auto coords_final = get_four_offsets(result, DW, DH, DD);
   lossless_index.insert(coords_p1.begin(), coords_p1.end());
   lossless_index.insert(coords_p2.begin(), coords_p2.end());
   lossless_index.insert(coords_p3.begin(), coords_p3.end());
   lossless_index.insert(coords_p4.begin(), coords_p4.end());
   lossless_index.insert(coords_final.begin(), coords_final.end());
+  if (verbose){
+    std::cout << "p1: " << p1[0] << " " << p1[1] << " " << p1[2] << std::endl;
+    std::cout << "p2: " << p2[0] << " " << p2[1] << " " << p2[2] << std::endl;
+    std::cout << "p3: " << p3[0] << " " << p3[1] << " " << p3[2] << std::endl;
+    std::cout << "p4: " << p4[0] << " " << p4[1] << " " << p4[2] << std::endl;
+    std::cout << "rk1: " << rk1[0] << " " << rk1[1] << " " << rk1[2] << std::endl;
+    std::cout << "rk2: " << rk2[0] << " " << rk2[1] << " " << rk2[2] << std::endl;
+    std::cout << "rk3: " << rk3[0] << " " << rk3[1] << " " << rk3[2] << std::endl;
+    std::cout << "rk4: " << rk4[0] << " " << rk4[1] << " " << rk4[2] << std::endl;
+    std::cout << "result: " << result[0] << " " << result[1] << " " << result[2] << std::endl;
+  }
 
   return result;
 }
 
-
-// 缓存get_four_offsets结果的函数，需要加锁
-template<typename Type>
-void updateOffsets(const Type* p, const int DW, const int DH, const int DD, std::vector<std::set<size_t>>& thread_lossless_index,int thread_id) {
-    auto coords = get_four_offsets(p, DW, DH, DD);
-    thread_lossless_index[thread_id].insert(coords.begin(), coords.end());
-}
-
 // newRK4_3d 函数
 template<typename Type>
-std::array<Type, 3> newRK4_3d_parallel(const Type* x, const Type* v, const ftk::ndarray<float>& data, Type h, const int DW, const int DH, const int DD, std::vector<std::set<size_t>>& thread_lossless_index,int thread_id) {
+std::array<Type, 3> newRK4_3d_parallel(const Type* x, const Type* v, const ftk::ndarray<float>& data, Type h, const int DW, const int DH, const int DD, std::vector<std::set<size_t>>& thread_lossless_index,int thread_id,bool verbose = false) {
     double rk1[3] = {0}, rk2[3] = {0}, rk3[3] = {0}, rk4[3] = {0};
-    const double p1[3] = {x[0], x[1], x[2]};
+    double p1[3] = {x[0], x[1], x[2]};
+    double p2[3] = {0}, p3[3] = {0}, p4[3] = {0};
+    std::array<Type, 3> result = {0, 0, 0};
 
-    if (!inside(p1, DH, DW, DD)) return {-1, -1, -1};
-    //updateOffsets(p1, DW, DH, DD, thread_lossless_index, thread_id);
+    if (!inside_domain(p1, DH, DW, DD)){
+        // return {-1, -1, -1};
+        return {x[0], x[1], x[2]};
+    } 
+    // updateOffsets(p1, DW, DH, DD, thread_lossless_index, thread_id);
     interp3d_new(p1, rk1, data);
 
-    const double p2[3] = {x[0] + 0.5 * h * rk1[0], x[1] + 0.5 * h * rk1[1], x[2] + 0.5 * h * rk1[2]};
-    if (!inside(p2, DH, DW, DD)) return {-1, -1, -1};
-    //updateOffsets(p2, DW, DH, DD, thread_lossless_index, thread_id);
+    // const double p2[3] = {x[0] + 0.5 * h * rk1[0], x[1] + 0.5 * h * rk1[1], x[2] + 0.5 * h * rk1[2]};
+    p2[0] = x[0] + 0.5 * h * rk1[0];
+    p2[1] = x[1] + 0.5 * h * rk1[1];
+    p2[2] = x[2] + 0.5 * h * rk1[2];
+    if (!inside_domain(p2, DH, DW, DD)) {
+        // return {-1, -1, -1};
+        //updateOffsets(p1, DW, DH, DD, thread_lossless_index, thread_id);
+        return {x[0], x[1], x[2]};
+    }
+    // updateOffsets(p2, DW, DH, DD, thread_lossless_index, thread_id);
     interp3d_new(p2, rk2, data);
 
-    const double p3[3] = {x[0] + 0.5 * h * rk2[0], x[1] + 0.5 * h * rk2[1], x[2] + 0.5 * h * rk2[2]};
-    if (!inside(p3, DH, DW, DD)) return {-1, -1, -1};
-    //updateOffsets(p3, DW, DH, DD, thread_lossless_index, thread_id);
+    // const double p3[3] = {x[0] + 0.5 * h * rk2[0], x[1] + 0.5 * h * rk2[1], x[2] + 0.5 * h * rk2[2]};
+    p3[0] = x[0] + 0.5 * h * rk2[0];
+    p3[1] = x[1] + 0.5 * h * rk2[1];
+    p3[2] = x[2] + 0.5 * h * rk2[2];
+    if (!inside_domain(p3, DH, DW, DD)) {
+        // return {-1, -1, -1};
+        //updateOffsets(p1, DW, DH, DD, thread_lossless_index, thread_id);
+        //updateOffsets(p2, DW, DH, DD, thread_lossless_index, thread_id);
+        return {x[0], x[1], x[2]};
+    }
+    // updateOffsets(p3, DW, DH, DD, thread_lossless_index, thread_id);
     interp3d_new(p3, rk3, data);
 
-    const double p4[3] = {x[0] + h * rk3[0], x[1] + h * rk3[1], x[2] + h * rk3[2]};
-    if (!inside(p4, DH, DW, DD)) return {-1, -1, -1};
-    //updateOffsets(p4, DW, DH, DD, thread_lossless_index, thread_id);
+    // const double p4[3] = {x[0] + h * rk3[0], x[1] + h * rk3[1], x[2] + h * rk3[2]};
+    p4[0] = x[0] + h * rk3[0];
+    p4[1] = x[1] + h * rk3[1];
+    p4[2] = x[2] + h * rk3[2];
+    if (!inside_domain(p4, DH, DW, DD)) {
+        // return {-1, -1, -1};
+        //updateOffsets(p1, DW, DH, DD, thread_lossless_index, thread_id);
+        //updateOffsets(p2, DW, DH, DD, thread_lossless_index, thread_id);
+        //updateOffsets(p3, DW, DH, DD, thread_lossless_index, thread_id);
+        return {x[0], x[1], x[2]};
+    };
+    // updateOffsets(p4, DW, DH, DD, thread_lossless_index, thread_id);
     interp3d_new(p4, rk4, data);
 
     Type next_x = x[0] + h * (rk1[0] + 2 * rk2[0] + 2 * rk3[0] + rk4[0]) / 6.0;
     Type next_y = x[1] + h * (rk1[1] + 2 * rk2[1] + 2 * rk3[1] + rk4[1]) / 6.0;
     Type next_z = x[2] + h * (rk1[2] + 2 * rk2[2] + 2 * rk3[2] + rk4[2]) / 6.0;
+    result[0] = next_x;
+    result[1] = next_y;
+    result[2] = next_z;
 
-    std::array<Type, 3> result = {next_x, next_y, next_z};
-    if (!inside(result, DH, DW, DD)) return {-1, -1, -1};
+    if (!inside_domain(result, DH, DW, DD)){
+        // return {-1, -1, -1};
+        //updateOffsets(p1, DW, DH, DD, thread_lossless_index, thread_id);
+        //updateOffsets(p2, DW, DH, DD, thread_lossless_index, thread_id);
+        //updateOffsets(p3, DW, DH, DD, thread_lossless_index, thread_id);
+        //updateOffsets(p4, DW, DH, DD, thread_lossless_index, thread_id);
+        return {x[0], x[1], x[2]};
+    }
     updateOffsets(p1, DW, DH, DD, thread_lossless_index, thread_id);
     updateOffsets(p2, DW, DH, DD, thread_lossless_index, thread_id);
     updateOffsets(p3, DW, DH, DD, thread_lossless_index, thread_id);
     updateOffsets(p4, DW, DH, DD, thread_lossless_index, thread_id);
     updateOffsets(result.data(), DW, DH, DD, thread_lossless_index, thread_id);
+    if (verbose){
+        std::cout << "p1: " << p1[0] << " " << p1[1] << " " << p1[2] << std::endl;
+        std::cout << "p2: " << p2[0] << " " << p2[1] << " " << p2[2] << std::endl;
+        std::cout << "p3: " << p3[0] << " " << p3[1] << " " << p3[2] << std::endl;
+        std::cout << "p4: " << p4[0] << " " << p4[1] << " " << p4[2] << std::endl;
+        std::cout << "rk1: " << rk1[0] << " " << rk1[1] << " " << rk1[2] << std::endl;
+        std::cout << "rk2: " << rk2[0] << " " << rk2[1] << " " << rk2[2] << std::endl;
+        std::cout << "rk3: " << rk3[0] << " " << rk3[1] << " " << rk3[2] << std::endl;
+        std::cout << "rk4: " << rk4[0] << " " << rk4[1] << " " << rk4[2] << std::endl;
+        std::cout << "result: " << result[0] << " " << result[1] << " " << result[2] << std::endl;
+    }
     return result;
 }
 
@@ -498,10 +764,10 @@ std::vector<std::array<double, 3>> trajectory_3d_parallel(double *X_original, co
     auto ori_offset = get_four_offsets(X_original, DW, DH, DD);
     thread_lossless_index[thread_id].insert(ori_offset.begin(), ori_offset.end());
 
-    if (!inside(current_x, DH, DW, DD)) {
+    if (!inside_domain(current_x, DH, DW, DD)) {
         flag = -1;
-        result.push_back({-1, -1, -1});
-        length++;
+        // result.push_back({-1, -1, -1});
+        // length++;
         return result;
     } else {
         result.push_back(current_x); // add initial position(seed)
@@ -512,9 +778,10 @@ std::vector<std::array<double, 3>> trajectory_3d_parallel(double *X_original, co
 
     double rk4_time_count = 0;
     while (flag == 0) {
-        if (!inside(current_x, DH, DW, DD)) {
+        if (!inside_domain(current_x, DH, DW, DD)) {
             flag = -1;
-            result.push_back({-1, -1, -1});
+            // result.push_back({-1, -1, -1});
+            result.push_back({current_x[0], current_x[1], current_x[2]});
             length++;
             break;
         }
@@ -524,13 +791,20 @@ std::vector<std::array<double, 3>> trajectory_3d_parallel(double *X_original, co
         }
 
         double current_v[3] = {0};
-        interp3d_new(current_x.data(), current_v, data);
+        //interp3d_new(current_x.data(), current_v, data);
 
         std::array<double, 3> RK4result = newRK4_3d_parallel(current_x.data(), current_v, data, time_step, DW, DH, DD, thread_lossless_index, thread_id);
 
-        if (RK4result[0] == -1 && RK4result[1] == -1 && RK4result[2] == -1) {
+        // if (RK4result[0] == -1 && RK4result[1] == -1 && RK4result[2] == -1) {
+        //     flag = -1;
+        //     result.push_back({-1, -1, -1});
+        //     length++;
+        //     break;
+        // }
+        if (RK4result[0] == current_x[0] && RK4result[1] == current_x[1] && RK4result[2] == current_x[2]) {
             flag = -1;
-            result.push_back({-1, -1, -1});
+            // result.push_back({-1, -1, -1});
+            result.push_back({current_x[0], current_x[1], current_x[2]});
             length++;
             break;
         }
@@ -542,7 +816,7 @@ std::vector<std::array<double, 3>> trajectory_3d_parallel(double *X_original, co
             if (it != critical_points.end()) {
                 auto cp = it->second;
                 double error = 1e-4;
-                if ((cp.type < 3 || cp.type > 6) && fabs(RK4result[0] - cp.x[0]) < error && fabs(RK4result[1] - cp.x[1]) < error && fabs(RK4result[2] - cp.x[2]) < error) {
+                if ((cp.type < 3 || cp.type > 6) && (cp.type != 0) && fabs(RK4result[0] - cp.x[0]) < error && fabs(RK4result[1] - cp.x[1]) < error && fabs(RK4result[2] - cp.x[2]) < error) {
                     flag = 1; // found cp
                     int cp_offset = get_cell_offset_3d(cp.x, DW, DH, DD);
                     result.push_back({RK4result[0], RK4result[1], RK4result[2]});
@@ -551,10 +825,10 @@ std::vector<std::array<double, 3>> trajectory_3d_parallel(double *X_original, co
                     result.push_back(true_cp);
                     length++;
                     auto final_offset_rk = get_four_offsets(RK4result.data(), DW, DH, DD);
-                    auto final_offset_cp = get_four_offsets(cp.x, DW, DH, DD);
+                    // auto final_offset_cp = get_four_offsets(cp.x, DW, DH, DD);
                     //printf("reaching cp: %f, %f, %f\n", cp.x[0], cp.x[1], cp.x[2]);
                     thread_lossless_index[thread_id].insert(final_offset_rk.begin(), final_offset_rk.end());
-                    thread_lossless_index[thread_id].insert(final_offset_cp.begin(), final_offset_cp.end());
+                    // thread_lossless_index[thread_id].insert(final_offset_cp.begin(), final_offset_cp.end());
                     return result;
                 }
             }
@@ -566,7 +840,7 @@ std::vector<std::array<double, 3>> trajectory_3d_parallel(double *X_original, co
     return result;
 }
 
-std::vector<std::array<double, 3>> trajectory_3d(double *X_original, const std::array<double, 3>& initial_x, const double time_step, const int max_length, const int DW, const int DH, const int DD, const std::unordered_map<size_t, critical_point_t_3d>& critical_points, ftk::ndarray<float>& data, std::vector<int>& length_index, std::set<size_t>& lossless_index) {
+std::vector<std::array<double, 3>> trajectory_3d(double *X_original, const std::array<double, 3>& initial_x, const double time_step, const int max_length, const int DW, const int DH, const int DD, const std::unordered_map<size_t, critical_point_t_3d>& critical_points, ftk::ndarray<float>& data, std::set<size_t>& lossless_index) {
     std::vector<std::array<double, 3>> result;
     int flag = 0; // 1 means found, -1 means out of bound, 0 means reach max length
     int length = 0;
@@ -580,23 +854,25 @@ std::vector<std::array<double, 3>> trajectory_3d(double *X_original, const std::
     auto ori_offset = get_four_offsets(X_original, DW, DH, DD);
     lossless_index.insert(ori_offset.begin(), ori_offset.end());
 
-    if (!inside(current_x, DH, DW, DD)) {
+    if (!inside_domain(current_x, DH, DW, DD)) { //seed out of bound
         flag = -1;
-        result.push_back({-1, -1, -1});
-        length++;
-        length_index.push_back(length);
+        // result.push_back({-1, -1, -1});
+        // result.push_back({current_x[0], current_x[1], current_x[2]});
+        // length++;
+        // length_index.push_back(length);
         return result;
     } else {
         result.push_back(current_x); // add initial position(seed)
         length++;
-        auto ini_offset = get_four_offsets(initial_x, DW, DH, DD);
+        auto ini_offset = get_four_offsets(current_x, DW, DH, DD);
         lossless_index.insert(ini_offset.begin(), ini_offset.end());
     }
 
     while (flag == 0) {
-        if (!inside(current_x, DH, DW, DD)) {
+        if (!inside_domain(current_x, DH, DW, DD)) {
             flag = -1;
-            result.push_back({-1, -1, -1});
+            // result.push_back({-1, -1, -1});
+            result.push_back({current_x[0], current_x[1], current_x[2]});
             length++;
             break;
         }
@@ -606,12 +882,20 @@ std::vector<std::array<double, 3>> trajectory_3d(double *X_original, const std::
         }
 
         double current_v[3] = {0};
-        interp3d_new(current_x.data(), current_v, data);
+        //interp3d_new(current_x.data(), current_v, data);
 
         std::array<double, 3> RK4result = newRK4_3d(current_x.data(), current_v, data, time_step, DW, DH, DD, lossless_index);
-        if (RK4result[0] == -1 && RK4result[1] == -1 && RK4result[2] == -1) {
+        // if (RK4result[0] == -1 && RK4result[1] == -1 && RK4result[2] == -1) {
+        //     flag = -1;
+        //     result.push_back({-1, -1, -1});
+        //     length++;
+        //     break;
+        // }
+        if (RK4result[0] == current_x[0] && RK4result[1] == current_x[1] && RK4result[2] == current_x[2]) {
             flag = -1;
-            result.push_back({-1, -1, -1});
+            // result.push_back({-1, -1, -1});
+            result.push_back({current_x[0], current_x[1], current_x[2]});
+            //这里是不是需要添加最后出界有关的cell的offsets
             length++;
             break;
         }
@@ -623,7 +907,7 @@ std::vector<std::array<double, 3>> trajectory_3d(double *X_original, const std::
             if (it != critical_points.end()) {
                 auto cp = it->second;
                 double error = 1e-4;
-                if ((cp.type < 3 || cp.type > 6) && fabs(RK4result[0] - cp.x[0]) < error && fabs(RK4result[1] - cp.x[1]) < error && fabs(RK4result[2] - cp.x[2]) < error) {
+                if ((cp.type < 3 || cp.type > 6) && (cp.type != 0) && fabs(RK4result[0] - cp.x[0]) < error && fabs(RK4result[1] - cp.x[1]) < error && fabs(RK4result[2] - cp.x[2]) < error) {
                     flag = 1; // found cp
                     int cp_offset = get_cell_offset_3d(cp.x, DW, DH, DD);
                     result.push_back({RK4result[0], RK4result[1], RK4result[2]});
@@ -632,11 +916,11 @@ std::vector<std::array<double, 3>> trajectory_3d(double *X_original, const std::
                     result.push_back(true_cp);
                     length++;
                     auto final_offset_rk = get_four_offsets(RK4result.data(), DW, DH, DD);
-                    auto final_offset_cp = get_four_offsets(cp.x, DW, DH, DD);
+                    // auto final_offset_cp = get_four_offsets(cp.x, DW, DH, DD);
                     //printf("reaching cp: %f, %f, %f\n", cp.x[0], cp.x[1], cp.x[2]);
                     lossless_index.insert(final_offset_rk.begin(), final_offset_rk.end());
-                    lossless_index.insert(final_offset_cp.begin(), final_offset_cp.end());
-                    length_index.push_back(length);
+                    // lossless_index.insert(final_offset_cp.begin(), final_offset_cp.end());
+                    //length_index.push_back(length);
                     return result;
                 }
             }
@@ -645,12 +929,12 @@ std::vector<std::array<double, 3>> trajectory_3d(double *X_original, const std::
         result.push_back(current_x);
         length++;
     }
-    length_index.push_back(length);
+    //length_index.push_back(length);
     return result;
 
   }
 
-void final_check(float *U, float *V, float *W, int r1, int r2, int r3, double eb, int obj,traj_config t_config,int total_thread, std::set<size_t> vertex_need_to_lossless, std::string file_out_dir=""){
+void final_check(float *U, float *V, float *W, int r1, int r2, int r3, double eb, int obj,traj_config t_config,int total_thread, std::set<size_t> vertex_need_to_lossless, thresholds th,result_struct results,std::string file_out_dir=""){
   unsigned char * final_result = NULL;
   size_t final_result_size = 0;
   final_result = sz_compress_cp_preserve_3d_record_vertex(U, V, W, r1, r2, r3, final_result_size, false, eb, vertex_need_to_lossless);
@@ -658,8 +942,8 @@ void final_check(float *U, float *V, float *W, int r1, int r2, int r3, double eb
   size_t result_after_zstd_size = sz_lossless_compress(ZSTD_COMPRESSOR, 3, final_result, final_result_size, &result_after_zstd);
   //printf("BEGIN COmpression ratio =  \n");
   //printf("FINAL Compressed size = %zu, ratio = %f\n", result_after_zstd_size, (3*r1*r2*r3*sizeof(float)) * 1.0/result_after_zstd_size);
-  printf("%f\n", (3*r1*r2*r3*sizeof(float)) * 1.0/result_after_zstd_size);
-  printf("====================================\n");
+  
+
   free(final_result);
   size_t zstd_decompressed_size = sz_lossless_decompress(ZSTD_COMPRESSOR, result_after_zstd, result_after_zstd_size, &final_result, final_result_size);
   float * final_dec_U = NULL;
@@ -667,11 +951,27 @@ void final_check(float *U, float *V, float *W, int r1, int r2, int r3, double eb
   float * final_dec_W = NULL;
   sz_decompress_cp_preserve_3d_record_vertex<float>(final_result, r1, r2, r3, final_dec_U, final_dec_V, final_dec_W);
   printf("verifying...\n");
-  double lossless_sum_u = 0;
-  for(auto p:vertex_need_to_lossless){
-    lossless_sum_u += U[p];
+  double nrmse_u, nrmse_v, nrmse_w,psnr_overall,psnr_cpsz_overall;
+  verify(U, final_dec_U, r1*r2*r3, nrmse_u);
+  verify(V, final_dec_V, r1*r2*r3, nrmse_v);
+  verify(W, final_dec_W, r1*r2*r3, nrmse_w);
+  psnr_cpsz_overall = 20 * log10(sqrt(3) / sqrt(nrmse_u * nrmse_u + nrmse_v * nrmse_v + nrmse_w * nrmse_w));
+  //printf("nrmse_u=%f, nrmse_v=%f, nrmse_w=%f, psnr_cpsz_overall=%f\n", nrmse_u, nrmse_v, nrmse_w, psnr_cpsz_overall);
+  printf("====================================\n");
+  printf("orginal trajs detail: outside: %d, max_iter: %d, reach cp %d\n",results.origin_traj_detail_[0],results.origin_traj_detail_[1],results.origin_traj_detail_[2]);
+  printf("pre-compute cp time :%f\n",results.pre_compute_cp_time_);
+  printf("BEGIN Compression ratio = %f\n", results.begin_cr_);
+  printf("PSNR_overall_cpsz = %f\n", results.psnr_cpsz_overall_);
+  printf("FINAL Compression ratio = %f\n", (3*r1*r2*r3*sizeof(float)) * 1.0/result_after_zstd_size);
+  printf("PSNR_overall = %f\n", psnr_cpsz_overall);
+  printf("comp time = %f\n", results.cpsz_comp_time_);
+  printf("decomp time = %f\n", results.cpsz_decomp_time_);
+  printf("algorithm time = %f\n", results.elapsed_alg_time_);
+  printf("rounds = %d\n", results.rounds_);
+  for (int i = 0; i < results.trajID_need_fix_next_detail_vec_.size(); i++){
+    printf("trajID_need_fix_next: %d, wrong outside: %d, wrong max_iter: %d, wrong cp: %d\n", results.trajID_need_fix_next_vec_[i], results.trajID_need_fix_next_detail_vec_[i][0], results.trajID_need_fix_next_detail_vec_[i][1], results.trajID_need_fix_next_detail_vec_[i][2]);
   }
-  printf("lossless_sum_u = %f\n", lossless_sum_u);
+  printf("====================================\n");
   //检查vertex_need_to_lossless对应的点是否一致
   for(auto p:vertex_need_to_lossless){
     if(U[p] != final_dec_U[p] || V[p] != final_dec_V[p] || W[p] != final_dec_W[p]){
@@ -755,8 +1055,29 @@ void final_check(float *U, float *V, float *W, int r1, int r2, int r3, double eb
               switch (obj)
               {
                 case 0:
-                  if((result_return_ori.size() !=t_config.max_length) && (result_return_ori.back()[0] != -1)){
-                    if (get_cell_offset_3d(result_return_ori.back().data(), r1, r2, r3) != get_cell_offset_3d(result_return_dec.back().data(), r1, r2, r3)){
+                  // if (LastTwoPointsAreEqual(result_return_ori)){
+                  //   //outside
+                  //   if (!SearchElementFromBack(result_return_dec, result_return_ori.back())){
+                  //     printf("some trajectories not fixed!(case 0-0)\n");
+                  //     printf("ori first point: %f, %f, %f ,dec first point: %f, %f, %f\n",result_return_ori[0][0],result_return_ori[0][1],result_return_ori[0][2],result_return_dec[0][0],result_return_dec[0][1],result_return_dec[0][2]);
+                  //     printf("ori last-1 point: %f, %f, %f ,dec last-1 point: %f, %f, %f\n",result_return_ori[result_return_ori.size()-2][0],result_return_ori[result_return_ori.size()-2][1],result_return_ori[result_return_ori.size()-2][2],result_return_dec[result_return_dec.size()-2][0],result_return_dec[result_return_dec.size()-2][1],result_return_dec[result_return_dec.size()-2][2]);
+                  //     printf("ori last point: %f, %f, %f ,dec last point: %f, %f, %f\n",result_return_ori.back()[0],result_return_ori.back()[1],result_return_ori.back()[2],result_return_dec.back()[0],result_return_dec.back()[1],result_return_dec.back()[2]);
+                  //     printf("ori length: %d, dec length: %d\n",result_return_ori.size(),result_return_dec.size());
+                  //     terminate = true;
+                  //   }
+                  // }
+                  if (LastTwoPointsAreEqual(result_return_ori)){
+                    if (euclideanDistance(result_return_ori.back(),result_return_dec.back()) > th.threshold_out){
+                      printf("some trajectories not fixed!(case 0-0)\n");
+                      printf("ori first point: %f, %f, %f ,dec first point: %f, %f, %f\n",result_return_ori[0][0],result_return_ori[0][1],result_return_ori[0][2],result_return_dec[0][0],result_return_dec[0][1],result_return_dec[0][2]);
+                      printf("ori last-1 point: %f, %f, %f ,dec last-1 point: %f, %f, %f\n",result_return_ori[result_return_ori.size()-2][0],result_return_ori[result_return_ori.size()-2][1],result_return_ori[result_return_ori.size()-2][2],result_return_dec[result_return_dec.size()-2][0],result_return_dec[result_return_dec.size()-2][1],result_return_dec[result_return_dec.size()-2][2]);
+                      printf("ori last point: %f, %f, %f ,dec last point: %f, %f, %f\n",result_return_ori.back()[0],result_return_ori.back()[1],result_return_ori.back()[2],result_return_dec.back()[0],result_return_dec.back()[1],result_return_dec.back()[2]);
+                      printf("ori length: %d, dec length: %d\n",result_return_ori.size(),result_return_dec.size());
+                      terminate = true;
+                    }
+                  }
+                  else if (result_return_ori.size() == t_config.max_length){
+                    if (euclideanDistance(result_return_ori.back(),result_return_dec.back()) >th.threshold_max){
                       printf("some trajectories not fixed!(case 0-1)\n");
                       printf("ori first point: %f, %f, %f ,dec first point: %f, %f, %f\n",result_return_ori[0][0],result_return_ori[0][1],result_return_ori[0][2],result_return_dec[0][0],result_return_dec[0][1],result_return_dec[0][2]);
                       printf("ori last-1 point: %f, %f, %f ,dec last-1 point: %f, %f, %f\n",result_return_ori[result_return_ori.size()-2][0],result_return_ori[result_return_ori.size()-2][1],result_return_ori[result_return_ori.size()-2][2],result_return_dec[result_return_dec.size()-2][0],result_return_dec[result_return_dec.size()-2][1],result_return_dec[result_return_dec.size()-2][2]);
@@ -765,64 +1086,51 @@ void final_check(float *U, float *V, float *W, int r1, int r2, int r3, double eb
                       terminate = true;
                     }
                   }
-                  else if((result_return_ori.back()[0] == -1) && (result_return_dec.back()[0]) != -1){
-                    printf("some trajectories not fixed!(case 0-2)\n");
-                    printf("ori first point: %f, %f, %f ,dec first point: %f, %f, %f\n",result_return_ori[0][0],result_return_ori[0][1],result_return_ori[0][2],result_return_dec[0][0],result_return_dec[0][1],result_return_dec[0][2]);
-                    printf("ori last-1 point: %f, %f, %f ,dec last-1 point: %f, %f, %f\n",result_return_ori[result_return_ori.size()-2][0],result_return_ori[result_return_ori.size()-2][1],result_return_ori[result_return_ori.size()-2][2],result_return_dec[result_return_dec.size()-2][0],result_return_dec[result_return_dec.size()-2][1],result_return_dec[result_return_dec.size()-2][2]);
-                    printf("ori last point: %f, %f, %f ,dec last point: %f, %f, %f\n",result_return_ori.back()[0],result_return_ori.back()[1],result_return_ori.back()[2],result_return_dec.back()[0],result_return_dec.back()[1],result_return_dec.back()[2]);
-                    printf("ori length: %d, dec length: %d\n",result_return_ori.size(),result_return_dec.size());
-                    terminate = true;
-                  }
-                  break;
-                
-                case 2:
-                  if(result_return_ori.size() == t_config.max_length){
-                    // if(result_return_ori.back()[0] == -1 && result_return_dec.back()[0] != -1){
-                    //   // last point just reach the boundary
-                    //   printf("some trajectories not fixed!(case2-0)\n");
-                    //   printf("ori first point: %f, %f, %f ,dec first point: %f, %f, %f\n",result_return_ori[0][0],result_return_ori[0][1],result_return_ori[0][2],result_return_dec[0][0],result_return_dec[0][1],result_return_dec[0][2]);
-                    //   printf("ori last-1 point: %f, %f, %f ,dec last-1 point: %f, %f, %f\n",result_return_ori[result_return_ori.size()-2][0],result_return_ori[result_return_ori.size()-2][1],result_return_ori[result_return_ori.size()-2][2],result_return_dec[result_return_dec.size()-2][0],result_return_dec[result_return_dec.size()-2][1],result_return_dec[result_return_dec.size()-2][2]);
-                    //   printf("ori last point: %f, %f, %f ,dec last point: %f, %f, %f\n",result_return_ori.back()[0],result_return_ori.back()[1],result_return_ori.back()[2],result_return_dec.back()[0],result_return_dec.back()[1],result_return_dec.back()[2]);
-                    //   printf("ori length: %d, dec length: %d\n",result_return_ori.size(),result_return_dec.size());
-                    //   terminate = true;
-                    // }
-                    if(result_return_dec.size() != t_config.max_length && get_cell_offset_3d(result_return_ori.back().data(), r1, r2, r3) != get_cell_offset_3d(result_return_dec.back().data(), r1, r2, r3)){
-                      printf("some trajectories not fixed!(case2-1)\n");
+                  else{
+                    //inside and not reach max, ie found cp
+                    if (get_cell_offset_3d(result_return_ori.back().data(), r3,r2,r1) != get_cell_offset_3d(result_return_dec.back().data(), r3,r2,r1)){
+                      printf("some trajectories not fixed!(case 0-2)\n");
                       printf("ori first point: %f, %f, %f ,dec first point: %f, %f, %f\n",result_return_ori[0][0],result_return_ori[0][1],result_return_ori[0][2],result_return_dec[0][0],result_return_dec[0][1],result_return_dec[0][2]);
                       printf("ori last-1 point: %f, %f, %f ,dec last-1 point: %f, %f, %f\n",result_return_ori[result_return_ori.size()-2][0],result_return_ori[result_return_ori.size()-2][1],result_return_ori[result_return_ori.size()-2][2],result_return_dec[result_return_dec.size()-2][0],result_return_dec[result_return_dec.size()-2][1],result_return_dec[result_return_dec.size()-2][2]);
                       printf("ori last point: %f, %f, %f ,dec last point: %f, %f, %f\n",result_return_ori.back()[0],result_return_ori.back()[1],result_return_ori.back()[2],result_return_dec.back()[0],result_return_dec.back()[1],result_return_dec.back()[2]);
                       printf("ori length: %d, dec length: %d\n",result_return_ori.size(),result_return_dec.size());
                       terminate = true;
                     }
-                    // 这是一种corner case，如果original的trajectory长度是max_length，但是恰好最后一个点是critical point
-                    // for (auto it = critical_points_final.begin(); it !=critical_points_final.end(); ++it){
-                    //   if ((std::abs(it->second.x[0] - result_return_ori.back()[0]) < 1e-4 && std::abs(it->second.x[1] - result_return_ori.back()[1]) < 1e-4) && std::abs(it->second.x[2] - result_return_ori.back()[2]) < 1e-4){
-                    //     if (get_cell_offset_3d(result_return_ori.back().data(), r1, r2, r3) != get_cell_offset_3d(result_return_dec.back().data(), r1, r2, r3)){
-                    //       printf("some trajectories not fixed!(case2-1)\n");
-                    //       printf("ori first point: %f, %f, %f ,dec first point: %f, %f, %f\n",result_return_ori[0][0],result_return_ori[0][1],result_return_ori[0][2],result_return_dec[0][0],result_return_dec[0][1],result_return_dec[0][2]);
-                    //       printf("ori last-1 point: %f, %f, %f ,dec last-1 point: %f, %f, %f\n",result_return_ori[result_return_ori.size()-2][0],result_return_ori[result_return_ori.size()-2][1],result_return_ori[result_return_ori.size()-2][2],result_return_dec[result_return_dec.size()-2][0],result_return_dec[result_return_dec.size()-2][1],result_return_dec[result_return_dec.size()-2][2]);
-                    //       printf("ori last point: %f, %f, %f ,dec last point: %f, %f, %f\n",result_return_ori.back()[0],result_return_ori.back()[1],result_return_ori.back()[2],result_return_dec.back()[0],result_return_dec.back()[1],result_return_dec.back()[2]);
-                    //       printf("ori length: %d, dec length: %d\n",result_return_ori.size(),result_return_dec.size());
-                    //       terminate = true;
-                    //     }
-                    //   }
-                    // }
                   }
-                  else if((result_return_ori.size() == t_config.max_length) && (result_return_dec.size() != t_config.max_length)){
-                    printf("some trajectories not fixed!(case2-2)\n");
-                    printf("ori first point: %f, %f, %f ,dec first point: %f, %f, %f\n",result_return_ori[0][0],result_return_ori[0][1],result_return_ori[0][2],result_return_dec[0][0],result_return_dec[0][1],result_return_dec[0][2]);
-                    printf("ori last-1 point: %f, %f, %f ,dec last-1 point: %f, %f, %f\n",result_return_ori[result_return_ori.size()-2][0],result_return_ori[result_return_ori.size()-2][1],result_return_ori[result_return_ori.size()-2][2],result_return_dec[result_return_dec.size()-2][0],result_return_dec[result_return_dec.size()-2][1],result_return_dec[result_return_dec.size()-2][2]);
-                    printf("ori last point: %f, %f, %f ,dec last point: %f, %f, %f\n",result_return_ori.back()[0],result_return_ori.back()[1],result_return_ori.back()[2],result_return_dec.back()[0],result_return_dec.back()[1],result_return_dec.back()[2]);
-                    printf("ori length: %d, dec length: %d\n",result_return_ori.size(),result_return_dec.size());
-                    terminate = true;
+                  break;
+                
+                case 2:
+                  if (LastTwoPointsAreEqual(result_return_ori)){
+                    //outside
+                    if (!SearchElementFromBack(result_return_dec, result_return_ori.back())){
+                      printf("some trajectories not fixed!(case 0-0)\n");
+                      printf("ori first point: %f, %f, %f ,dec first point: %f, %f, %f\n",result_return_ori[0][0],result_return_ori[0][1],result_return_ori[0][2],result_return_dec[0][0],result_return_dec[0][1],result_return_dec[0][2]);
+                      printf("ori last-1 point: %f, %f, %f ,dec last-1 point: %f, %f, %f\n",result_return_ori[result_return_ori.size()-2][0],result_return_ori[result_return_ori.size()-2][1],result_return_ori[result_return_ori.size()-2][2],result_return_dec[result_return_dec.size()-2][0],result_return_dec[result_return_dec.size()-2][1],result_return_dec[result_return_dec.size()-2][2]);
+                      printf("ori last point: %f, %f, %f ,dec last point: %f, %f, %f\n",result_return_ori.back()[0],result_return_ori.back()[1],result_return_ori.back()[2],result_return_dec.back()[0],result_return_dec.back()[1],result_return_dec.back()[2]);
+                      printf("ori length: %d, dec length: %d\n",result_return_ori.size(),result_return_dec.size());
+                      terminate = true;
+                    }
                   }
-                  else if(result_return_dec.back()[0] != -1 && result_return_ori.back()[0] == -1){
-                    printf("some trajectories not fixed!(case2-3)\n");
-                    printf("ori first point: %f, %f, %f ,dec first point: %f, %f, %f\n",result_return_ori[0][0],result_return_ori[0][1],result_return_ori[0][2],result_return_dec[0][0],result_return_dec[0][1],result_return_dec[0][2]);
-                    printf("ori last-1 point: %f, %f, %f ,dec last-1 point: %f, %f, %f\n",result_return_ori[result_return_ori.size()-2][0],result_return_ori[result_return_ori.size()-2][1],result_return_ori[result_return_ori.size()-2][2],result_return_dec[result_return_dec.size()-2][0],result_return_dec[result_return_dec.size()-2][1],result_return_dec[result_return_dec.size()-2][2]);
-                    printf("ori last point: %f, %f, %f ,dec last point: %f, %f, %f\n",result_return_ori.back()[0],result_return_ori.back()[1],result_return_ori.back()[2],result_return_dec.back()[0],result_return_dec.back()[1],result_return_dec.back()[2]);
-                    printf("ori length: %d, dec length: %d\n",result_return_ori.size(),result_return_dec.size());
-                    terminate = true;
+                  else if (result_return_ori.size() == t_config.max_length){
+                    if (result_return_dec.size() != t_config.max_length){
+                      printf("some trajectories not fixed!(case 2-2)\n");
+                      printf("ori first point: %f, %f, %f ,dec first point: %f, %f, %f\n",result_return_ori[0][0],result_return_ori[0][1],result_return_ori[0][2],result_return_dec[0][0],result_return_dec[0][1],result_return_dec[0][2]);
+                      printf("ori last-1 point: %f, %f, %f ,dec last-1 point: %f, %f, %f\n",result_return_ori[result_return_ori.size()-2][0],result_return_ori[result_return_ori.size()-2][1],result_return_ori[result_return_ori.size()-2][2],result_return_dec[result_return_dec.size()-2][0],result_return_dec[result_return_dec.size()-2][1],result_return_dec[result_return_dec.size()-2][2]);
+                      printf("ori last point: %f, %f, %f ,dec last point: %f, %f, %f\n",result_return_ori.back()[0],result_return_ori.back()[1],result_return_ori.back()[2],result_return_dec.back()[0],result_return_dec.back()[1],result_return_dec.back()[2]);
+                      printf("ori length: %d, dec length: %d\n",result_return_ori.size(),result_return_dec.size());
+                      terminate = true;
+                    }
+                  }
+                  else{
+                    //inside and not reach max, ie found cp
+                    if (get_cell_offset_3d(result_return_ori.back().data(), r3,r2,r1) != get_cell_offset_3d(result_return_dec.back().data(), r3,r2,r1)){
+                      printf("some trajectories not fixed!(case 2-3)\n");
+                      printf("ori first point: %f, %f, %f ,dec first point: %f, %f, %f\n",result_return_ori[0][0],result_return_ori[0][1],result_return_ori[0][2],result_return_dec[0][0],result_return_dec[0][1],result_return_dec[0][2]);
+                      printf("ori last-1 point: %f, %f, %f ,dec last-1 point: %f, %f, %f\n",result_return_ori[result_return_ori.size()-2][0],result_return_ori[result_return_ori.size()-2][1],result_return_ori[result_return_ori.size()-2][2],result_return_dec[result_return_dec.size()-2][0],result_return_dec[result_return_dec.size()-2][1],result_return_dec[result_return_dec.size()-2][2]);
+                      printf("ori last point: %f, %f, %f ,dec last point: %f, %f, %f\n",result_return_ori.back()[0],result_return_ori.back()[1],result_return_ori.back()[2],result_return_dec.back()[0],result_return_dec.back()[1],result_return_dec.back()[2]);
+                      printf("ori length: %d, dec length: %d\n",result_return_ori.size(),result_return_dec.size());
+                      terminate = true;
+                    }
                   }
                   break;
               }
@@ -838,23 +1146,37 @@ void final_check(float *U, float *V, float *W, int r1, int r2, int r3, double eb
   int numTrajectories = final_check_ori.size();
   vector<double> frechetDistances(numTrajectories, -1);
   auto frechetDis_time_start = std::chrono::high_resolution_clock::now();
+  double max_distance = -1.0;
+  int max_index = -1;
   #pragma omp parallel for
   for (int i = 0; i < numTrajectories; i++){
     auto traj1 = final_check_ori[i];
     auto traj2 = final_check_dec[i];
-    //remove the last point if it is -1
-    if (traj1.back()[0] == -1){
-      traj1.pop_back();
-    }
-    if (traj2.back()[0] == -1){
-      traj2.pop_back();
-    }
     frechetDistances[i] = frechetDistance(traj1,traj2);
+    #pragma omp critical
+    {
+      if(frechetDistances[i] > max_distance){
+        max_distance = frechetDistances[i];
+        max_index = i;
+      }
+    }
   }
   auto frechetDis_time_end = std::chrono::high_resolution_clock::now();
   //calculate time in second
   std::chrono::duration<double> frechetDis_time = frechetDis_time_end - frechetDis_time_start;
   printf("frechet distance time: %f\n",frechetDis_time.count());
+  //print max distance ans start point, end point
+  printf("max_distance index: %d\n",max_index);
+  printf("max_distance start point ori: %f, %f, %f\n",final_check_ori[max_index][0][0],final_check_ori[max_index][0][1],final_check_ori[max_index][0][2]);
+  printf("max_distance start point dec: %f, %f, %f\n",final_check_dec[max_index][0][0],final_check_dec[max_index][0][1],final_check_dec[max_index][0][2]);
+  printf("max_distance end point ori: %f, %f, %f\n",final_check_ori[max_index].back()[0],final_check_ori[max_index].back()[1],final_check_ori[max_index].back()[2]);
+  printf("max_distance end point dec: %f, %f, %f\n",final_check_dec[max_index].back()[0],final_check_dec[max_index].back()[1],final_check_dec[max_index].back()[2]);
+  printf("dec length: %d, ori length: %d\n",final_check_dec[max_index].size(),final_check_ori[max_index].size());
+  printf("max_distance: %f\n",max_distance);
+  std::vector<std::vector<std::array<double, 3>>> max_distance_single_trajs(2);
+  max_distance_single_trajs[0] = final_check_ori[max_index];
+  max_distance_single_trajs[1] = final_check_dec[max_index];
+
   //计算统计量
   double minVal, maxVal, medianVal, meanVal, stdevVal;
   calculateStatistics(frechetDistances, minVal, maxVal, medianVal, meanVal, stdevVal);
@@ -873,6 +1195,7 @@ void final_check(float *U, float *V, float *W, int r1, int r2, int r3, double eb
   if(file_out_dir != ""){
     save_trajs_to_binary_3d(final_check_ori, file_out_dir + "ori_traj_3d.bin");
     save_trajs_to_binary_3d(final_check_dec, file_out_dir + "dec_traj_3d.bin");
+    save_trajs_to_binary_3d(max_distance_single_trajs, file_out_dir + "max_distance_single_traj_3d.bin");
   }
 }
 int main(int argc, char ** argv){
@@ -882,6 +1205,8 @@ int main(int argc, char ** argv){
     std::vector<double> index_time_vec;
     std::vector<double> re_cal_trajs_time_vec;
     std::vector<int> trajID_need_fix_next_vec;
+    std::vector<std::array<int,3>> trajID_need_fix_next_detail_vec; //0:outside, 1.reach max iter, 2.find cp
+    std::array<int,3> origin_traj_detail;
     std::set<size_t> final_vertex_need_to_lossless; //最终需要lossless的点的index
     bool stop = false; //算法停止flag
 
@@ -896,8 +1221,22 @@ int main(int argc, char ** argv){
     double eps = atof(argv[8]);
     int max_length = atoi(argv[9]);
     double max_eb = atof(argv[10]);
-    int obj = atoi(argv[11]);
+    // int obj = atoi(argv[11]);
+    std::string eb_type = argv[11];
+    int obj = 0;
     int total_thread = atoi(argv[12]);
+
+    // these two flags are used to control whether use the saved compressed data,to save computation time
+    int readout_flag = 0;
+    int writeout_flag = 1;
+
+    double threshold = 1.74;
+    double threshold_outside = 50;
+    double threshold_max_iter = 10;
+    
+    std::chrono::duration<double> cpsz_comp_duration;
+    std::chrono::duration<double> cpsz_decomp_duration;
+    
     std::string file_out_dir = "";
     if (argc == 14){
       file_out_dir = argv[13];
@@ -905,43 +1244,116 @@ int main(int argc, char ** argv){
     // int obj = 0;
     omp_set_num_threads(total_thread);
     traj_config t_config = {h, eps, max_length};
-    // cout << U[r2 + 3] << " " << U[3*r2 + 1] << endl;
-    // transpose_2d(U, r1, r2);
-    // cout << U[r2 + 3] << " " << U[3*r2 + 1] << endl;
-    // transpose_2d(V, r1, r2);
-    auto critical_points_0 = compute_critical_points(U, V, W, r1, r2, r3); //r1=DD,r2=DH,r3=DW
-    cout << "critical points #: " << critical_points_0.size() << endl;
 
-
-    size_t result_size = 0;
-    struct timespec start, end;
-    int err = 0;
-    err = clock_gettime(CLOCK_REALTIME, &start);
-    cout << "start Compression\n";
-    // unsigned char * result =  sz_compress_cp_preserve_3d_offline_log(U, V, W, r1, r2, r3, result_size, false, max_eb);
-    unsigned char * result =  sz_compress_cp_preserve_3d_online_log(U, V, W, r1, r2, r3, result_size, false, max_eb);
-    // exit(0);
-    unsigned char * result_after_lossless = NULL;
-    size_t lossless_outsize = sz_lossless_compress(ZSTD_COMPRESSOR, 3, result, result_size, &result_after_lossless);
-    err = clock_gettime(CLOCK_REALTIME, &end);
-    cout << "Compression time: " << (double)(end.tv_sec - start.tv_sec) + (double)(end.tv_nsec - start.tv_nsec)/(double)1000000000 << "s" << endl;
-    double begin_cr = (3*num_elements*sizeof(float)) * 1.0/lossless_outsize;
-    cout << "Compressed size = " << lossless_outsize << ", ratio = " << (3*num_elements*sizeof(float)) * 1.0/lossless_outsize << endl;
-    free(result);
-    // exit(0);
-    err = clock_gettime(CLOCK_REALTIME, &start);
-    size_t lossless_output = sz_lossless_decompress(ZSTD_COMPRESSOR, result_after_lossless, lossless_outsize, &result, result_size);
     float * dec_U = NULL;
     float * dec_V = NULL;
     float * dec_W = NULL;
-    sz_decompress_cp_preserve_3d_online_log<float>(result, r1, r2, r3, dec_U, dec_V, dec_W);
-    err = clock_gettime(CLOCK_REALTIME, &end);
-    cout << "Decompression time: " << (double)(end.tv_sec - start.tv_sec) + (double)(end.tv_nsec - start.tv_nsec)/(double)1000000000 << "s" << endl;
-    free(result_after_lossless);
+    // pre-compute critical points
+    auto cp_cal_start = std::chrono::high_resolution_clock::now();
+    auto critical_points_0 = compute_critical_points(U, V, W, r1, r2, r3); //r1=DD,r2=DH,r3=DW
+    auto cp_cal_end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> cp_cal_duration = cp_cal_end - cp_cal_start;
+    cout << "critical points #: " << critical_points_0.size() << endl;
+    double begin_cr = 0;
+
+    size_t result_size = 0;
+    struct timespec start, end;
+    if (readout_flag == 1){
+      dec_U = readfile<float>("/home/mxi235/data/temp_data/dec_U.bin", num_elements);
+      dec_V = readfile<float>("/home/mxi235/data/temp_data/dec_V.bin", num_elements);
+      dec_W = readfile<float>("/home/mxi235/data/temp_data/dec_W.bin", num_elements);
+    }
+    
+    else{
+
+      cout << "start Compression\n";
+      // unsigned char * result =  sz_compress_cp_preserve_3d_offline_log(U, V, W, r1, r2, r3, result_size, false, max_eb);
+      unsigned char * result;
+      auto comp_time_start = std::chrono::high_resolution_clock::now();
+      if(eb_type == "rel"){
+        result =  sz_compress_cp_preserve_3d_online_log(U, V, W, r1, r2, r3, result_size, false, max_eb);
+      }
+      else{
+        printf("not support eb_type\n");
+        exit(0);
+      }
+      unsigned char * result_after_lossless = NULL;
+      size_t lossless_outsize = sz_lossless_compress(ZSTD_COMPRESSOR, 3, result, result_size, &result_after_lossless);
+
+      auto comp_time_end = std::chrono::high_resolution_clock::now();
+      cpsz_comp_duration = comp_time_end - comp_time_start;
+
+      begin_cr = (3*num_elements*sizeof(float)) * 1.0/lossless_outsize;
+      cout << "Compressed size = " << lossless_outsize << ", ratio = " << (3*num_elements*sizeof(float)) * 1.0/lossless_outsize << endl;
+      free(result);
+      // exit(0);
+      auto decomp_time_start = std::chrono::high_resolution_clock::now();
+      size_t lossless_output = sz_lossless_decompress(ZSTD_COMPRESSOR, result_after_lossless, lossless_outsize, &result, result_size);
+      sz_decompress_cp_preserve_3d_online_log<float>(result, r1, r2, r3, dec_U, dec_V, dec_W);
+      auto decomp_time_end = std::chrono::high_resolution_clock::now();
+      cpsz_decomp_duration = decomp_time_end - decomp_time_start;
+      free(result_after_lossless);
+    }
+    printf("verifying...\n");
+    double nrmse_u, nrmse_v, nrmse_w,psnr_overall,psnr_cpsz_overall;
+    verify(U, dec_U, r1*r2*r3, nrmse_u);
+    verify(V, dec_V, r1*r2*r3, nrmse_v);
+    verify(W, dec_W, r1*r2*r3, nrmse_w);
+    psnr_cpsz_overall = 20 * log10(sqrt(3) / sqrt(nrmse_u * nrmse_u + nrmse_v * nrmse_v + nrmse_w * nrmse_w));
+    
+
+    if (writeout_flag == 1){
+      writefile<float>("/home/mxi235/data/temp_data/dec_U.bin", dec_U, num_elements);
+      writefile<float>("/home/mxi235/data/temp_data/dec_V.bin", dec_V, num_elements);
+      writefile<float>("/home/mxi235/data/temp_data/dec_W.bin", dec_W, num_elements);
+      printf("success write out\n");
+    }
+
+
+
 
 
     auto critical_points_out = compute_critical_points(dec_U,dec_V,dec_W, r1, r2, r3);
     cout << "critical points dec: " << critical_points_out.size() << endl;
+
+    
+    if (critical_points_0.size() != critical_points_out.size()){
+    printf("critical_points_ori size: %ld, critical_points_out size: %ld\n", critical_points_0.size(), critical_points_out.size());
+    printf("critical points size not equal\n");
+    exit(0);
+    }
+    //check two critical points are the same
+    for (auto p:critical_points_0){
+      auto p_out = critical_points_0[p.first];
+      if (p.second.x[0] != p_out.x[0] || p.second.x[1] != p_out.x[1] || p.second.x[2] != p_out.x[2]){
+        printf("critical points not equal\n");
+        exit(0);
+      }
+    }
+
+    //replace the points on surface with original data
+    // for (int i = 0; i < r1; i++){
+    //   for (int j = 0; j < r2; j++){
+    //     for (int k = 0; k < r3; k++){
+    //       if (i == 0 || i == r3-1 || j == 0 || j == r2-1 || k == 0 || k == r1-1){
+    //         dec_U[k + r3 * j + r3 * r2 * i] = U[k + r3 * j + r3 * r2 * i];
+    //         dec_V[k + r3 * j + r3 * r2 * i] = V[k + r3 * j + r3 * r2 * i];
+    //         dec_W[k + r3 * j + r3 * r2 * i] = W[k + r3 * j + r3 * r2 * i];
+    //       }
+    //     }
+    //   }
+    // }
+    // for (int i = 0; i < r1; i++){
+    //   for (int j = 0; j < r2; j++){
+    //     for (int k = 0; k < r3; k++){
+    //       if (i == 1 || i == r3-2 || j == 1 || j == r2-2 || k == 1 || k == r1-2){
+    //         dec_U[k + r3 * j + r3 * r2 * i] = U[k + r3 * j + r3 * r2 * i];
+    //         dec_V[k + r3 * j + r3 * r2 * i] = V[k + r3 * j + r3 * r2 * i];
+    //         dec_W[k + r3 * j + r3 * r2 * i] = W[k + r3 * j + r3 * r2 * i];
+    //       }
+    //     }
+    //   }
+    // }
 
     ftk::ndarray<float> grad_ori;
     grad_ori.reshape({3, static_cast<unsigned long>(r3),static_cast<unsigned long>(r2), static_cast<unsigned long>(r1)});//500,500,100
@@ -953,35 +1365,16 @@ int main(int argc, char ** argv){
     refill_gradient_3d(0, r1, r2, r3, dec_U, grad_dec);
     refill_gradient_3d(1, r1, r2, r3, dec_V, grad_dec);
     refill_gradient_3d(2, r1, r2, r3, dec_W, grad_dec);
-    printf("ori: 1,499,99,99 is %f\n",grad_ori(1,499,99,99));
-    printf("dec: 1,499,99,99 is %f\n",grad_dec(1,499,99,99));
-    printf("ori: 1,38,48,58 is %f\n",grad_ori(1,38,48,58));
-    printf("dec: 1,38,48,58 is %f\n",grad_dec(1,38,48,58));
-    //test interp3d
-    // double test_pt[3] = {3.052532,277.932877,95.424966};//3.052532,277.932877,97.424966
-    // double test_out_val[3] = {0};
 
-    // auto interp_start = std::chrono::high_resolution_clock::now();
-    // interp3d_new(test_pt, test_out_val,grad_ori);
-    // auto interp_end = std::chrono::high_resolution_clock::now();
-    // std::chrono::duration<double, std::milli> duration_interp = interp_end - interp_start;
-    // printf("interp3d: %f %f %f\n", test_out_val[0], test_out_val[1],test_out_val[2]);
-    // printf("interp3d time: %f ms\n", duration_interp.count());
-
-
-
+    
     //exit(0);
 
     //*************先计算一次整体的traj_ori 和traj_dec,后续只需增量修改*************
     auto start_alg_time = std::chrono::high_resolution_clock::now();
     //*************计算原始数据的traj_ori*************
-    size_t found = 0;
-    size_t outside = 0;
-    size_t max_iter = 0;
     size_t total_saddle_count = 0;
     size_t total_traj_count = 0;
     size_t total_traj_reach_cp = 0;
-    std::vector<int> index_ori;
     std::set<size_t> vertex_ori;
     // std::unordered_map<size_t, std::set<int>> cellID_trajIDs_map_ori;
     auto start1 = std::chrono::high_resolution_clock::now();
@@ -1045,9 +1438,6 @@ int main(int argc, char ** argv){
                 //printf("current trajID: %d\n",trajID);
                 std::vector<std::array<double, 3>> result_return = trajectory_3d_parallel(pt, seed, h * directions[k][0], max_length, r3,r2,r1, critical_points_0, grad_ori,thread_lossless_index,thread_id);
                 // printf("threadID: %d, trajID: %d, seed pt: %f %f %f, end pt: %f %f %f\n",omp_get_thread_num(),trajID,direction[1], direction[2], direction[3],traj.back()[0],traj.back()[1],traj.back()[2]);
-                if(result_return.back()[0] != -1 && result_return.size() != max_length){
-                    total_traj_reach_cp ++;
-                }
                 trajs_ori[i*6 + k] = result_return;
                 trajID_direction_vector[i*6 + k] = directions[k][0];
                 total_traj_count ++;
@@ -1061,10 +1451,8 @@ int main(int argc, char ** argv){
     printf("total critical points: %zu\n",critical_points_0.size());
     printf("total saddle points: %zu\n",total_saddle_count);
     printf("total traj: %zu\n",total_traj_count);
-    printf("total_traj_reach_cp: %zu\n",total_traj_reach_cp);
 
-
-    start1 = std::chrono::high_resolution_clock::now();
+    //start1 = std::chrono::high_resolution_clock::now();
     // for (auto traj:trajs_ori){
     //     auto last = traj.back();
     //     auto last_offset = get_cell_offset_3d(last.data(), r3, r2, r1);
@@ -1090,18 +1478,16 @@ int main(int argc, char ** argv){
     //     }
     // }
     // end1 = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<double>elapsed = end1 - start1;
-    cout << "Elapsed time for check all traj once: " << elapsed.count() << "s" << endl;
-    printf("found: %zu, outside: %zu, max_iter: %zu\n",found,outside,max_iter);
+    //std::chrono::duration<double>elapsed = end1 - start1;
+    //cout << "Elapsed time for check all traj once: " << elapsed.count() << "s" << endl;
     printf("total traj: %zu\n",trajs_ori.size());
     printf("total critical points: %zu\n",critical_points_0.size());
     printf("total saddle points: %zu\n",total_saddle_count);
     printf("vertex_ori size: %zu\n",vertex_ori.size());
-    printf("total_traj_reach_cp: %zu\n",total_traj_reach_cp);
+
 
     //*************计算解压缩数据的traj_dec*************
-    total_saddle_count,total_traj_count,total_traj_reach_cp = 0;
-    std::vector<int> index_dec;
+    total_saddle_count = 0,total_traj_count = 0;
     std::set<size_t> vertex_dec;
     // std::unordered_map<size_t, std::set<int>> cellID_trajIDs_map_dec;
     std::vector<int> keys_dec;
@@ -1167,7 +1553,6 @@ int main(int argc, char ** argv){
                 std::vector<std::array<double, 3>> result_return = trajectory_3d_parallel(pt, seed, h * directions[k][0], max_length, r3,r2,r1, critical_points_out, grad_dec,thread_lossless_index,thread_id);
                 // printf("threadID: %d, trajID: %d, seed pt: %f %f %f, end pt: %f %f %f\n",omp_get_thread_num(),trajID,direction[1], direction[2], direction[3],traj.back()[0],traj.back()[1],traj.back()[2]);
                 if(result_return.back()[0] != -1 && result_return.size() != max_length){
-                    total_traj_reach_cp ++;
                 }
                 trajs_dec[i*6 + k] = result_return;
                 total_traj_count ++;
@@ -1183,7 +1568,6 @@ int main(int argc, char ** argv){
     printf("total critical points: %zu\n",critical_points_out.size());
     printf("total saddle points: %zu\n",total_saddle_count);
     printf("vertex_ori size: %zu\n",vertex_ori.size());
-    printf("total_traj_reach_cp: %zu\n",total_traj_reach_cp);
     // for (int i = 0; i < trajs_ori.size(); i++){
     //     auto traj_ori = trajs_ori[i];
     //     auto traj_dec = trajs_dec[i];
@@ -1201,12 +1585,52 @@ int main(int argc, char ** argv){
     //     }
     // }
 
-    printf("done\n");
+    save_trajs_to_binary_3d(trajs_dec, file_out_dir + "cpsz_traj_3d.bin");
+
+
+    // int last_two_pt_same = 0;
+    // int max_size = 0;
+    // int reach_cp = 0;
+    // for (auto p:trajs_ori){
+    //     //print all trajs that last two points are equal
+    //     if (p.size() > 1){
+    //         auto last = p.back();
+    //         auto last2 = p[p.size()-2];
+    //         if (p.size() == max_length){
+    //             max_size ++;
+    //         }
+    //         else if (last[0] == last2[0] && last[1] == last2[1] && last[2] == last2[2]){
+    //             //printf("last pt (%f %f %f)\n",last[0],last[1],last[2]);
+    //             last_two_pt_same ++;
+    //         }
+    //         else {
+    //             reach_cp ++;
+    //         }
+    //     }
+    //     if (p.size() <=1){
+    //       //print all pts in p
+    //       printf("====================================\n");
+    //       for (auto pt:p){
+    //         printf("pt: %f %f %f\n",pt[0],pt[1],pt[2]);
+    //       }
+    //     }
+        
+    // }
+    // printf("last two pt same: %d\n",last_two_pt_same);
+    // printf("max size: %d\n",max_size);
+    // printf("reach cp: %d\n",reach_cp);
+    // printf("total traj: %d\n",trajs_ori.size());
+    // exit(0);
 
     // 计算哪里有问题（init queue）
     std::set<size_t> trajID_need_fix;
     auto init_queue_start = std::chrono::high_resolution_clock::now();
-
+    int num_outside = 0;
+    int num_max_iter = 0;
+    int num_find_cp = 0;
+    int wrong_num_outside = 0;
+    int wrong_num_max_iter = 0;
+    int wrong_num_find_cp = 0;
     switch (obj)
     {
     case 0:
@@ -1215,29 +1639,50 @@ int main(int argc, char ** argv){
         auto t2 = trajs_dec[i];
         bool cond1 = get_cell_offset_3d(t1.back().data(), r3, r2, r1) == get_cell_offset_3d(t2.back().data(), r3, r2, r1);
         bool cond2 = t1.size() == t_config.max_length;
-        bool cond3 = t1.back()[0] == -1;
-        bool cond4 = t2.back()[0] == -1;
-        if (!cond2 && !cond3 && !cond1){ //ori 找到了cp，但是dec和ori不一致
-          trajID_need_fix.insert(i);
+
+        if (LastTwoPointsAreEqual(t1)){
+          num_outside ++;
+          //ori inside
+          if (!LastTwoPointsAreEqual(t2)){
+            //dec outside
+            wrong_num_outside ++;
+            trajID_need_fix.insert(i);
+          }
+          else{
+            //dec outside
+            if (euclideanDistance(t1.back(), t2.back()) > threshold_outside){
+              wrong_num_outside ++;
+              trajID_need_fix.insert(i);
+            }
+          }
         }
-        else if (cond3 && !cond4){
-          trajID_need_fix.insert(i);
+        else if (cond2){
+          num_max_iter ++;
+          //ori reach max
+          if (t2.size() != t_config.max_length){
+            //dec not reach max, add
+            wrong_num_max_iter ++;
+            trajID_need_fix.insert(i);
+          }
+          else{
+            //dec reach max, need to check distance
+            if (euclideanDistance(t1.back(), t2.back()) > threshold_max_iter){
+              wrong_num_max_iter ++;
+              trajID_need_fix.insert(i);
+            }
+          }
+        }
+        else{
+          //reach cp
+          num_find_cp ++;
+          if(!cond1){
+            wrong_num_find_cp ++;
+            trajID_need_fix.insert(i);
+          }
         }
       }
       break;
-    case 1:
-      for(size_t i =0; i< trajs_ori.size(); ++i){
-        auto t1 = trajs_ori[i];
-        auto t2 = trajs_dec[i];
-        bool cond1 = get_cell_offset_3d(t1.back().data(), r3, r2, r1) == get_cell_offset_3d(t2.back().data(), r3, r2, r1);
-        bool cond2 = t1.size() == t_config.max_length;
-        bool cond3 = t1.back()[0] == -1;
-        if (!cond2 && !cond3 && !cond1){ //ori 找到了cp，但是dec和ori不一致
-          trajID_need_fix.insert(i);
-        }
-      }
-      break;
-    
+
     case 2:
       //  original | dec
       //  outside  | outside (could go different direction)
@@ -1250,20 +1695,52 @@ int main(int argc, char ** argv){
         bool cond3 = t2.size() == t_config.max_length;
         bool cond4 = t1.back()[0] == -1;
         bool cond5 = t2.back()[0] == -1;
-        if (cond4){
-          if (!cond5){
+        bool cond6 = get_cell_offset_3d(t1.back().data(), r3, r2, r1) == get_cell_offset_3d(t2.back().data(), r3, r2, r1);
+        // if (cond4){
+        //   //ori outside
+        //   auto last_inside_ori = findLastNonNegativeOne(t1);
+        //   auto last_inside_dec = findLastNonNegativeOne(t2);
+        //   if (!cond5){
+        //     trajID_need_fix.insert(i);
+        //   }
+        //   for (int j = t2.size() - 1; j >= 0; --j){
+        //     if (get_cell_offset_3d(last_inside_ori.data(), r3, r2, r1) == get_cell_offset_3d(t2[j].data(), r3, r2, r1)){
+        //       break;
+        //     }
+        //     if (j==0){
+        //       trajID_need_fix.insert(i);
+        //     }
+        //   }
+        // }
+        if (LastTwoPointsAreEqual(t1)){
+          if(!LastTwoPointsAreEqual(t2)){
+            if (SearchElementFromBack(t2, t1.back())){
+              continue;
+            }
+            else{
+            trajID_need_fix.insert(i);
+            }
+          }
+          else if (get_cell_offset_3d(t1.back().data(), r3, r2, r1) != get_cell_offset_3d(t2.back().data(), r3, r2, r1)){
             trajID_need_fix.insert(i);
           }
-        }
+        } 
         else if (cond2){
           if (!cond3){
             trajID_need_fix.insert(i);
           }
         }
-        else if (!cond2 && !cond4){
-          std::array<double, 3> last_ori = t1.back();
-          std::array<double, 3> last_dec = t2.back();
-          if(get_cell_offset_3d(last_ori.data(), r3, r2, r1) != get_cell_offset_3d(last_dec.data(), r3, r2, r1)){
+        // else if (!cond2 && !cond4){
+        //   //ori inside, not reach max, ie found cp
+        //   std::array<double, 3> last_ori = findLastNonNegativeOne(t1);
+        //   std::array<double, 3> last_dec = findLastNonNegativeOne(t2);
+        //   if(get_cell_offset_3d(last_ori.data(), r3, r2, r1) != get_cell_offset_3d(last_dec.data(), r3, r2, r1)){
+        //     trajID_need_fix.insert(i);
+        //   }
+        // }
+        else{
+          //reach cp
+          if (!cond6){
             trajID_need_fix.insert(i);
           }
         }
@@ -1277,18 +1754,29 @@ int main(int argc, char ** argv){
     printf("Elapsed time for init queue: %f s\n", init_queue_elapsed.count());
     if (trajID_need_fix.size() == 0){
       printf("no need to fix\n");
+      if (file_out_dir != ""){
+        save_trajs_to_binary_3d(trajs_ori, file_out_dir + "3d_trajs_ori.bin");
+        save_trajs_to_binary_3d(trajs_dec, file_out_dir + "3d_trajs_dec.bin");
+      }
+      exit(0);
     }
     else{
       printf("need to fix: %zu\n",trajID_need_fix.size());
       trajID_need_fix_next_vec.push_back(trajID_need_fix.size());
+      trajID_need_fix_next_detail_vec.push_back({wrong_num_outside, wrong_num_max_iter, wrong_num_find_cp});
+      origin_traj_detail = {num_outside, num_max_iter, num_find_cp};
+      printf("original traj has: %d outside, %d max_iter, %d find_cp\n",num_outside, num_max_iter, num_find_cp);
     }
-    printf("done2");
 
     //*************开始修复轨迹*************
     int current_round = 0;
     do
     {
       printf("begin fix traj,current_round: %d\n", current_round++);
+      if (current_round >=20){
+        printf("current_round >= 20, exit\n");
+        exit(0);
+      }
       std::set<size_t> trajID_need_fix_next;
       //fix trajecotry
       auto index_time_start = std::chrono::high_resolution_clock::now();
@@ -1307,8 +1795,8 @@ int main(int argc, char ** argv){
         auto t1 = trajs_ori[current_trajID];
         auto t2 = trajs_dec[current_trajID];
         int start_fix_index = 0;
-        int end_fix_index = t1.size() - 1;
-        double threshold = 0.5;
+        // int end_fix_index = t1.size() - 1;
+        int end_fix_index = 1;
         int thread_id = omp_get_thread_num();
 
         //find the first different point
@@ -1317,8 +1805,8 @@ int main(int argc, char ** argv){
         //for (size_t j = start_fix_index; j < max_index; ++j){
           auto p1 = t1[j];
           auto p2 = t2[j];
-          if (p1[0] > 0 && p2[0] > 0){
-            double dist = sqrt(pow(p1[0] - p2[0], 2) + pow(p1[1] - p2[1], 2) + pow(p1[2] - p2[2], 2));
+          if (j < t1.size() - 1 && j < t2.size() - 1){
+            double dist = euclideanDistance(p1, p2);
             //auto p1_offset = get_cell_offset(p1.data(), DW, DH);
             //auto p2_offset = get_cell_offset(p2.data(), DW, DH);
             if ((dist > threshold)){
@@ -1329,34 +1817,31 @@ int main(int argc, char ** argv){
             }
           }
         }
+        if (t1.size() == t_config.max_length){
+        end_fix_index = t1.size();
+        }
+        // end_fix_index = std::min(end_fix_index, static_cast<int>(t1.size()) - 1);
+        end_fix_index = std::min(end_fix_index, static_cast<int>(t1.size())); //t1.size() - 1;
 
         while(!success){
           double direction = trajID_direction_vector[current_trajID];
-          std::vector<int> temp_index_ori;
-          std::vector<int> temp_index_check;
           std::set<size_t> temp_vertexID; //存储经过的点对应的vertexID
           std::set<size_t> temp_var;
-          std::unordered_map<size_t, double> rollback_dec_u;
-          std::unordered_map<size_t, double> rollback_dec_v;
-          std::unordered_map<size_t, double> rollback_dec_w;
+          // std::unordered_map<size_t, double> rollback_dec_u;
+          // std::unordered_map<size_t, double> rollback_dec_v;
+          // std::unordered_map<size_t, double> rollback_dec_w;
           //计算一次rk4直到终点，得到经过的cellID， 然后替换数据
-          auto temp_trajs_ori = trajectory_3d(t1[0].data(), t1[1], h * direction, end_fix_index, r3, r2, r1, critical_points_0, grad_ori,temp_index_ori,temp_vertexID);
+          // end_fix_index = std::min(end_fix_index,t_config.max_length); 
+          auto temp_trajs_ori = trajectory_3d(t1[0].data(), t1[1], h * direction, end_fix_index, r3, r2, r1, critical_points_0, grad_ori,temp_vertexID);
           //printf("end_fix_index for temp_trajs_ori: %d\n",end_fix_index);
           //此时temp_trajs_ori中存储的是从起点到分岔点经过的vertex
-          for (auto o:temp_vertexID){
-            rollback_dec_u[o] = dec_U[o];//存储需要回滚的数据
-            rollback_dec_v[o] = dec_V[o];
-            rollback_dec_w[o] = dec_W[o];
-            local_all_vertex_for_all_diff_traj[thread_id].insert(o);//存储经过的vertex到local_all_vertex_for_all_diff_traj
-            
-          }
-
-          auto current_divergence_pos =temp_trajs_ori.back();
-          if (current_divergence_pos[0] == -1){
-            printf("error: current_divergence_pos is -1\n");
-            exit(0);
-          }
-
+          // for (auto o:temp_vertexID){
+          //   rollback_dec_u[o] = dec_U[o];//存储需要回滚的数据
+          //   rollback_dec_v[o] = dec_V[o];
+          //   rollback_dec_w[o] = dec_W[o];
+          //   local_all_vertex_for_all_diff_traj[thread_id].insert(o);//存储经过的vertex到local_all_vertex_for_all_diff_traj
+          // }
+          //这里o越界了
           for (auto o:temp_vertexID){ //用原始数据更新dec_U,dec_V,dec_W
             dec_U[o] = U[o];
             dec_V[o] = V[o];
@@ -1367,104 +1852,130 @@ int main(int argc, char ** argv){
             grad_dec(0, x, y, z) = U[o];//更新grad_dec
             grad_dec(1, x, y, z) = V[o];
             grad_dec(2, x, y, z) = W[o];
+            local_all_vertex_for_all_diff_traj[thread_id].insert(o);
           }
           //此时数据更新了，如果此时计算从起点到分岔点的轨迹(使用dec），应该是一样的
-          std::vector<int> temp_index_test;
-          std::set<size_t> temp_vertexID_test; //存储经过的点对应的vertexID
-          auto temp_trajs_test = trajectory_3d(t1[0].data(), t1[1], h * direction, end_fix_index, r3, r2, r1, critical_points_out, grad_dec,temp_index_test,temp_vertexID_test);
+          //std::vector<int> temp_index_test;
+          //std::set<size_t> temp_vertexID_test; //存储经过的点对应的vertexID
+          //auto temp_trajs_test = trajectory_3d(t1[0].data(), t1[1], h * direction, end_fix_index, r3, r2, r1, critical_points_out, grad_dec,temp_index_test,temp_vertexID_test);
 
           //auto temp_trajs_check = trajectory_3d(current_divergence_pos.data(), current_divergence_pos, h * direction, t1.size()-end_fix_index+2, r3, r2, r1, critical_points_out, grad_dec,temp_index_check,temp_var);
-          auto temp_trajs_check = trajectory_3d(t1[0].data(), t1[1], h * direction, t_config.max_length, r3, r2, r1, critical_points_out, grad_dec,temp_index_check,temp_var);
+          auto temp_trajs_check = trajectory_3d(t1[0].data(), t1[1], h * direction, end_fix_index, r3, r2, r1, critical_points_0, grad_dec,temp_var);
           switch(obj)
           {
             case 0:
-              if (t1.back()[0] != -1 && t1.size() != t_config.max_length){
-                success = (get_cell_offset_3d(findLastNonNegativeOne(t1).data(), r3, r2, r1) == get_cell_offset_3d(findLastNonNegativeOne(temp_trajs_check).data(), r3, r2, r1));
-              }
-              else if(t1.back()[0] == -1){
-                success = (temp_trajs_check.back()[0] == -1);
+            if (LastTwoPointsAreEqual(t1)){
+              //ori outside
+              if (!LastTwoPointsAreEqual(temp_trajs_check)){
+                //dec inside
+                success = false;
               }
               else{
+                //dec outside
+                success = (euclideanDistance(t1.back(), temp_trajs_check.back()) < threshold_outside);
+              }
+            }
+            else if (t1.size() == t_config.max_length){
+              if ((temp_trajs_check.size() == t_config.max_length)){
+                if (euclideanDistance(t1.back(), temp_trajs_check.back()) >=threshold_max_iter){
+                  success = false;
+                }
+                else{
+                  success = true;
+                }
+              }
+            }
+            else{
+              //reach cp
+              if (get_cell_offset_3d(t1.back().data(), r3, r2, r1) == get_cell_offset_3d(temp_trajs_check.back().data(), r3, r2, r1)){
                 success = true;
               }
-              break;
-            case 1:
-              success = (get_cell_offset_3d(findLastNonNegativeOne(t1).data(), r3, r2, r1) == get_cell_offset_3d(findLastNonNegativeOne(temp_trajs_check).data(), r3, r2, r1));
+            }
               break;
             case 2:
-              if (t1.size() == t_config.max_length){
-                // if (end_fix_index == t_config.max_length){
-                //   success = (temp_trajs_check.size() == 2);
-                // }
+              // if (t1.back()[0] == -1){
+              //   if (temp_trajs_check.back()[0] != -1){
+              //     success = false;
+              //   }
+              //   auto last_inside_ori = findLastNonNegativeOne(t1);
+              //   for(int j = temp_trajs_check.size() - 1; j >= 0; --j){
+              //     if (get_cell_offset_3d(last_inside_ori.data(), r3, r2, r1) == get_cell_offset_3d(temp_trajs_check[j].data(), r3, r2, r1)){
+              //       success = true;
+              //       break;
+              //     }
+              //     if (j == 0){
+              //       success = false;
+              //     }
+              //   }
+              // }
+              if (LastTwoPointsAreEqual(t1)){
+                if (!LastTwoPointsAreEqual(temp_trajs_check)){
+                  if (SearchElementFromBack(temp_trajs_check, t1.back())){
+                    success = true;
+                  }
+                  else{
+                    success = false;
+                  }
+                }
+                else if (get_cell_offset_3d(t1.back().data(), r3, r2, r1) != get_cell_offset_3d(temp_trajs_check.back().data(), r3, r2, r1)){
+                  // 或者不等于temp_trajs_check倒数第二个点？
+                  success = false;
+                }
+                else{
+                  success = true;
+                }
+              }
+              else if (t1.size() == t_config.max_length){
+                //ori reach max, dec should reach max as well
                 success = (temp_trajs_check.size() == t_config.max_length);
-
-              }
-              else if (t1.back()[0] == -1){
-                success = (temp_trajs_check.back()[0] == -1);
-              }
-              else if (t1.size() != t_config.max_length && t1.back()[0] != -1){
-                success = (get_cell_offset_3d(findLastNonNegativeOne(t1).data(), r3, r2, r1) == get_cell_offset_3d(findLastNonNegativeOne(temp_trajs_check).data(), r3, r2, r1));
               }
               else{
-                success = true;
+                success = (get_cell_offset_3d(t1.back().data(), r3, r2, r1) == get_cell_offset_3d(temp_trajs_check.back().data(), r3, r2, r1));
               }
               break;
           }
       
           if (!success){
             //线程争抢可能导致没发fix
-            if (end_fix_index >= t_config.max_length){
-              printf("error: traj %zu, current end_fix_index: %d\n",current_trajID,end_fix_index);
-              printf("temp_trajs_ori length: %zu,temp_trajs_ori first: %f %f %f, last: %f %f %f\n",temp_trajs_ori.size(),temp_trajs_ori[0][0],temp_trajs_ori[0][1],temp_trajs_ori[0][2],temp_trajs_ori.back()[0],temp_trajs_ori.back()[1],temp_trajs_ori.back()[2]);
-              printf("temp_trajs_check length: %zu, temp_trajs_check first: %f %f %f, last: %f %f %f last inside: %f %f %f\n",temp_trajs_check.size(),temp_trajs_check[0][0],temp_trajs_check[0][1],temp_trajs_check[0][2],temp_trajs_check.back()[0],temp_trajs_check.back()[1],temp_trajs_check.back()[2],findLastNonNegativeOne(temp_trajs_check)[0],findLastNonNegativeOne(temp_trajs_check)[1],findLastNonNegativeOne(temp_trajs_check)[2]);
-              printf("t1 length: %zu , t1 first: %f %f %f, last: %f %f %f\n",t1.size(),t1[0][0],t1[0][1],t1[0][2],t1.back()[0],t1.back()[1],t1.back()[2]);
-              //print all points for temp_trajs_ori, temp_trajs_check, t1
-              if (current_round>=4){
-                // for (size_t i = 0; i < std::min(temp_trajs_ori.size(),temp_trajs_check.size()); ++i){
-                //   printf("    t1               %zu: %f %f %f\n",i,t1[i][0],t1[i][1],t1[i][2]);
-                //   printf("    temp_trajs_ori   %zu: %f %f %f\n",i,temp_trajs_ori[i][0],temp_trajs_ori[i][1],temp_trajs_ori[i][2]);
-                //   printf("    temp_trajs_check %zu: %f %f %f\n",i,temp_trajs_check[i][0],temp_trajs_check[i][1],temp_trajs_check[i][2]);
-                //   printf("=====================================\n");
-                // }
-                if (temp_trajs_test.size() != temp_trajs_ori.size()){
-                  printf("ERROR: temp_trajs_test size: %zu, temp_trajs_ori size: %zu\n",temp_trajs_test.size(),temp_trajs_ori.size());
-                  printf("end_fix_index for temp_trajs_test: %d\n",end_fix_index);
-                  printf("temp_trajs_ori size: %zu, temp_trajs_test size: %zu\n",temp_trajs_ori.size(),temp_trajs_test.size());
-                  //print all points for temp_trajs_ori, temp_trajs_test
-                  for (size_t i = 0; i < std::min(temp_trajs_ori.size(),temp_trajs_test.size()); ++i){
-                    printf("    temp_trajs_ori   %zu: %f %f %f\n",i,temp_trajs_ori[i][0],temp_trajs_ori[i][1],temp_trajs_ori[i][2]);
-                    printf("    t1               %zu: %f %f %f\n",i,t1[i][0],t1[i][1],t1[i][2]);
-                    printf("    temp_trajs_test  %zu: %f %f %f\n",i,temp_trajs_test[i][0],temp_trajs_test[i][1],temp_trajs_test[i][2]);
-                    printf("=====================================\n");
-                  }
-                  exit(0);
-                }
-              }
-
-              trajID_need_fix_next.insert(current_trajID);
+            //rollback
+            // for (auto o:temp_vertexID){
+            //   dec_U[o] = rollback_dec_u[o];
+            //   dec_V[o] = rollback_dec_v[o];
+            //   dec_W[o] = rollback_dec_w[o];
+            //   int x = o % r3; //o 转化为坐标
+            //   int y = (o / r3) % r2;
+            //   int z = o / (r3 * r2);
+            //   grad_dec(0, x, y, z) = dec_U[o];//回退grad_dec
+            //   grad_dec(1, x, y, z) = dec_V[o];
+            //   grad_dec(2, x, y, z) = dec_W[o];
+            //   local_all_vertex_for_all_diff_traj[thread_id].erase(o); //删除local_all_vertex_for_all_diff_traj中的vertex
+            // }
+            if (end_fix_index >= static_cast<int>(t1.size())){
+              printf("t_config.max_length: %d,end_fix_index%d\n",t_config.max_length,end_fix_index);
+              printf("error: current end_fix_index is %d, current ID: %zu\n",end_fix_index,current_trajID);
+              printf("ori first: (%f %f %f), temp_trajs_ori first: (%f %f %f), temp_trajs_check first: (%f %f %f)\n",t1[0][0],t1[0][1],t1[0][2],temp_trajs_ori[0][0],temp_trajs_ori[0][1],temp_trajs_ori[0][2],temp_trajs_check[0][0],temp_trajs_check[0][1],temp_trajs_check[0][2]);
+              printf("ori second: (%f %f %f), temp_trajs_ori second: (%f %f %f), temp_trajs_check second: (%f %f %f)\n",t1[1][0],t1[1][1],t1[1][2],temp_trajs_ori[1][0],temp_trajs_ori[1][1],temp_trajs_ori[1][2],temp_trajs_check[1][0],temp_trajs_check[1][1],temp_trajs_check[1][2]);
+              printf("ori last-2: (%f %f %f), temp_trajs_ori last-2: (%f %f %f), temp_trajs_check last-2: (%f %f %f)\n",t1[t1.size()-3][0],t1[t1.size()-3][1],t1[t1.size()-3][2],temp_trajs_ori[temp_trajs_ori.size()-3][0],temp_trajs_ori[temp_trajs_ori.size()-3][1],temp_trajs_ori[temp_trajs_ori.size()-3][2],temp_trajs_check[temp_trajs_check.size()-3][0],temp_trajs_check[temp_trajs_check.size()-3][1],temp_trajs_check[temp_trajs_check.size()-3][2]);
+              printf("ori last-1: (%f %f %f), temp_trajs_ori last-1: (%f %f %f), temp_trajs_check last-1: (%f %f %f)\n",t1[t1.size()-2][0],t1[t1.size()-2][1],t1[t1.size()-2][2],temp_trajs_ori[temp_trajs_ori.size()-2][0],temp_trajs_ori[temp_trajs_ori.size()-2][1],temp_trajs_ori[temp_trajs_ori.size()-2][2],temp_trajs_check[temp_trajs_check.size()-2][0],temp_trajs_check[temp_trajs_check.size()-2][1],temp_trajs_check[temp_trajs_check.size()-2][2]);
+              printf("ori last: (%f %f %f), temp_trajs_ori last: (%f %f %f), temp_trajs_check last: (%f %f %f)\n",t1[t1.size()-1][0],t1[t1.size()-1][1],t1[t1.size()-1][2],temp_trajs_ori[temp_trajs_ori.size()-1][0],temp_trajs_ori[temp_trajs_ori.size()-1][1],temp_trajs_ori[temp_trajs_ori.size()-1][2],temp_trajs_check[temp_trajs_check.size()-1][0],temp_trajs_check[temp_trajs_check.size()-1][1],temp_trajs_check[temp_trajs_check.size()-1][2]);
+              printf("t1 size: %zu, temp_trajs_ori size: %zu, temp_trajs_check size: %zu\n",t1.size(),temp_trajs_ori.size(),temp_trajs_check.size());
+              // if (current_round >=6){
+              //   std::array<double,3> v = {0,0,0};
+              //   std::set<size_t> lossless;
+              //   double direction = trajID_direction_vector[current_trajID];
+              //   auto rk4_ori = newRK4_3d(t1[t1.size()-2].data(),v.data(),grad_ori,t_config.h * direction ,r3,r2,r1,lossless,true);
+              //   auto rk4_check = newRK4_3d(temp_trajs_check[temp_trajs_check.size()-2].data(),v.data(),grad_dec,t_config.h * direction,r3,r2,r1,lossless,true);
+              //   printf("done\n");
+              // }
               break;
             }
-            //rollback
-            for (auto o:temp_vertexID){
-              dec_U[o] = rollback_dec_u[o];
-              dec_V[o] = rollback_dec_v[o];
-              dec_W[o] = rollback_dec_w[o];
-              int x = o % r3; //o 转化为坐标
-              int y = (o / r3) % r2;
-              int z = o / (r3 * r2);
-              grad_dec(0, x, y, z) = dec_U[o];//回退grad_dec
-              grad_dec(1, x, y, z) = dec_V[o];
-              grad_dec(2, x, y, z) = dec_W[o];
-              local_all_vertex_for_all_diff_traj[thread_id].erase(o); //删除local_all_vertex_for_all_diff_traj中的vertex
-            }
-
-
-            end_fix_index = std::min(end_fix_index + 10, t_config.max_length);
+            end_fix_index = std::min(end_fix_index + 10, static_cast<int>(t1.size()));
           }
           else{
             //成功修正当前trajectory
             //printf("fix traj %zu successfully\n",current_trajID);
             trajs_dec[current_trajID] = temp_trajs_check;
+            break;
           }
         }
       } 
@@ -1484,10 +1995,13 @@ int main(int argc, char ** argv){
       printf("recalculating trajectories for updated decompressed data...\n");
       //get trajectories for updated decompressed data
       auto recalc_trajs_start = std::chrono::high_resolution_clock::now();
-      std::vector<std::vector<std::array<double, 3>>> trajs_dec_next(keys_dec.size() * 6);//指定长度为saddle的个数*6，因为每个saddle有6个方向
-      for (auto& traj : trajs_dec_next) {
-          traj.reserve(expected_size); // 预分配容量
+
+      //用原来的trajs_dec替换
+      trajs_dec.resize(keys_dec.size() * 6);
+      for (auto& traj : trajs_dec) {
+        traj.resize(t_config.max_length, {0.0, 0.0, 0.0});
       }
+
       std::vector<std::set<size_t>> thread_lossless_index_dec_next(total_thread);
       #pragma omp parallel for
       for (size_t i = 0; i < keys_dec.size(); ++i) {
@@ -1524,7 +2038,7 @@ int main(int argc, char ** argv){
               for (int k = 0; k < 6; k++){
                   std::array<double,3> seed = {directions[k][1], directions[k][2], directions[k][3]};
                   std::vector<std::array<double, 3>> result_return = trajectory_3d_parallel(pt, seed, h * directions[k][0], max_length, r3,r2,r1, critical_points_out, grad_dec,thread_lossless_index_dec_next,thread_id);
-                  trajs_dec_next[i*6 + k] = result_return;
+                  trajs_dec[i*6 + k] = result_return;
               }
           }
       }
@@ -1536,106 +2050,79 @@ int main(int argc, char ** argv){
       printf("comparing the new trajectories with the old ones to see if all trajectories are fixed ...\n");
 
       int wrong = 0;
-      //这里的for很简单，暂时不并行
+      int wrong_num_outside = 0;
+      int wrong_num_max_iter = 0;
+      int wrong_num_find_cp = 0;
       auto compare_traj_start = std::chrono::high_resolution_clock::now();
       for (size_t i =0; i< trajs_ori.size(); ++i){
         auto t1 = trajs_ori[i];
-        auto t2 = trajs_dec_next[i];
+        auto t2 = trajs_dec[i];
         bool cond1 = get_cell_offset_3d(t1.back().data(), r3, r2, r1) == get_cell_offset_3d(t2.back().data(), r3, r2, r1);
         bool cond2 = t1.size() == t_config.max_length;
         bool cond3 = t2.size() == t_config.max_length;
-        bool cond4 = t1.back()[0] == -1;
-        bool cond5 = t2.back()[0] == -1;
         switch(obj)
         {
           case 0:
-            if(!cond2 && !cond4){
-              auto ori_last_inside = t1.back();
-              auto dec_last_inside = t2.back();
-              if (get_cell_offset_3d(ori_last_inside.data(), r3, r2, r1) != get_cell_offset_3d(dec_last_inside.data(), r3, r2, r1)){
+            //1. outside 2. reach max 3. reach cp
+            // if (LastTwoPointsAreEqual(t1)){//如果ori出界了
+            //   if (!LastTwoPointsAreEqual(t2)){//dec没有出界
+            //     if (SearchElementFromBack(t2, t1.back())){ //dec中包含了ori的最后一个点
+            //       continue;
+            //     }
+            //     else{//dec中不包含ori的最后一个点
+            //       wrong ++;
+            //       trajID_need_fix_next.insert(i);
+            //     }
+            //   }
+            //   else if (!SearchElementFromBack(t2, t1.back())){//dec中不包含ori的最后一个点
+            //     wrong ++;
+            //     trajID_need_fix_next.insert(i);
+            //   }
+            // }
+            if (LastTwoPointsAreEqual(t1)){
+              //ori outside
+              if (!LastTwoPointsAreEqual(t2)){
+                //dec inside
                 wrong ++;
+                wrong_num_outside ++;
                 trajID_need_fix_next.insert(i);
-                // printf("add traj %ld\n",i);
-                // printf("Trajectory %ld is wrong!!!\n", i);
-                // printf("first ori:(%f,%f.%f), second ori(%f,%f,%f): last ori:(%f,%f,%f)\n",t1[0][0],t1[0][1],t1[0][2],t1[1][0],t1[1][1],t1[1][2],t1.back()[0],t1.back()[1],t1.back()[2]);
-                // printf("first dec:(%f,%f,%f), second dec(%f,%f,%f): last dec:(%f,%f,%f)\n",t2[0][0],t2[0][1],t2[0][2],t2[1][0],t2[1][1],t2[1][2],t2.back()[0],t2.back()[1],t2.back()[2]);
-                // printf("ori length: %zu, dec length: %zu\n", t1.size(), t2.size());
+              }
+              else{
+                //dec outside
+                if (euclideanDistance(t1.back(), t2.back()) > threshold_outside){
+                  wrong ++;
+                  wrong_num_outside ++;
+                  trajID_need_fix_next.insert(i);
+                }
               }
             }
-            else if (cond4 && !cond5){
-              wrong ++;
-              trajID_need_fix_next.insert(i);
-              // printf("add traj %ld\n",i);
-              // printf("Trajectory %ld is wrong!!!\n", i);
-              // printf("first ori:(%f,%f.%f), second ori(%f,%f,%f): last ori:(%f,%f,%f)\n",t1[0][0],t1[0][1],t1[0][2],t1[1][0],t1[1][1],t1[1][2],t1.back()[0],t1.back()[1],t1.back()[2]);
-              // printf("first dec:(%f,%f,%f), second dec(%f,%f,%f): last dec:(%f,%f,%f)\n",t2[0][0],t2[0][1],t2[0][2],t2[1][0],t2[1][1],t2[1][2],t2.back()[0],t2.back()[1],t2.back()[2]);
-              // printf("ori length: %zu, dec length: %zu\n", t1.size(), t2.size());
-            }
-            break;
-          
-          case 1:
-            if(cond4){
-              auto ori_last_inside = findLastNonNegativeOne(t1);
-              auto dec_last_inside = findLastNonNegativeOne(t2);
-              if(get_cell_offset_3d(ori_last_inside.data(), r3, r2, r1) != get_cell_offset_3d(dec_last_inside.data(), r3, r2, r1)){
+            else if (cond2){
+              if (t2.size() != t_config.max_length){
                 wrong ++;
+                wrong_num_max_iter ++;
                 trajID_need_fix_next.insert(i);
-                // printf("add traj %ld\n",i);
-                // printf("Trajectory %ld is wrong!!!\n", i);
-                // printf("first ori:(%f,%f.%f), second ori(%f,%f,%f): last ori:(%f,%f,%f)\n",t1[0][0],t1[0][1],t1[0][2],t1[1][0],t1[1][1],t1[1][2],t1.back()[0],t1.back()[1],t1.back()[2]);
-                // printf("first dec:(%f,%f,%f), second dec(%f,%f,%f): last dec:(%f,%f,%f)\n",t2[0][0],t2[0][1],t2[0][2],t2[1][0],t2[1][1],t2[1][2],t2.back()[0],t2.back()[1],t2.back()[2]);
-                // printf("ori length: %zu, dec length: %zu\n", t1.size(), t2.size());
+              }
+              else{
+                if (euclideanDistance(t1.back(), t2.back()) > threshold_max_iter){
+                  wrong ++;
+                  wrong_num_max_iter ++;
+                  trajID_need_fix_next.insert(i);
+                }
               }
             }
-            else if (cond2){ //original reach limit
-              auto dec_last_inside = findLastNonNegativeOne(t2);
-              if (get_cell_offset_3d(t1.back().data(),r3,r2,r1) != get_cell_offset_3d(dec_last_inside.data(),r3,r2,r1)){
+            else{
+              //reach cp
+              if(!cond1){
                 wrong ++;
+                wrong_num_find_cp ++;
                 trajID_need_fix_next.insert(i);
-                // printf("add traj %ld\n",i);
-                // printf("Trajectory %ld is wrong!!!\n", i);
-                // printf("first ori:(%f,%f.%f), second ori(%f,%f,%f): last ori:(%f,%f,%f)\n",t1[0][0],t1[0][1],t1[0][2],t1[1][0],t1[1][1],t1[1][2],t1.back()[0],t1.back()[1],t1.back()[2]);
-                // printf("first dec:(%f,%f,%f), second dec(%f,%f,%f): last dec:(%f,%f,%f)\n",t2[0][0],t2[0][1],t2[0][2],t2[1][0],t2[1][1],t2[1][2],t2.back()[0],t2.back()[1],t2.back()[2]);
-                // printf("ori length: %zu, dec length: %zu\n", t1.size(), t2.size());
               }
-            }
-            else if (!cond2 && !cond4){ //found cp
-              auto ori_last_inside = findLastNonNegativeOne(t1);
-              auto dec_last_inside = findLastNonNegativeOne(t2);
-              if(get_cell_offset_3d(ori_last_inside.data(),r3,r2,r1) != get_cell_offset_3d(dec_last_inside.data(),r3,r2,r1)){
-                wrong ++;
-                trajID_need_fix_next.insert(i);
-                // printf("add traj %ld\n",i);
-                // printf("Trajectory %ld is wrong!!!\n", i);
-                // printf("first ori:(%f,%f.%f), second ori(%f,%f,%f): last ori:(%f,%f,%f)\n",t1[0][0],t1[0][1],t1[0][2],t1[1][0],t1[1][1],t1[1][2],t1.back()[0],t1.back()[1],t1.back()[2]);
-                // printf("first dec:(%f,%f,%f), second dec(%f,%f,%f): last dec:(%f,%f,%f)\n",t2[0][0],t2[0][1],t2[0][2],t2[1][0],t2[1][1],t2[1][2],t2.back()[0],t2.back()[1],t2.back()[2]);
-                // printf("ori length: %zu, dec length: %zu\n", t1.size(), t2.size());
-              }
-            }
-            break;
-        
-          case 2:
-            if(cond2 && cond3){
-              continue;
-            }
-            else if (cond4 && cond5){
-              continue;
-            }
-            else {
-              if (!cond1){
-                wrong ++;
-                trajID_need_fix_next.insert(i);
-                // printf("add traj %ld\n",i);
-                // printf("Trajectory %ld is wrong!!!\n", i);
-                // printf("first ori:(%f,%f.%f), second ori(%f,%f,%f): last ori:(%f,%f,%f)\n",t1[0][0],t1[0][1],t1[0][2],t1[1][0],t1[1][1],t1[1][2],t1.back()[0],t1.back()[1],t1.back()[2]);
-                // printf("first dec:(%f,%f,%f), second dec(%f,%f,%f): last dec:(%f,%f,%f)\n",t2[0][0],t2[0][1],t2[0][2],t2[1][0],t2[1][1],t2[1][2],t2.back()[0],t2.back()[1],t2.back()[2]);
-                // printf("ori length: %zu, dec length: %zu\n", t1.size(), t2.size());
-              }
-            }
+            }     
             break;
         }
       }
-      printf("wrong: %d\n",wrong);
+      
+      printf("wrong: %d, wrong_num_outside: %d, wrong_num_max_iter: %d, wrong_num_find_cp: %d\n",wrong,wrong_num_outside,wrong_num_max_iter,wrong_num_find_cp);
       auto compare_traj_end = std::chrono::high_resolution_clock::now();
       std::chrono::duration<double> compare_traj_elapsed = compare_traj_end - compare_traj_start;
       compare_time_vec.push_back(compare_traj_elapsed.count());
@@ -1645,27 +2132,63 @@ int main(int argc, char ** argv){
         printf("All trajectories are fixed!\n");
       }
       else{
-        printf("trajID_need_fix_next size: %ld\n", trajID_need_fix_next.size());
+        //printf("trajID_need_fix_next size: %ld\n", trajID_need_fix_next.size());
         trajID_need_fix_next_vec.push_back(trajID_need_fix_next.size());
+        trajID_need_fix_next_detail_vec.push_back({wrong_num_outside, wrong_num_max_iter, wrong_num_find_cp});
         trajID_need_fix.clear();
-        for(auto i:trajID_need_fix_next){
-          trajID_need_fix.insert(i);
+        for(auto o:trajID_need_fix_next){
+          trajID_need_fix.insert(o);
         }
         trajID_need_fix_next.clear();
-        printf("begin next round of fixing...\n");
-
       }
 
+
+      if(current_round >= 19){
+        //print first of the trajID_need_fix
+        int first_trajID_need_fix = *trajID_need_fix.begin();
+        printf("first trajID_need_fix: %d\n",first_trajID_need_fix);
+        auto t1 = trajs_ori[first_trajID_need_fix];
+        auto t2 = trajs_dec[first_trajID_need_fix];
+        for (size_t i = 0; i < t1.size(); ++i){
+          printf("ori: %f %f %f, dec: %f %f %f\n",t1[i][0],t1[i][1],t1[i][2],t2[i][0],t2[i][1],t2[i][2]);
+          }
+        printf("ori last-2: %f %f %f, dec last-2: %f %f %f\n",t1[t1.size()-3][0],t1[t1.size()-3][1],t1[t1.size()-3][2],t2[t2.size()-3][0],t2[t2.size()-3][1],t2[t2.size()-3][2]);
+        printf("ori last-1: %f %f %f, dec last-1: %f %f %f\n",t1[t1.size()-2][0],t1[t1.size()-2][1],t1[t1.size()-2][2],t2[t2.size()-2][0],t2[t2.size()-2][1],t2[t2.size()-2][2]);
+        printf("ori last: %f %f %f, dec last: %f %f %f\n",t1[t1.size()-1][0],t1[t1.size()-1][1],t1[t1.size()-1][2],t2[t2.size()-1][0],t2[t2.size()-1][1],t2[t2.size()-1][2]);
+        
+        // printf("last-2 rk4:\n");
+        // std::array<double,3> v = {0,0,0};
+        // std::set<size_t> lossless;
+        // auto rk4_ori = newRK4_3d(t1[t1.size()-2].data(),v.data(),grad_ori,t_config.h,r3,r2,r1,lossless,true);
+        // auto rk4_dec = newRK4_3d(t2[t2.size()-2].data(),v.data(),grad_dec,t_config.h,r3,r2,r1,lossless,true);
+
+        //print second of the trajID_need_fix
+        int second_trajID_need_fix = *std::next(trajID_need_fix.begin(),1);
+        printf("second trajID_need_fix: %d\n",second_trajID_need_fix);
+        t1 = trajs_ori[second_trajID_need_fix];
+        t2 = trajs_dec[second_trajID_need_fix];
+        for (size_t i = 0; i < t1.size(); ++i){
+          printf("ori: %f %f %f, dec: %f %f %f\n",t1[i][0],t1[i][1],t1[i][2],t2[i][0],t2[i][1],t2[i][2]);
+        }
+        printf("ori last-2: %f %f %f, dec last-2: %f %f %f\n",t1[t1.size()-3][0],t1[t1.size()-3][1],t1[t1.size()-3][2],t2[t2.size()-3][0],t2[t2.size()-3][1],t2[t2.size()-3][2]);
+        printf("ori last-1: %f %f %f, dec last-1: %f %f %f\n",t1[t1.size()-2][0],t1[t1.size()-2][1],t1[t1.size()-2][2],t2[t2.size()-2][0],t2[t2.size()-2][1],t2[t2.size()-2][2]);
+        printf("ori last: %f %f %f, dec last: %f %f %f\n",t1[t1.size()-1][0],t1[t1.size()-1][1],t1[t1.size()-1][2],t2[t2.size()-1][0],t2[t2.size()-1][1],t2[t2.size()-1][2]);
+        //   exit(0);
+      }
+    
     }while (!stop);
     auto end_alg_time = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> elapsed_alg_time = end_alg_time - start_alg_time;
-    printf("traj_ori_begain time: %f\n", traj_ori_begin_elapsed.count());
-    printf("traj_dec_begin time: %f\n", traj_dec_begin_elapsed.count()); 
-    printf("compare & init_queue time: %f\n", init_queue_elapsed.count());
+    //printf("traj_ori_begain time: %f\n", traj_ori_begin_elapsed.count());
+    //printf("traj_dec_begin time: %f\n", traj_dec_begin_elapsed.count()); 
+    
     printf("total round: %d\n", current_round);
     // for (auto t:index_time_vec){
     //   printf("index_time: %f\n", t);
     // }
+    printf("Total time (excclude cpsz time): %f\n", elapsed_alg_time.count());
+    printf("traj_begin(ori+dec) time: %f\n", traj_ori_begin_elapsed.count() + traj_dec_begin_elapsed.count());
+    printf("compare & init_queue time: %f\n", init_queue_elapsed.count());
     printf("sum of index_time: %f\n", std::accumulate(index_time_vec.begin(), index_time_vec.end(), 0.0));
     // for (auto t:re_cal_trajs_time_vec){
     //   printf("re_cal_trajs_time: %f\n", t);
@@ -1676,22 +2199,40 @@ int main(int argc, char ** argv){
     // }
     printf("sum of compare & update_queue_time: %f\n", std::accumulate(compare_time_vec.begin(), compare_time_vec.end(), 0.0));
 
-    // for(auto t:trajID_need_fix_next_vec){
-    //   printf("trajID_need_fix_next: %d\n", t);
-    // }
-    printf("BEGIN Compression Ratio: %f\n", begin_cr);
-    printf("====================================\n");
-    printf("%d\n",current_round);
-    printf("%f\n",elapsed_alg_time.count());
-    printf("%f\n",traj_ori_begin_elapsed.count() + traj_dec_begin_elapsed.count());
-    printf("%f\n",init_queue_elapsed.count());
-    printf("%f\n",std::accumulate(index_time_vec.begin(), index_time_vec.end(), 0.0));
-    printf("%f\n",std::accumulate(re_cal_trajs_time_vec.begin(), re_cal_trajs_time_vec.end(), 0.0));
-    printf("%f\n",std::accumulate(compare_time_vec.begin(), compare_time_vec.end(), 0.0));
-
+    for(auto t:trajID_need_fix_next_vec){
+      printf("trajID_need_fix_next: %d\n", t);
+    }
+  
+    // printf("====================================\n");
+    // printf("BEGIN Compression Ratio: %f\n", begin_cr);
+    // printf("psnr_overall_cpsz: %f\n",psnr_cpsz_overall);
+    // printf("%d\n",current_round);
+    // printf("%f\n",elapsed_alg_time.count());
+    // printf("%f\n",traj_ori_begin_elapsed.count() + traj_dec_begin_elapsed.count());
+    // printf("%f\n",init_queue_elapsed.count());
+    // printf("%f\n",std::accumulate(index_time_vec.begin(), index_time_vec.end(), 0.0));
+    // printf("%f\n",std::accumulate(re_cal_trajs_time_vec.begin(), re_cal_trajs_time_vec.end(), 0.0));
+    // printf("%f\n",std::accumulate(compare_time_vec.begin(), compare_time_vec.end(), 0.0));
+    // struct result_struct
+    // {
+    //   double begin_cr_ = begin_cr;
+    //   double psnr_cpsz_overall_ = psnr_cpsz_overall;
+    //   int current_round_ = current_round;
+    //   double elapsed_alg_time_ = elapsed_alg_time.count();
+    //   double cpsz_comp_time_ = cpsz_comp_duration.count();
+    //   double cpsz_decomp_time_ = cpsz_decomp_duration.count();
+    //   // pass trajID_need_fix_next_vec
+    //   std::vector<int> trajID_need_fix_next_vec_ = trajID_need_fix_next_vec;
+    //   //trajID_need_fix_next_detail_vec
+    //   std::vector<std::vector<int>> trajID_need_fix_next_detail_vec_ = trajID_need_fix_next_detail_vec;
+    // };
+    
     // now final check
     // printf("verifying the final decompressed data...\n");
     // printf("BEGIN Compression Ratio: %f\n", begin_cr);
+    printf("final checking...\n");
     bool write_flag = true;
-    final_check(U, V, W, r1, r2, r3, max_eb,obj,t_config,total_thread,final_vertex_need_to_lossless,file_out_dir);   
+    thresholds th = {threshold, threshold_outside, threshold_max_iter};
+    result_struct results ={cp_cal_duration.count(),begin_cr,psnr_cpsz_overall,current_round,elapsed_alg_time.count(),cpsz_comp_duration.count(),cpsz_decomp_duration.count(),current_round,trajID_need_fix_next_vec,trajID_need_fix_next_detail_vec,origin_traj_detail};
+    final_check(U, V, W, r1, r2, r3, max_eb,obj,t_config,total_thread,final_vertex_need_to_lossless,th,results,file_out_dir);   
 }

@@ -6,7 +6,7 @@
 #include <cassert>
 #include <iostream>
 #include <set>
-
+#include "cp.hpp"
 
 inline std::set<size_t> convert_simplexID_to_coords(const std::set<size_t>& simplex, const int DW, const int DH){
   std::set<size_t> result;
@@ -419,6 +419,61 @@ inline double max_eb_to_keep_sign_2d_online(const T A, const T B, const T C=0){
 	double fabs_sum = (fabs(A) + fabs(B));
 	if(fabs_sum == 0) return 0;
 	return fabs(A + B + C) / fabs_sum;
+}
+
+/* 
+absolute error bound version.
+*/
+
+// maximal absolute error bound to keep the sign of A*e_1 + B*e_2 + C
+template<typename T>
+inline double max_eb_to_keep_sign_2d_online_abs(const T A, const T B, const T C=0){
+	return fabs(C) / (fabs(A) + fabs(B));
+}
+
+
+/*
+triangle mesh x0, x1, x2, derive absolute cp-preserving eb for x2 given x0, x1
+*/
+template<typename T>
+double 
+derive_cp_eb_for_positions_online_abs(const T u0, const T u1, const T u2, const T v0, const T v1, const T v2, const T c[4]){//, conditions_2d& cond){
+	double M0 = u2*v0 - u0*v2;
+  double M1 = u1*v2 - u2*v1;
+  double M2 = u0*v1 - u1*v0;
+  double M = M0 + M1 + M2;
+	if(M == 0) return 0;
+	bool f1 = (M0 == 0) || (M / M0 >= 1);
+	bool f2 = (M1 == 0) || (M / M1 >= 1); 
+	bool f3 = (M2 == 0) || (M / M2 >= 1);
+	double eb = 0;
+	if(f1 && f2 && f3){
+		// cp exists
+		return 0;
+	}
+	else{
+		eb = 0;
+		if(!f1){
+			// M0(M1 + M2)
+			// M0: (u2+e1)*v0 - u0(v2+e2)
+			// double cur_eb = MINF(max_eb_to_keep_sign_2d_online(u2*v0, -u0*v2), max_eb_to_keep_sign_2d_online(-u2*v1, u1*v2, u0*v1 - u1*v0));
+			double cur_eb = MINF(max_eb_to_keep_sign_2d_online_abs(v0, -u0, u2*v0 - u0*v2), max_eb_to_keep_sign_2d_online_abs(-v1, u1, u1*v2 - u2*v1 + u0*v1 - u1*v0));
+			eb = MAX(eb, cur_eb);
+		}
+		if(!f2){
+			// M1(M0 + M2)
+			// double cur_eb = MINF(max_eb_to_keep_sign_2d_online(-u2*v1, u1*v2), max_eb_to_keep_sign_2d_online(u2*v0, -u0*v2, u0*v1 - u1*v0));
+			double cur_eb = MINF(max_eb_to_keep_sign_2d_online_abs(-v1, u1, u1*v2 - u2*v1), max_eb_to_keep_sign_2d_online_abs(v0, -u0, u2*v0 - u0*v2 + u0*v1 - u1*v0));
+			eb = MAX(eb, cur_eb);				
+		}
+		if(!f3){
+			// M2(M0 + M1)
+			// double cur_eb = max_eb_to_keep_sign_2d_online(u2*v0 - u2*v1, u1*v2 - u0*v2);
+			double cur_eb = max_eb_to_keep_sign_2d_online_abs(v0 - v1, u1 - u0, u2*v0 - u0*v2 + u1*v2 - u2*v1);
+			eb = MAX(eb, cur_eb);				
+		}
+	}
+	return eb;
 }
 
 // W0 + W1 = u1v2 - u2v1 + u2v0 - u0v2
@@ -1176,3 +1231,704 @@ template
 unsigned char *
 sz_compress_cp_preserve_2d_record_vertex(const float * U, const float * V, size_t r1, size_t r2, size_t& compressed_size, bool transpose, double max_pwr_eb,const std::set<size_t> &index_need_to_fix);
 
+template<typename T>
+unsigned char *
+sz_compress_cp_preserve_2d_st2_fix(const T * U, const T * V, size_t r1, size_t r2, size_t& compressed_size, bool transpose, double max_pwr_eb,double modified_eb,std::unordered_map<size_t, critical_point_t> & critical_points,const std::set<size_t> &index_need_to_fix){
+	size_t num_elements = r1 * r2;
+	T * decompressed_U = (T *) malloc(num_elements*sizeof(T));
+	memcpy(decompressed_U, U, num_elements*sizeof(T));
+	T * decompressed_V = (T *) malloc(num_elements*sizeof(T));
+	memcpy(decompressed_V, V, num_elements*sizeof(T));
+	int * eb_quant_index = (int *) malloc(2*num_elements*sizeof(int)); //这个index在cpszsos中是一倍，为什么？
+	int * data_quant_index = (int *) malloc(2*num_elements*sizeof(int));
+	int * eb_quant_index_pos = eb_quant_index;
+	int * data_quant_index_pos = data_quant_index;
+	//build cp_exist vector
+	std::vector<bool> cp_exist(2*(r1-1)*(r2-1), 0);
+	for(auto it = critical_points.begin(); it != critical_points.end(); it++){
+		cp_exist[it->first] = 1;
+	}
+	// next, row by row
+	const int base = 4;
+	const double log_of_base = log2(base);
+	const int capacity = 65536;
+	const int intv_radius = (capacity >> 1);
+	unpred_vec<T> unpred_data;
+	T * U_pos = decompressed_U;
+	T * V_pos = decompressed_V;
+	// offsets to get six adjacent triangle indices
+	// the 7-th rolls back to T0
+	/*
+			T3	T4
+		T2	X 	T5
+		T1	T0(T6)
+	*/
+	const int offsets[7] = {
+		-(int)r2, -(int)r2 - 1, -1, (int)r2, (int)r2+1, 1, -(int)r2
+	};
+	const T x[6][3] = {
+		{1, 0, 1},
+		{0, 0, 1},
+		{0, 1, 1},
+		{0, 1, 0},
+		{1, 1, 0},
+		{1, 0, 0}
+	};
+	const T y[6][3] = {
+		{0, 0, 1},
+		{0, 1, 1},
+		{0, 1, 0},
+		{1, 1, 0},
+		{1, 0, 0},
+		{1, 0, 1}
+	};
+	T inv_C[6][4];
+	for(int i=0; i<6; i++){
+		get_adjugate_matrix_for_position(x[i][0], x[i][1], x[i][2], y[i][0], y[i][1], y[i][2], inv_C[i]);
+	}
+	int index_offset[6][2][2];
+	for(int i=0; i<6; i++){
+		for(int j=0; j<2; j++){
+			index_offset[i][j][0] = x[i][j] - x[i][2];
+			index_offset[i][j][1] = y[i][j] - y[i][2];
+		}
+	}
+	int cell_offset[6] = {
+		-2*((int)r2-1)-1, -2*((int)r2-1)-2, -1, 0, 1, -2*((int)r2-1)
+	};
+	double threshold = std::numeric_limits<double>::epsilon();
+	// conditions_2d cond;
+	for(int i=0; i<r1; i++){ //DH
+		// printf("start %d row\n", i);
+		T * cur_U_pos = U_pos;
+		T * cur_V_pos = V_pos;
+		for(int j=0; j<r2; j++){ //DW
+			size_t vertex_index = i * r2 + j;
+			double required_eb;
+			bool unpred_flag = false;
+			bool verification_flag = false;
+			required_eb = max_pwr_eb;
+			// derive eb given six adjacent triangles
+			for(int k=0; k<6; k++){
+				bool in_mesh = true;
+				for(int p=0; p<2; p++){
+					// reserved order!
+					if(!(in_range(i + index_offset[k][p][1], (int)r1) && in_range(j + index_offset[k][p][0], (int)r2))){
+						in_mesh = false;
+						break;
+					}
+				}
+				if(in_mesh){
+					// required_eb = MINF(required_eb, derive_cp_eb_for_positions_online(cur_U_pos[offsets[k]], cur_U_pos[offsets[k+1]], cur_U_pos[0],
+					// 	cur_V_pos[offsets[k]], cur_V_pos[offsets[k+1]], cur_V_pos[0], inv_C[k]));
+					bool original_has_cp = cp_exist[2*(i*(r2-1) + j) + cell_offset[k]];
+					if (original_has_cp){
+						unpred_flag = true;
+						verification_flag = true;
+						break;
+					}
+				}
+			}
+			T decompressed[2];
+
+			int n_try = 0;
+			while(!verification_flag){
+				unpred_flag = false;
+				for(int k=0; k<2; k++){
+					T * cur_data_pos = (k == 0) ? cur_U_pos : cur_V_pos;
+					T cur_data = *cur_data_pos;
+					double abs_eb = fabs(cur_data) * required_eb;
+					eb_quant_index_pos[k] = eb_exponential_quantize(abs_eb, base, log_of_base, threshold);					
+					// eb_quant_index_pos[k] = eb_linear_quantize(abs_eb, 1e-3);
+					if(eb_quant_index_pos[k] > 0){
+						// get adjacent data and perform Lorenzo
+						/*
+							d2 X
+							d0 d1
+						*/
+						T d0 = (i && j) ? cur_data_pos[-1 - r2] : 0;
+						T d1 = (i) ? cur_data_pos[-r2] : 0;
+						T d2 = (j) ? cur_data_pos[-1] : 0;
+						T pred = d1 + d2 - d0;
+						double diff = cur_data - pred;
+						double quant_diff = fabs(diff) / abs_eb + 1;
+						if(quant_diff < capacity){
+							quant_diff = (diff > 0) ? quant_diff : -quant_diff;
+							int quant_index = (int)(quant_diff/2) + intv_radius;
+							data_quant_index_pos[k] = quant_index;
+							decompressed[k] = pred + 2 * (quant_index - intv_radius) * abs_eb; 
+							// check original data
+							if(fabs(decompressed[k] - cur_data) >= abs_eb){
+								unpred_flag = true;
+								break;
+							}
+						}
+						else{
+							unpred_flag = true;
+							break;
+						}
+					}
+					else unpred_flag = true;
+				}
+				if(unpred_flag) break;
+				//verify cp in six adjacent triangles
+				verification_flag = true;
+				for(int k=0; k<6; k++){
+					bool in_mesh = true;
+					for(int p=0; p<2; p++){
+						// reserved order!
+						if(!(in_range(i + index_offset[k][p][1], (int)r1) && in_range(j + index_offset[k][p][0], (int)r2))){
+							in_mesh = false;
+							break;
+						}
+					}
+					if(in_mesh){
+						int indices[3];
+						for(int p=0; p<2; p++){
+							indices[p] = (i + index_offset[k][p][1])*r2 + (j + index_offset[k][p][0]);
+						}
+						indices[2] = i*r2 + j;
+
+						double current_v[3][2];
+						for(int p=0; p<2; p++){
+							current_v[p][0] = decompressed_U[indices[p]];
+							current_v[p][1] = decompressed_V[indices[p]];
+						}
+						current_v[2][0] = decompressed[0]; //我擦，这里需要用的是decompressed（预测值），而不是decompressed_U，但是另外两个是decompressed_U
+						current_v[2][1] = decompressed[1];
+						bool decompressed_has_cp = (check_cp(current_v) == 1);
+						if (decompressed_has_cp){
+							verification_flag = false;
+							break;
+						}
+					}
+				}
+				//relax error bound
+				required_eb /= 2;
+				n_try ++;
+				if ((!verification_flag) && (n_try >=3)){
+					unpred_flag = true;
+					verification_flag = true;
+				}
+			}
+			if(unpred_flag){
+				// recover quant index
+				*(eb_quant_index_pos ++) = 0;
+				*(eb_quant_index_pos ++) = 0;
+				*(data_quant_index_pos ++) = intv_radius;
+				*(data_quant_index_pos ++) = intv_radius;
+				unpred_data.push_back(*cur_U_pos);
+				unpred_data.push_back(*cur_V_pos);
+			}
+			else{
+				eb_quant_index_pos += 2;
+				data_quant_index_pos += 2;
+				// assign decompressed data
+				*cur_U_pos = decompressed[0];
+				*cur_V_pos = decompressed[1];
+			}
+			cur_U_pos ++, cur_V_pos ++;
+		}
+		U_pos += r2;
+		V_pos += r2;
+	}
+	free(decompressed_U);
+	free(decompressed_V);
+	printf("offsets eb_q, data_q, unpred: %ld %ld %ld\n", eb_quant_index_pos - eb_quant_index, data_quant_index_pos - data_quant_index, unpred_data.size());
+	unsigned char * compressed = (unsigned char *) malloc(2*num_elements*sizeof(T));
+	unsigned char * compressed_pos = compressed;
+	write_variable_to_dst(compressed_pos, base);
+	write_variable_to_dst(compressed_pos, threshold);
+	write_variable_to_dst(compressed_pos, intv_radius);
+	size_t unpredictable_count = unpred_data.size();
+	write_variable_to_dst(compressed_pos, unpredictable_count);
+	write_array_to_dst(compressed_pos, (T *)&unpred_data[0], unpredictable_count);	
+	Huffman_encode_tree_and_data(2*1024, eb_quant_index, 2*num_elements, compressed_pos);
+	free(eb_quant_index);
+	Huffman_encode_tree_and_data(2*capacity, data_quant_index, 2*num_elements, compressed_pos);
+	printf("pos = %ld\n", compressed_pos - compressed);
+	free(data_quant_index);
+	compressed_size = compressed_pos - compressed;
+	return compressed;	
+}
+
+template
+unsigned char *
+sz_compress_cp_preserve_2d_st2_fix(const float * U, const float * V, size_t r1, size_t r2, size_t& compressed_size, bool transpose, double max_pwr_eb,double modified_eb,std::unordered_map<size_t, critical_point_t> & critical_points,const std::set<size_t> &index_need_to_fix);
+
+// abs error bound version
+template<typename T>
+unsigned char *
+sz_compress_cp_preserve_2d_online_abs_record_vertex(const T * U, const T * V, size_t r1, size_t r2, size_t& compressed_size, bool transpose, double max_pwr_eb, const std::set<size_t> &index_need_to_fix){
+	size_t num_elements = r1 * r2;
+	size_t intArrayLength = num_elements;
+	size_t num_bytes = (intArrayLength % 8 == 0) ? intArrayLength / 8 : intArrayLength / 8 + 1;
+	unsigned char * bitmap;
+	if(index_need_to_fix.size() != 0){
+		printf("parpare bitmap\n");
+		//准备bitmap#####################
+		bitmap = (unsigned char *) malloc(num_elements*sizeof(unsigned char));
+		if (bitmap == NULL) {
+		fprintf(stderr, "Failed to allocate memory for bitmap\n");
+		exit(1);
+		}
+		// set all to 0
+		// memset(bitmap, 0, num_elements * sizeof(T));
+		memset(bitmap, 0, num_elements * sizeof(unsigned char));
+		//set index_need_to_fix to 1
+		for(auto it = index_need_to_fix.begin(); it != index_need_to_fix.end(); ++it){
+			assert(*it < num_elements);
+			bitmap[*it] = 1;
+		}
+		//准备bitmap#####################
+	}
+	T * decompressed_U = (T *) malloc(num_elements*sizeof(T));
+	memcpy(decompressed_U, U, num_elements*sizeof(T));
+	T * decompressed_V = (T *) malloc(num_elements*sizeof(T));
+	memcpy(decompressed_V, V, num_elements*sizeof(T));
+	int * eb_quant_index = (int *) malloc(2*num_elements*sizeof(int));
+	int * data_quant_index = (int *) malloc(2*num_elements*sizeof(int));
+	int * eb_quant_index_pos = eb_quant_index;
+	int * data_quant_index_pos = data_quant_index;
+	// next, row by row
+	const int base = 4;
+	const double log_of_base = log2(base);
+	const int capacity = 65536;
+	const int intv_radius = (capacity >> 1);
+	unpred_vec<T> unpred_data;
+	T * U_pos = decompressed_U;
+	T * V_pos = decompressed_V;
+	// offsets to get six adjacent triangle indices
+	// the 7-th rolls back to T0
+	/*
+			T3	T4
+		T2	X 	T5
+		T1	T0(T6)
+	*/
+	const int offsets[7] = {
+		-(int)r2, -(int)r2 - 1, -1, (int)r2, (int)r2+1, 1, -(int)r2
+	};
+	const T x[6][3] = {
+		{1, 0, 1},
+		{0, 0, 1},
+		{0, 1, 1},
+		{0, 1, 0},
+		{1, 1, 0},
+		{1, 0, 0}
+	};
+	const T y[6][3] = {
+		{0, 0, 1},
+		{0, 1, 1},
+		{0, 1, 0},
+		{1, 1, 0},
+		{1, 0, 0},
+		{1, 0, 1}
+	};
+	T inv_C[6][4];
+	for(int i=0; i<6; i++){
+		get_adjugate_matrix_for_position(x[i][0], x[i][1], x[i][2], y[i][0], y[i][1], y[i][2], inv_C[i]);
+	}
+	int index_offset[6][2][2];
+	for(int i=0; i<6; i++){
+		for(int j=0; j<2; j++){
+			index_offset[i][j][0] = x[i][j] - x[i][2];
+			index_offset[i][j][1] = y[i][j] - y[i][2];
+		}
+	}
+	double threshold = std::numeric_limits<double>::epsilon();
+	// conditions_2d cond;
+	for(int i=0; i<r1; i++){
+		// printf("start %d row\n", i);
+		T * cur_U_pos = U_pos;
+		T * cur_V_pos = V_pos;
+		for(int j=0; j<r2; j++){
+			double required_eb = max_pwr_eb;
+			// derive eb given six adjacent triangles
+			if((cur_U_pos[0] == 0) || (cur_V_pos[0] == 0)){
+				required_eb = 0;
+			}
+			else{
+				for(int k=0; k<6; k++){
+					bool in_mesh = true;
+					for(int p=0; p<2; p++){
+						// reserved order!
+						if(!(in_range(i + index_offset[k][p][1], (int)r1) && in_range(j + index_offset[k][p][0], (int)r2))){
+							in_mesh = false;
+							break;
+						}
+					}
+					if(in_mesh){
+						// derive abs eb
+						required_eb = MINF(required_eb, derive_cp_eb_for_positions_online_abs(cur_U_pos[offsets[k]], cur_U_pos[offsets[k+1]], cur_U_pos[0],
+							cur_V_pos[offsets[k]], cur_V_pos[offsets[k+1]], cur_V_pos[0], inv_C[k]));
+					}
+				}				
+			}
+			if(required_eb > 0){
+				bool unpred_flag = false;
+				T decompressed[2];
+				// compress U and V
+				for(int k=0; k<2; k++){
+					T * cur_data_pos = (k == 0) ? cur_U_pos : cur_V_pos;
+					T cur_data = *cur_data_pos;
+					double abs_eb = required_eb;
+					eb_quant_index_pos[k] = eb_exponential_quantize(abs_eb, base, log_of_base, threshold);
+					// eb_quant_index_pos[k] = eb_linear_quantize(abs_eb, 1e-3);
+					if(eb_quant_index_pos[k] > 0){
+						// get adjacent data and perform Lorenzo
+						/*
+							d2 X
+							d0 d1
+						*/
+						T d0 = (i && j) ? cur_data_pos[-1 - r2] : 0;
+						T d1 = (i) ? cur_data_pos[-r2] : 0;
+						T d2 = (j) ? cur_data_pos[-1] : 0;
+						T pred = d1 + d2 - d0;
+						double diff = cur_data - pred;
+						double quant_diff = fabs(diff) / abs_eb + 1;
+						if(quant_diff < capacity){
+							quant_diff = (diff > 0) ? quant_diff : -quant_diff;
+							int quant_index = (int)(quant_diff/2) + intv_radius;
+							data_quant_index_pos[k] = quant_index;
+							decompressed[k] = pred + 2 * (quant_index - intv_radius) * abs_eb; 
+							// check original data
+							if(fabs(decompressed[k] - cur_data) >= abs_eb){
+								unpred_flag = true;
+								break;
+							}
+						}
+						else{
+							unpred_flag = true;
+							break;
+						}
+					}
+					else unpred_flag = true;
+				}
+				if(unpred_flag){
+					// recover quant index
+					*(eb_quant_index_pos ++) = 0;
+					*(eb_quant_index_pos ++) = 0;
+					*(data_quant_index_pos ++) = intv_radius;
+					*(data_quant_index_pos ++) = intv_radius;
+					unpred_data.push_back(*cur_U_pos);
+					unpred_data.push_back(*cur_V_pos);
+				}
+				else{
+					eb_quant_index_pos += 2;
+					data_quant_index_pos += 2;
+					// assign decompressed data
+					*cur_U_pos = decompressed[0];
+					*cur_V_pos = decompressed[1];
+				}
+			}
+			else{
+				// record as unpredictable data
+				*(eb_quant_index_pos ++) = 0;
+				*(eb_quant_index_pos ++) = 0;
+				*(data_quant_index_pos ++) = intv_radius;
+				*(data_quant_index_pos ++) = intv_radius;
+				unpred_data.push_back(*cur_U_pos);
+				unpred_data.push_back(*cur_V_pos);
+			}
+			cur_U_pos ++, cur_V_pos ++;
+		}
+		U_pos += r2;
+		V_pos += r2;
+	}
+	free(decompressed_U);
+	free(decompressed_V);
+	printf("offsets eb_q, data_q, unpred: %ld %ld %ld\n", eb_quant_index_pos - eb_quant_index, data_quant_index_pos - data_quant_index, unpred_data.size());
+	unsigned char * compressed = (unsigned char *) malloc(2*num_elements*sizeof(T));
+	unsigned char * compressed_pos = compressed;
+	if(index_need_to_fix.size() != 0){
+		//修改：先写bitmap
+		// write_variable_to_dst(compressed_pos,num_elements); // 处理后的bitmap的长度 size_t
+		//write_array_to_dst(compressed_pos, compressedArray, num_bytes);
+		convertIntArray2ByteArray_fast_1b_to_result_sz(bitmap, num_elements, compressed_pos);
+		printf("bitmap pos = %ld\n", compressed_pos - compressed);
+
+		//再写index_need_to_fix的大小
+		write_variable_to_dst(compressed_pos, index_need_to_fix.size()); //size_t, index_need_to_fix的大小
+		printf("index_need_to_fix pos = %ld\n", compressed_pos - compressed);
+		//再写index_need_to_fix对应U和V的数据
+		for (auto it = index_need_to_fix.begin(); it != index_need_to_fix.end(); it++){
+			write_variable_to_dst(compressed_pos, U[*it]); //T, index_need_to_fix对应的U的值
+		}
+		for (auto it = index_need_to_fix.begin(); it != index_need_to_fix.end(); it++){
+			write_variable_to_dst(compressed_pos, V[*it]); //T, index_need_to_fix对应的V的值
+		}
+		printf("index_need_to_fix lossless data pos = %ld\n", compressed_pos - compressed);
+	}
+	write_variable_to_dst(compressed_pos, base);
+	write_variable_to_dst(compressed_pos, threshold);
+	write_variable_to_dst(compressed_pos, intv_radius);
+	size_t unpredictable_count = unpred_data.size();
+	write_variable_to_dst(compressed_pos, unpredictable_count);
+	write_array_to_dst(compressed_pos, (T *)&unpred_data[0], unpredictable_count);	
+	Huffman_encode_tree_and_data(2*1024, eb_quant_index, 2*num_elements, compressed_pos);
+	free(eb_quant_index);
+	Huffman_encode_tree_and_data(2*capacity, data_quant_index, 2*num_elements, compressed_pos);
+	printf("pos = %ld\n", compressed_pos - compressed);
+	free(data_quant_index);
+	compressed_size = compressed_pos - compressed;
+	return compressed;	
+}
+
+template
+unsigned char *
+sz_compress_cp_preserve_2d_online_abs_record_vertex(const float * U, const float * V, size_t r1, size_t r2, size_t& compressed_size, bool transpose, double max_pwr_eb,const std::set<size_t> &index_need_to_fix);
+
+template
+unsigned char *
+sz_compress_cp_preserve_2d_online_abs_record_vertex(const double * U, const double * V, size_t r1, size_t r2, size_t& compressed_size, bool transpose, double max_pwr_eb,const std::set<size_t> &index_need_to_fix);
+
+
+template<typename T>
+static int 
+check_cp_numeric(T v[3][2]){
+  T mu[3]; // check intersection
+  bool succ2 = ftk::inverse_lerp_s2v2(v, mu);
+  if (!succ2) return -1;
+	return 1;
+}
+
+template<typename T>
+static vector<bool> 
+compute_cp_numeric(const T * U, const T * V, int r1, int r2){
+	// check cp for all cells
+	vector<bool> cp_exist(2*(r1-1)*(r2-1), 0);
+	for(int i=0; i<r1-1; i++){
+		for(int j=0; j<r2-1; j++){
+			int indices[3];
+			indices[0] = i*r2 + j;
+			indices[1] = (i+1)*r2 + j;
+			indices[2] = (i+1)*r2 + (j+1); 
+			T vf[3][2];
+			// cell index 0
+			for(int p=0; p<3; p++){
+				vf[p][0] = U[indices[p]];
+				vf[p][1] = V[indices[p]];
+			}
+			cp_exist[2*(i * (r2-1) + j)] = (check_cp_numeric(vf) == 1);
+			// cell index 1
+			indices[1] = i*r2 + (j+1);
+			vf[1][0] = U[indices[1]];
+			vf[1][1] = V[indices[1]];
+			cp_exist[2*(i * (r2-1) + j) + 1] = (check_cp_numeric(vf) == 1);
+		}
+	}
+	return cp_exist;	
+}
+
+
+// TODO:这个还没修改适配
+template<typename T>
+unsigned char *
+sz_compress_cp_preserve_2d_online_abs_relax_FN(const T * U, const T * V, size_t r1, size_t r2, size_t& compressed_size, bool transpose, double max_pwr_eb){
+	size_t num_elements = r1 * r2;
+	T * decompressed_U = (T *) malloc(num_elements*sizeof(T));
+	memcpy(decompressed_U, U, num_elements*sizeof(T));
+	T * decompressed_V = (T *) malloc(num_elements*sizeof(T));
+	memcpy(decompressed_V, V, num_elements*sizeof(T));
+	int * eb_quant_index = (int *) malloc(2*num_elements*sizeof(int));
+	int * data_quant_index = (int *) malloc(2*num_elements*sizeof(int));
+	int * eb_quant_index_pos = eb_quant_index;
+	int * data_quant_index_pos = data_quant_index;
+	// next, row by row
+	const int base = 4;
+	const double log_of_base = log2(base);
+	const int capacity = 65536;
+	const int intv_radius = (capacity >> 1);
+	unpred_vec<T> unpred_data;
+	T * U_pos = decompressed_U;
+	T * V_pos = decompressed_V;
+	// offsets to get six adjacent triangle indices
+	// the 7-th rolls back to T0
+	/*
+			T3	T4
+		T2	X 	T5
+		T1	T0(T6)
+	*/
+	const int offsets[7] = {
+		-(int)r2, -(int)r2 - 1, -1, (int)r2, (int)r2+1, 1, -(int)r2
+	};
+	const T x[6][3] = {
+		{1, 0, 1},
+		{0, 0, 1},
+		{0, 1, 1},
+		{0, 1, 0},
+		{1, 1, 0},
+		{1, 0, 0}
+	};
+	const T y[6][3] = {
+		{0, 0, 1},
+		{0, 1, 1},
+		{0, 1, 0},
+		{1, 1, 0},
+		{1, 0, 0},
+		{1, 0, 1}
+	};
+	int index_offset[6][2][2];
+	for(int i=0; i<6; i++){
+		for(int j=0; j<2; j++){
+			index_offset[i][j][0] = x[i][j] - x[i][2];
+			index_offset[i][j][1] = y[i][j] - y[i][2];
+		}
+	}
+	// offset relative to 2*(i*r2 + j)
+	// note: width for cells is 2*(r2-1)
+	int cell_offset[6] = {
+		-2*((int)r2-1)-1, -2*((int)r2-1)-2, -1, 0, 1, -2*((int)r2-1)
+	};
+	double threshold = std::numeric_limits<double>::epsilon();
+	// check cp for all cells
+	vector<bool> cp_exist = compute_cp_numeric(U, V, r1, r2);
+	int count = 0;
+	int max_count = 1;
+	for(int i=0; i<r1; i++){
+		// printf("start %d row\n", i);
+		T * cur_U_pos = U_pos;
+		T * cur_V_pos = V_pos;
+		for(int j=0; j<r2; j++){
+			double abs_eb = max_pwr_eb;
+			bool unpred_flag = false;
+			T decompressed[2];
+			// compress data and then verify
+			bool verification_flag = false;
+			if((*cur_U_pos == 0) && (*cur_V_pos == 0)){
+				verification_flag = true;
+				unpred_flag = true;
+			}
+			else{
+				// check if cp exists in adjacent cells
+				for(int k=0; k<6; k++){
+					bool in_mesh = true;
+					for(int p=0; p<2; p++){
+						// reserved order!
+						if(!(in_range(i + index_offset[k][p][1], (int)r1) && in_range(j + index_offset[k][p][0], (int)r2))){
+							in_mesh = false;
+							break;
+						}
+					}
+					if(in_mesh){
+						bool original_has_cp = cp_exist[2*(i*(r2-1) + j) + cell_offset[k]];
+						if(original_has_cp){
+							unpred_flag = true;
+							verification_flag = true;
+							break;
+						}
+					}
+				}
+			}
+			while(!verification_flag){
+				*eb_quant_index_pos = eb_exponential_quantize(abs_eb, base, log_of_base, threshold);
+				unpred_flag = false;
+				// compress U and V
+				for(int k=0; k<2; k++){
+					T * cur_data_pos = (k == 0) ? cur_U_pos : cur_V_pos;
+					T cur_data = *cur_data_pos;
+					// get adjacent data and perform Lorenzo
+					/*
+						d2 X
+						d0 d1
+					*/
+					T d0 = (i && j) ? cur_data_pos[-1 - r2] : 0;
+					T d1 = (i) ? cur_data_pos[-r2] : 0;
+					T d2 = (j) ? cur_data_pos[-1] : 0;
+					T pred = d1 + d2 - d0;
+					T diff = cur_data - pred;
+					T quant_diff = std::abs(diff) / abs_eb + 1;
+					if(quant_diff < capacity){
+						quant_diff = (diff > 0) ? quant_diff : -quant_diff;
+						int quant_index = (int)(quant_diff/2) + intv_radius;
+						data_quant_index_pos[k] = quant_index;
+						decompressed[k] = pred + 2 * (quant_index - intv_radius) * abs_eb; 
+					}
+					else{
+						unpred_flag = true;
+						break;
+					}
+				}
+				if(unpred_flag) break;
+				// verify cp in six adjacent triangles
+				verification_flag = true;
+				for(int k=0; k<6; k++){
+					bool in_mesh = true;
+					for(int p=0; p<2; p++){
+						// reserved order!
+						if(!(in_range(i + index_offset[k][p][1], (int)r1) && in_range(j + index_offset[k][p][0], (int)r2))){
+							in_mesh = false;
+							break;
+						}
+					}
+					if(in_mesh){
+						T vf[3][2];
+						vf[0][0] = cur_U_pos[offsets[k]];
+						vf[1][0] = cur_U_pos[offsets[k+1]];
+						vf[2][0] = decompressed[0];
+						vf[0][1] = cur_V_pos[offsets[k]];
+						vf[1][1] = cur_V_pos[offsets[k+1]];
+						vf[2][1] = decompressed[1];
+						bool decompressed_has_cp = (check_cp_numeric(vf) == 1);
+						if(decompressed_has_cp){
+							verification_flag = false;
+							break;
+						}
+					}
+				}
+				// relax error bound
+				abs_eb /= 2;
+				count ++;
+				if((!verification_flag) && (count > max_count)){
+					unpred_flag = true;
+					verification_flag = true;					
+				}
+			}
+			if(unpred_flag){
+				// recover quant index
+				*(eb_quant_index_pos ++) = 0;
+				*(eb_quant_index_pos ++) = 0;
+				*(data_quant_index_pos ++) = intv_radius;
+				*(data_quant_index_pos ++) = intv_radius;
+				unpred_data.push_back(*cur_U_pos);
+				unpred_data.push_back(*cur_V_pos);
+			}
+			else{
+				eb_quant_index_pos[1] = eb_quant_index_pos[0];
+				eb_quant_index_pos += 2;
+				data_quant_index_pos += 2;
+				*cur_U_pos = decompressed[0];
+				*cur_V_pos = decompressed[1];
+			}
+			cur_U_pos ++, cur_V_pos ++;
+		}
+		U_pos += r2;
+		V_pos += r2;
+	}
+	free(decompressed_U);
+	free(decompressed_V);
+	printf("offsets eb_q, data_q, unpred: %ld %ld %ld\n", eb_quant_index_pos - eb_quant_index, data_quant_index_pos - data_quant_index, unpred_data.size());
+	unsigned char * compressed = (unsigned char *) malloc(2*num_elements*sizeof(T));
+	unsigned char * compressed_pos = compressed;
+	write_variable_to_dst(compressed_pos, base);
+	write_variable_to_dst(compressed_pos, threshold);
+	write_variable_to_dst(compressed_pos, intv_radius);
+	size_t unpredictable_count = unpred_data.size();
+	write_variable_to_dst(compressed_pos, unpredictable_count);
+	write_array_to_dst(compressed_pos, (T *)&unpred_data[0], unpredictable_count);	
+	Huffman_encode_tree_and_data(2*1024, eb_quant_index, 2*num_elements, compressed_pos);
+	free(eb_quant_index);
+	Huffman_encode_tree_and_data(2*capacity, data_quant_index, 2*num_elements, compressed_pos);
+	printf("pos = %ld\n", compressed_pos - compressed);
+	free(data_quant_index);
+	compressed_size = compressed_pos - compressed;
+	return compressed;	
+}
+
+template
+unsigned char *
+sz_compress_cp_preserve_2d_online_abs_relax_FN(const float * U, const float * V, size_t r1, size_t r2, size_t& compressed_size, bool transpose, double max_pwr_eb);
+
+template
+unsigned char *
+sz_compress_cp_preserve_2d_online_abs_relax_FN(const double * U, const double * V, size_t r1, size_t r2, size_t& compressed_size, bool transpose, double max_pwr_eb);

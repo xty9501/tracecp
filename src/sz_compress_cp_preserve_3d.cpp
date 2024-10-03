@@ -1558,13 +1558,13 @@ sz_compress_cp_preserve_3d_record_vertex(const T * U, const T * V, const T * W, 
 	free(decompressed_U);
 	free(decompressed_V);
 	free(decompressed_W);
-	printf("offset eb_q, data_q, unpred: %ld %ld %ld\n", eb_quant_index_pos - eb_quant_index, data_quant_index_pos - data_quant_index, eb_zero_data.size());
+	//printf("offset eb_q, data_q, unpred: %ld %ld %ld\n", eb_quant_index_pos - eb_quant_index, data_quant_index_pos - data_quant_index, eb_zero_data.size());
 	unsigned char * compressed = (unsigned char *) malloc(3*num_elements*sizeof(T));
 	unsigned char * compressed_pos = compressed;
 	//开始写入
 	//先写bitmap
 	convertIntArray2ByteArray_fast_1b_to_result_sz(bitmap, num_elements, compressed_pos);
-	printf("bitmap size = %ld\n", num_bytes);
+	//printf("bitmap size = %ld\n", num_bytes);
 	//再写入lossless数据的大小
 	write_variable_to_dst(compressed_pos, index_need_to_lossless.size());
 	//再写入lossless数据
@@ -1577,7 +1577,7 @@ sz_compress_cp_preserve_3d_record_vertex(const T * U, const T * V, const T * W, 
 	for (auto it = index_need_to_lossless.begin(); it != index_need_to_lossless.end(); it++){
 		write_variable_to_dst(compressed_pos, W[*it]);
 	}
-	printf("index_need_to_lossless lossless data pos = %ld\n", compressed_pos - compressed);
+	//printf("index_need_to_lossless lossless data pos = %ld\n", compressed_pos - compressed);
 
 	write_variable_to_dst(compressed_pos, base);
 	write_variable_to_dst(compressed_pos, intv_radius);
@@ -1586,7 +1586,7 @@ sz_compress_cp_preserve_3d_record_vertex(const T * U, const T * V, const T * W, 
 	size_t unpredictable_count = eb_zero_data.size();
 	write_variable_to_dst(compressed_pos, unpredictable_count);
 	write_array_to_dst(compressed_pos, (T *)&eb_zero_data[0], unpredictable_count);	
-	printf("eb_zero_data size = %ld\n", unpredictable_count*sizeof(T));
+	//printf("eb_zero_data size = %ld\n", unpredictable_count*sizeof(T));
 	// store out range information
 	unsigned char * tmp = compressed_pos;
 	// size_t outrange_count = outrange_sign_pos - outrange_sign;
@@ -1605,13 +1605,13 @@ sz_compress_cp_preserve_3d_record_vertex(const T * U, const T * V, const T * W, 
 	size_t eb_quant_num = eb_quant_index_pos - eb_quant_index;
 	write_variable_to_dst(compressed_pos, eb_quant_num);
 	Huffman_encode_tree_and_data(2*256, eb_quant_index, num_elements, compressed_pos);
-	printf("eb_quant_index size = %ld\n", compressed_pos - tmp);
+	//printf("eb_quant_index size = %ld\n", compressed_pos - tmp);
 	free(eb_quant_index);
 	tmp = compressed_pos;
 	size_t data_quant_num = data_quant_index_pos - data_quant_index;
 	write_variable_to_dst(compressed_pos, data_quant_num);
 	Huffman_encode_tree_and_data(2*capacity, data_quant_index, data_quant_num, compressed_pos);
-	printf("data_quant_index size = %ld\n", compressed_pos - tmp);
+	//printf("data_quant_index size = %ld\n", compressed_pos - tmp);
 	free(data_quant_index);
 	compressed_size = compressed_pos - compressed;
 	return compressed;	
