@@ -14,6 +14,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "sz_huffman.hpp"
+#include <omp.h>
 
 //Note: when changing the following settings, intvCapacity in sz.h should be changed as well.
 //#define allNodes 131072
@@ -62,4 +63,5 @@ void encode_withTree(HuffmanTree* huffmanTree, const int *s, size_t length, unsi
 void decode_withTree(HuffmanTree* huffmanTree, const unsigned char *s, size_t targetLength, int *out);
 
 void SZ_ReleaseHuffman(HuffmanTree* huffmanTree);
+void Huffman_init_openmp(HuffmanTree* huffmanTree, int *s, size_t length, int thread_num, size_t * freq);
 #endif

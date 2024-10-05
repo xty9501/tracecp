@@ -113,5 +113,29 @@ Huffman_encode_tree_and_data(size_t state_num, const int * type, size_t num_elem
 	SZ_ReleaseHuffman(huffman);
 }
 
+void
+omp_Huffman_encode_tree_and_data(size_t state_num, int * type, size_t num_elements, unsigned char*& compressed_pos,size_t * freq, int thread_num){
+	HuffmanTree * huffman = createHuffmanTree(state_num);
+	Huffman_init_openmp(huffman, type, num_elements, thread_num, freq);
+	size_t node_count = 0;
+	size_t i = 0;
+	for (i = 0; i < state_num; i++)
+		if (huffman->code[i]) node_count++; 
+	node_count = node_count*2-1;
+	unsigned char *tree_structure = NULL;
+	unsigned int tree_size = convert_HuffTree_to_bytes_anyStates(huffman, node_count, &tree_structure);
+	write_variable_to_dst(compressed_pos, node_count);
+	write_variable_to_dst(compressed_pos, tree_size);
+	write_array_to_dst(compressed_pos, tree_structure, tree_size);
+	unsigned char * type_array_size_pos = compressed_pos;
+	compressed_pos += sizeof(size_t);
+	size_t type_array_size = 0; 
+	encode(huffman, type, num_elements, compressed_pos, &type_array_size);
+	write_variable_to_dst(type_array_size_pos, type_array_size);
+	compressed_pos += type_array_size;
+	free(tree_structure);
+	SZ_ReleaseHuffman(huffman);
+}
+
 
 

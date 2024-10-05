@@ -107,7 +107,14 @@ double calculateEDR2D(const std::vector<std::array<double, 2>>& seq1, const std:
     return dp[len1][len2];
 }
 
-// 使用动态规划计算Fréchet距离，并使用OpenMP进行并行化
+//function to calculate the angle between two vectors
+double angleBetweenVectors(const std::array<double, 2>& velocity1, const std::array<double, 2>& velocity2) {
+    double dotProduct = velocity1[0] * velocity2[0] + velocity1[1] * velocity2[1];
+    double magnitude1 = sqrt(velocity1[0] * velocity1[0] + velocity1[1] * velocity1[1]);
+    double magnitude2 = sqrt(velocity2[0] * velocity2[0] + velocity2[1] * velocity2[1]);
+    return acos(dotProduct / (magnitude1 * magnitude2));
+}
+
 double frechetDistance(const vector<array<double, 2>>& P, const vector<array<double, 2>>& Q) {
     int n = P.size();
     int m = Q.size();
@@ -126,7 +133,6 @@ double frechetDistance(const vector<array<double, 2>>& P, const vector<array<dou
         dp[0][j] = max(dp[0][j-1], euclideanDistance(P[0], Q[j]));
     }
 
-    // 使用OpenMP并行化主循环
     for (int i = 1; i < n; i++) {
         for (int j = 1; j < m; j++) {
             dp[i][j] = max(min({dp[i-1][j], dp[i][j-1], dp[i-1][j-1]}), euclideanDistance(P[i], Q[j]));
@@ -173,7 +179,21 @@ void calculateStatistics(const vector<double>& data, double& minVal, double& max
     stdevVal = sqrt(varianceSum / data.size());
 }
 
-
+std::vector<size_t> get_surrouding_3x3_vertex_index(const double x, const double y, const int DW, const int DH) {
+    std::vector<size_t> result;
+    int x0 = floor(x);
+    int y0 = floor(y);
+    for (int i = -1; i <= 2; i++) {
+        for (int j = -1; j <= 2; j++) {
+            int x1 = x0 + i;
+            int y1 = y0 + j;
+            if (x1 >= 0 && x1 < DW && y1 >= 0 && y1 < DH) {
+                result.push_back(y1 * DW + x1);
+            }
+        }
+    }
+    
+}
 
 std::pair<std::array<double, 2>, std::array<double, 2>> findLastTwoNonNegativeOne(const std::vector<std::array<double, 2>>& vec) {
     std::array<double, 2> last_valid_point = {-1, -1};
@@ -771,6 +791,25 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
   
   // exit(0);
 
+  // optimization: for each saddle point, find the adjacent 12 triangles, and lossless store the index of the vertices
+  for (auto cp: critical_points_ori) {
+    if (cp.second.type != SADDLE) continue;
+    auto pt = cp.second.x;
+    auto vertexs = get_surrouding_3x3_vertex_index(pt[0],pt[1], DW, DH);
+    for (auto v: vertexs) {
+      // vertex_ori.insert(v);
+      all_vertex_for_all_diff_traj.insert(v);
+      dec_U[v] = U[v];
+      dec_V[v] = V[v];
+      int x = v % DW;
+      int y = v / DW;
+      grad_dec(0, x, y) = U[v];
+      grad_dec(1, x, y) = V[v];
+    }
+  }
+    
+
+
   // 计算哪里有问题（init queue）
   std::set<size_t> trajID_need_fix = {};
   auto init_queue_start = std::chrono::high_resolution_clock::now();
@@ -780,26 +819,32 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
   int wrong_num_outside = 0;
   int wrong_num_max_iter = 0;
   int wrong_num_find_cp = 0;
+  std::vector<std::set<size_t>> local_trajID_need_fix(totoal_thread);
+
   switch(obj){
     case 0:
+      #pragma omp parallel for reduction(+:num_outside, num_max_iter, num_find_cp, wrong_num_outside, wrong_num_max_iter, wrong_num_find_cp)
       for(size_t i =0; i< trajs_ori.size(); ++i){
+        //printf("processing traj %ld by thread %d\n", i, omp_get_thread_num());
         auto t1 = trajs_ori[i];
         auto t2 = trajs_dec[i];
         bool cond1 = get_cell_offset(t1.back().data(), DW, DH) == get_cell_offset(t2.back().data(), DW, DH); //ori and dec reach same cp
         bool cond2 = (t1.size() == t_config.max_length); //ori reach max
+        bool f_dist = frechetDistance(t1, t2) >= threshold;
         if (LastTwoPointsAreEqual(t1)){
           num_outside ++;
           //ori outside
           if (!LastTwoPointsAreEqual(t2)){
             //dec inside
             wrong_num_outside ++;
-            trajID_need_fix.insert(i);
+            local_trajID_need_fix[omp_get_thread_num()].insert(i);
           }
           else{
             //dec outside
-            if (euclideanDistance(t1.back(), t2.back()) >= threshold_outside){
+            //if (euclideanDistance(t1.back(), t2.back()) >= threshold_outside){
+            if (f_dist && euclideanDistance(t1.back(), t2.back()) >= threshold_outside){
               wrong_num_outside ++;
-              trajID_need_fix.insert(i);
+              local_trajID_need_fix[omp_get_thread_num()].insert(i);
             }
           }
         }
@@ -811,101 +856,37 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
           if (t2.size() != t_config.max_length){
             //dec not reach max, add
             wrong_num_max_iter ++;
-            trajID_need_fix.insert(i);
+            local_trajID_need_fix[omp_get_thread_num()].insert(i);
           }
           else{
             //dec reach max, need to check distance
-            if (euclideanDistance(t1.back(), t2.back()) >= threshold_max_iter){
+            if (euclideanDistance(t1.back(), t2.back()) >= threshold_max_iter && f_dist){
               wrong_num_max_iter ++;
-              trajID_need_fix.insert(i);
+              local_trajID_need_fix[omp_get_thread_num()].insert(i);
             }
           }
         }
         else {
           num_find_cp ++;
           //reach cp
-          if (!cond1){
+          if (!cond1 || f_dist){
             wrong_num_find_cp ++;
-            trajID_need_fix.insert(i);
-          }
-        }
-      }
-      break;
-    case 2:
-      //  original | dec
-      //  outside  | outside (could go different direction)
-      //  max_iter | max_iter (could be different)
-      //  reach cp | reach same cp
-      for(size_t i=0;i<trajs_ori.size(); ++i){
-        auto t1 = trajs_ori[i];
-        auto t2 = trajs_dec[i];
-        bool cond2 = t1.size() == t_config.max_length;
-        bool cond3 = t2.size() == t_config.max_length;
-        // bool cond4 = t1.back()[0] == -1;
-        // bool cond5 = t2.back()[0] == -1;
-        bool cond6 = get_cell_offset(t1.back().data(), DW, DH) == get_cell_offset(t2.back().data(), DW, DH);
-        // if (cond4){
-        //   //ori outside
-        //   auto last_inside = findLastNonNegativeOne(t1);
-        //   auto last_inside_dec = findLastNonNegativeOne(t2);
-        //   if (get_cell_offset(last_inside.data(), DW, DH) != get_cell_offset(last_inside_dec.data(), DW, DH)){
-        //     trajID_need_fix.insert(i);
-        //   }
-        // }
-
-        // if(cond4){
-        //   //ori outside
-        //   auto last_inside_ori = findLastNonNegativeOne(t1);
-        //   auto last_inside_dec = findLastNonNegativeOne(t2);
-        //   //每一个t2从后往前找，看有没有cell跟last_inside_ori一样的，如果没有，就insert
-        //   if (!cond5){ //没出去就直接加了
-        //     trajID_need_fix.insert(i);
-        //   }
-        //   for(int j = t2.size()-1; j >= 0; --j){
-        //     if (get_cell_offset(last_inside_ori.data(), DW, DH) == get_cell_offset(t2[j].data(), DW, DH)){
-        //       break;
-        //     }
-        //     if (j == 0){
-        //       trajID_need_fix.insert(i);
-        //     }
-        //   }
-        // }
-        if (LastTwoPointsAreEqual(t1)) {
-          if (!LastTwoPointsAreEqual(t2)) {
-            if (SearchElementFromBack(t2, t1.back())) {
-              continue;
-            }
-            else {
-              trajID_need_fix.insert(i);
-            }
-          }
-          else if (get_cell_offset(t1.back().data(), DW, DH) != get_cell_offset(t2.back().data(), DW, DH)){
-            trajID_need_fix.insert(i);
-          }
-        }
-
-
-        else if(cond2){
-          //ori reach max
-          if (!cond3){
-            trajID_need_fix.insert(i);
-          }
-        }
-        else{
-          //ori inside, not reach max, ie found cp
-          // std::array<double, 2>  ori_last_inside = findLastNonNegativeOne(t1);
-          // std::array<double, 2>  dec_last_inside = findLastNonNegativeOne(t2);
-          if (!cond6){
-            trajID_need_fix.insert(i);
+            local_trajID_need_fix[omp_get_thread_num()].insert(i);
           }
         }
       }
       break;
   }
 
+  //汇总local_trajID_need_fix
+  for (const auto& local_set:local_trajID_need_fix){
+    trajID_need_fix.insert(local_set.begin(), local_set.end());
+  }
+
 
   auto init_queue_end = std::chrono::high_resolution_clock::now();
   std::chrono::duration<double> init_queue_elapsed = init_queue_end - init_queue_start;
+  printf("Time for init queue: %f\n", init_queue_elapsed.count());
 
   if (trajID_need_fix.size() == 0){
     stop = true;
@@ -939,7 +920,7 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
     origin_traj_detail = {num_outside, num_max_iter, num_find_cp};
   }
 
-  //*************开始修复轨迹*************    //*************开始修复轨迹*************
+  //*************开始修复轨迹*************   
   int current_round = 0;
   do
   {
@@ -951,8 +932,6 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
     std::set<size_t> trajID_need_fix_next;
     //fix trajectory
     auto index_time_start = std::chrono::high_resolution_clock::now();
-    //这里不太好并行
-    //每个线程拿一个trajid
     //convert trajID_need_fix to vector
     std::vector<size_t> trajID_need_fix_vector(trajID_need_fix.begin(), trajID_need_fix.end());
     printf("current iteration size: %ld\n", trajID_need_fix_vector.size());
@@ -1106,14 +1085,14 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
               }
               else{
                 //dec outside
-                success = (euclideanDistance(t1.back(), temp_trajs_check.back()) < threshold_outside);
+                success = (euclideanDistance(t1.back(), temp_trajs_check.back()) < threshold_outside && frechetDistance(t1, temp_trajs_check) < threshold);
               }
             }
             else if (t1.size() == t_config.max_length){
               //这里的判断是｜｜ 不是&&！！
               //success = ((euclideanDistance(t1.back(), temp_trajs_check.back()) < threshold_max_iter) || (temp_trajs_check.size() == t_config.max_length));
               if ((temp_trajs_check.size() == t_config.max_length)){
-                if (euclideanDistance(t1.back(), temp_trajs_check.back()) >= threshold_max_iter){
+                if (euclideanDistance(t1.back(), temp_trajs_check.back()) >= threshold_max_iter || frechetDistance(t1, temp_trajs_check) >= threshold){
                   success = false;
                 }
                 else{
@@ -1126,7 +1105,7 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
             }
             else{
               //reach cp
-              if (get_cell_offset(t1.back().data(), DW, DH) == get_cell_offset(temp_trajs_check.back().data(), DW, DH)){
+              if (get_cell_offset(t1.back().data(), DW, DH) == get_cell_offset(temp_trajs_check.back().data(), DW, DH) && frechetDistance(t1, temp_trajs_check) < threshold){
                 success = true;
               }
             }
@@ -1304,46 +1283,34 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
     int wrong_num_outside = 0;
     int wrong_num_max_iter = 0;
     int wrong_num_find_cp = 0;
-    //这个for不需要并行
+    //这个for现在也要并行了，因为frechetDistance算的慢
+    std::vector<std::set<size_t>> local_trajID_need_fix_next(totoal_thread);
     auto comp_start = std::chrono::high_resolution_clock::now();
+    #pragma omp parallel for reduction(+:wrong_num_outside, wrong_num_max_iter, wrong_num_find_cp,wrong)
     for(size_t i=0;i < trajs_ori.size(); ++i){
       auto t1 = trajs_ori[i];
       auto t2 = trajs_dec[i];
       bool cond1 = get_cell_offset(t1.back().data(), DW, DH) == get_cell_offset(t2.back().data(), DW, DH);
       bool cond2 = (t1.size() == t_config.max_length);
       bool cond3 = t2.size() == t_config.max_length;
+      bool f_dis = frechetDistance(t1, t2) >= threshold;
       // bool cond4 = t1.back()[0] == -1;
       // bool cond5 = t2.back()[0] == -1;
       switch (obj)
       {
       case 0:
-        // if (LastTwoPointsAreEqual(t1)){
-        //   if (!LastTwoPointsAreEqual(t2)){
-        //     if (SearchElementFromBack(t2, t1.back())){
-        //       continue;
-        //     }
-        //     else{
-        //       wrong ++;
-        //       trajID_need_fix_next.insert(i);
-        //     }
-        //   }
-        //   else if (!SearchElementFromBack(t2, t1.back())){
-        //     wrong ++;
-        //     trajID_need_fix_next.insert(i);
-        //   }
-        // }
         if (LastTwoPointsAreEqual(t1)){
 
           if (!LastTwoPointsAreEqual(t2)){
             wrong ++;
             wrong_num_outside ++;
-            trajID_need_fix_next.insert(i);
+            local_trajID_need_fix_next[omp_get_thread_num()].insert(i);
           }
           else{
-            if (euclideanDistance(t1.back(), t2.back()) > threshold_outside){
+            if (euclideanDistance(t1.back(), t2.back()) > threshold_outside || f_dis){
               wrong ++;
               wrong_num_outside ++;
-              trajID_need_fix_next.insert(i);
+              local_trajID_need_fix_next[omp_get_thread_num()].insert(i);
             }
           }
         }
@@ -1355,85 +1322,32 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
             //dec not reach max, add
             wrong ++;
             wrong_num_max_iter ++;
-            trajID_need_fix_next.insert(i);
+            local_trajID_need_fix_next[omp_get_thread_num()].insert(i);
           }
           else{
             //dec reach max, need to check distance
-            if (euclideanDistance(t1.back(), t2.back()) >= threshold_max_iter){
+            if (euclideanDistance(t1.back(), t2.back()) >= threshold_max_iter || f_dis){
               wrong ++;
               wrong_num_max_iter ++;
-              trajID_need_fix_next.insert(i);
+              local_trajID_need_fix_next[omp_get_thread_num()].insert(i);
             }
           }
         }
         else{
           num_find_cp ++;
-          if (!cond1){
+          if (!cond1 || f_dis){
             wrong ++;
             wrong_num_find_cp ++;
-            trajID_need_fix_next.insert(i);
+            local_trajID_need_fix_next[omp_get_thread_num()].insert(i);
           }
         }
         break;
-
-      case 2:
-        // if (cond4){
-        //   //ori outside
-        //   // auto last_inside = findLastNonNegativeOne(t1);
-        //   // auto last_inside_dec = findLastNonNegativeOne(t2);
-        //   // if (get_cell_offset(last_inside.data(), DW, DH) != get_cell_offset(last_inside_dec.data(), DW, DH)){
-        //   //   wrong ++;
-        //   //   trajID_need_fix_next.insert(i);
-        //   // }
-        //   auto ori_last_inside = findLastNonNegativeOne(t1);
-        //   auto dec_last_inside = findLastNonNegativeOne(t2);
-        //   if (!cond5){ //dec inside
-        //     wrong ++;
-        //     trajID_need_fix_next.insert(i);
-        //   }
-        //   for(int j = t2.size()-1; j >= 0; --j){
-        //     if (get_cell_offset(ori_last_inside.data(), DW, DH) == get_cell_offset(t2[j].data(), DW, DH)){
-        //       break;
-        //     }
-        //     if (j == 0){ //not found
-        //       wrong ++;
-        //       trajID_need_fix_next.insert(i);
-        //     }
-        //   }
-        // }
-        if (LastTwoPointsAreEqual(t1)){
-          if (!LastTwoPointsAreEqual(t2)){
-            if (SearchElementFromBack(t2, t1.back())){
-              continue;
-            }
-            else{
-              wrong ++;
-              trajID_need_fix_next.insert(i);
-            }
-          }
-          else if (!SearchElementFromBack(t2, t1.back())){
-            wrong ++;
-            trajID_need_fix_next.insert(i);
-          }
-        }
-        else if (cond2){
-          //ori reach max, dec should reach max as well
-          if (t2.size() != t_config.max_length){
-            wrong ++;
-            trajID_need_fix_next.insert(i);
-          }
-        }
-        else{
-          //ori inside, not reach max, ie found cp
-          if (get_cell_offset(t1.back().data(), DW, DH) != get_cell_offset(t2.back().data(), DW, DH)){
-            wrong ++;
-            trajID_need_fix_next.insert(i);
-          }
-        }
-        break;
-
       }
 
+    }
+    //汇总local_trajID_need_fix_next
+    for (const auto& local_set:local_trajID_need_fix_next){
+      trajID_need_fix_next.insert(local_set.begin(), local_set.end());
     }
     printf("wrong: %ld\n", wrong);
     auto comp_end = std::chrono::high_resolution_clock::now();

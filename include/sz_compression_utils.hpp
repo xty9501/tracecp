@@ -120,6 +120,8 @@ build_Huffman_tree(const int * type, size_t num_elements, size_t state_num);
 void
 Huffman_encode_tree_and_data(size_t state_num, const int * type, size_t num_elements, unsigned char*& compressed_pos);
 
+void
+omp_Huffman_encode_tree_and_data(size_t state_num, int * type, size_t num_elements, unsigned char*& compressed_pos,size_t * freq, int thread_num);
 // variation with speculative compression on derived eb
 template<typename T>
 T relax_eb(T eb, T factor){

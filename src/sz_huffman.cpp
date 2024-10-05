@@ -213,7 +213,49 @@ void init(HuffmanTree* huffmanTree, const int *s, size_t length)
 	build_code(huffmanTree, huffmanTree->qq[1], 0, 0, 0);
 	free(freq);
 }
- 
+
+void Huffman_init_openmp(HuffmanTree* huffmanTree, int *s, size_t length, int thread_num, size_t * freq){
+	size_t i;
+	// size_t *freq = (size_t *)malloc(thread_num*huffmanTree->allNodes*sizeof(size_t));
+	// memset(freq, 0, thread_num*huffmanTree->allNodes*sizeof(size_t));
+	size_t block_size = (length - 1)/ thread_num + 1;
+	size_t block_residue = length - (thread_num - 1) * block_size;
+	// Visual Studio compilers do not like the definition of the variables inside the parallel for loop
+
+	for(int t=0; t<thread_num; t++){
+		int id = omp_get_thread_num();
+		int * s_pos = s + id * block_size;
+		size_t * freq_pos = freq + id * huffmanTree->allNodes;
+		if(id < thread_num - 1){
+			for(size_t i=0; i<block_size; i++){
+				freq_pos[s_pos[i]] ++;
+			}
+		}
+		else{
+			for(size_t i=0; i<block_residue; i++){
+				freq_pos[s_pos[i]] ++;
+			}
+		}
+	}
+	size_t * freq_pos = freq + huffmanTree->allNodes;
+	for(int t=1; t<thread_num; t++){
+		for(i = 0; i<huffmanTree->allNodes; i++){
+			freq[i] += freq_pos[i];
+		}
+		freq_pos += huffmanTree->allNodes;
+	}
+
+	for (i = 0; i < huffmanTree->allNodes; i++)
+		if (freq[i])
+			qinsert(huffmanTree, new_node(huffmanTree, freq[i], i, 0, 0));
+
+	while (huffmanTree->qend > 2)
+		qinsert(huffmanTree, new_node(huffmanTree, 0, 0, qremove(huffmanTree), qremove(huffmanTree)));
+
+	build_code(huffmanTree, huffmanTree->qq[1], 0, 0, 0);
+	// free(freq);
+}
+
 void encode(HuffmanTree *huffmanTree, const int *s, size_t length, unsigned char *out, size_t *outSize)
 {
 	size_t i = 0;
