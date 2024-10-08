@@ -75,7 +75,8 @@ double MaxeuclideanDistance(const std::vector<std::array<double, 2>>& vec1, cons
     return max_distance;
 }
 
-
+//EDR distance return a int, range from 0 to max(seq1.size(), seq2.size()), '
+//if two point's distance is less than threshold, consider them as the same point
 double calculateEDR2D(const std::vector<std::array<double, 2>>& seq1, const std::vector<std::array<double, 2>>& seq2, double threshold) {
     size_t len1 = seq1.size();
     size_t len2 = seq2.size();
@@ -792,21 +793,21 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
   // exit(0);
 
   // optimization: for each saddle point, find the adjacent 12 triangles, and lossless store the index of the vertices
-  for (auto cp: critical_points_ori) {
-    if (cp.second.type != SADDLE) continue;
-    auto pt = cp.second.x;
-    auto vertexs = get_surrouding_3x3_vertex_index(pt[0],pt[1], DW, DH);
-    for (auto v: vertexs) {
-      // vertex_ori.insert(v);
-      all_vertex_for_all_diff_traj.insert(v);
-      dec_U[v] = U[v];
-      dec_V[v] = V[v];
-      int x = v % DW;
-      int y = v / DW;
-      grad_dec(0, x, y) = U[v];
-      grad_dec(1, x, y) = V[v];
-    }
-  }
+  // for (auto cp: critical_points_ori) {
+  //   if (cp.second.type != SADDLE) continue;
+  //   auto pt = cp.second.x;
+  //   auto vertexs = get_surrouding_3x3_vertex_index(pt[0],pt[1], DW, DH);
+  //   for (auto v: vertexs) {
+  //     // vertex_ori.insert(v);
+  //     all_vertex_for_all_diff_traj.insert(v);
+  //     dec_U[v] = U[v];
+  //     dec_V[v] = V[v];
+  //     int x = v % DW;
+  //     int y = v / DW;
+  //     grad_dec(0, x, y) = U[v];
+  //     grad_dec(1, x, y) = V[v];
+  //   }
+  // }
     
 
 
@@ -842,7 +843,7 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
           else{
             //dec outside
             //if (euclideanDistance(t1.back(), t2.back()) >= threshold_outside){
-            if (f_dist && euclideanDistance(t1.back(), t2.back()) >= threshold_outside){
+            if ( euclideanDistance(t1.back(), t2.back()) >= threshold_outside && f_dist){
               wrong_num_outside ++;
               local_trajID_need_fix[omp_get_thread_num()].insert(i);
             }
@@ -860,7 +861,9 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
           }
           else{
             //dec reach max, need to check distance
-            if (euclideanDistance(t1.back(), t2.back()) >= threshold_max_iter && f_dist){
+            // if (euclideanDistance(t1.back(), t2.back()) >= threshold_max_iter && f_dist){
+            //change:没走到的话，判断末端距离+edr
+            if (euclideanDistance(t1.back(), t2.back()) >= threshold_max_iter && calculateEDR2D(t1,t2,2) > 50){
               wrong_num_max_iter ++;
               local_trajID_need_fix[omp_get_thread_num()].insert(i);
             }
@@ -1005,7 +1008,7 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
         }
       }
       if (t1.size() == t_config.max_length){
-        end_fix_index = t1.size();
+        end_fix_index = t1.size() / 2; //从中间开始fix
       }
       end_fix_index = std::min(end_fix_index, static_cast<int>(t1.size())); //t1.size() - 1;
     
@@ -1089,10 +1092,13 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
               }
             }
             else if (t1.size() == t_config.max_length){
+              //ori reach max
               //这里的判断是｜｜ 不是&&！！
               //success = ((euclideanDistance(t1.back(), temp_trajs_check.back()) < threshold_max_iter) || (temp_trajs_check.size() == t_config.max_length));
               if ((temp_trajs_check.size() == t_config.max_length)){
-                if (euclideanDistance(t1.back(), temp_trajs_check.back()) >= threshold_max_iter || frechetDistance(t1, temp_trajs_check) >= threshold){
+                // if (euclideanDistance(t1.back(), temp_trajs_check.back()) >= threshold_max_iter || frechetDistance(t1, temp_trajs_check) >= threshold){
+                //change:没走到的话，判断末端距离+edr
+                if (euclideanDistance(t1.back(), temp_trajs_check.back()) >= threshold_max_iter && calculateEDR2D(t1,temp_trajs_check,2) > 50){
                   success = false;
                 }
                 else{
@@ -1188,7 +1194,7 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
           // end_fix_index = std::min(end_fix_index + 10,static_cast<int>(t1.size()));
           
           
-          end_fix_index = std::min(end_fix_index + 10,static_cast<int>(t1.size())); //t1.size() - 1
+          end_fix_index = std::min(end_fix_index + static_cast<int>(0.005*t_config.max_length),static_cast<int>(t1.size())); //t1.size() - 1
         }
         else{
           //修正成功当前trajectory
@@ -1315,7 +1321,7 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
           }
         }
         else if (cond2){
-
+          // ori reach max
           //这里的判断是｜｜ 不是&&！！
           // if ((euclideanDistance(t1.back(), t2.back()) > threshold_max_iter) || (t2.size() != t_config.max_length)){
           if (t2.size() != t_config.max_length){
@@ -1326,7 +1332,9 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
           }
           else{
             //dec reach max, need to check distance
-            if (euclideanDistance(t1.back(), t2.back()) >= threshold_max_iter || f_dis){
+            //change:没走到的话，判断末端距离+edr
+            // if (euclideanDistance(t1.back(), t2.back()) >= threshold_max_iter || f_dis){
+            if (euclideanDistance(t1.back(), t2.back()) >= threshold_max_iter || calculateEDR2D(t1,t2,2) > 50){
               wrong ++;
               wrong_num_max_iter ++;
               local_trajID_need_fix_next[omp_get_thread_num()].insert(i);

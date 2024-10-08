@@ -133,6 +133,7 @@ omp_Huffman_encode_tree_and_data(size_t state_num, int * type, size_t num_elemen
 	encode(huffman, type, num_elements, compressed_pos, &type_array_size);
 	write_variable_to_dst(type_array_size_pos, type_array_size);
 	compressed_pos += type_array_size;
+	//printf("node_count = %ld, tree_size = %d, type_array_size = %ld\n", node_count, tree_size, type_array_size);
 	free(tree_structure);
 	SZ_ReleaseHuffman(huffman);
 }

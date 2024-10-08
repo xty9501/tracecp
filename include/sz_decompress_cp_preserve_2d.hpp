@@ -27,5 +27,8 @@ template<typename T>
 void
 sz_decompress_cp_preserve_2d_online_record_vertex(const unsigned char * compressed, size_t r1, size_t r2, T *& U, T *& V);
 
+template<typename T>
+void
+omp_sz_decompress_cp_preserve_2d_online(const unsigned char * compressed, size_t r1, size_t r2, T *& U, T *& V);
 
 #endif

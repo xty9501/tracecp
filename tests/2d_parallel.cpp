@@ -49,13 +49,106 @@
 #include <algorithm>
 #include<omp.h>
 
+// 比较两个 double 类型的坐标是否相同
+bool arePointsEqual(const double a[2], const double b[2], double epsilon = 1e-6) {
+  return std::fabs(a[0] - b[0]) < epsilon && std::fabs(a[1] - b[1]) < epsilon;
+}
+
+// 检查两个 unordered_map 是否具有相同的键，并且 critical_point 的 x 坐标一致
+bool haveSameCriticalPointCoordinates(const std::unordered_map<size_t, critical_point_t>& map1, const std::unordered_map<size_t, critical_point_t>& map2) {
+  // 1. 检查两个 map 的大小是否相同
+  if (map1.size() != map2.size()) {
+    return false;
+  }
+
+  // 2. 遍历 map1，检查 map2 是否具有相同键并且 x 坐标一致
+  for (const auto& pair : map1) {
+    size_t key = pair.first;
+    const critical_point_t& cp1 = pair.second;
+
+    // 检查 map2 中是否有相同的键
+    auto it = map2.find(key);
+    if (it == map2.end()) {
+      return false;  // 如果 map2 中没有这个键，则不一致
+    }
+
+    // 检查 x 坐标是否一致
+    const critical_point_t& cp2 = it->second;
+    if (!arePointsEqual(cp1.x, cp2.x)) {
+      return false;  // 如果 x 坐标不一致，则不一致
+    }
+  }
+
+  // 3. 所有键和 x 坐标都一致
+  return true;
+}
+
+template<typename Type>
+void verify(Type * ori_data, Type * data, size_t num_elements, double &nrmse){
+    size_t i = 0;
+    Type Max = 0, Min = 0, diffMax = 0;
+    Max = ori_data[0];
+    Min = ori_data[0];
+    diffMax = fabs(data[0] - ori_data[0]);
+    size_t k = 0;
+    double sum1 = 0, sum2 = 0;
+    for (i = 0; i < num_elements; i++){
+        sum1 += ori_data[i];
+        sum2 += data[i];
+    }
+    double mean1 = sum1/num_elements;
+    double mean2 = sum2/num_elements;
+
+    double sum3 = 0, sum4 = 0;
+    double sum = 0, prodSum = 0, relerr = 0;
+    size_t max_index = -1;
+    double maxpw_relerr = 0; 
+    for (i = 0; i < num_elements; i++){
+        if (Max < ori_data[i]) Max = ori_data[i];
+        if (Min > ori_data[i]) Min = ori_data[i];
+        
+        Type err = fabs(data[i] - ori_data[i]);
+        if(ori_data[i]!=0 && fabs(ori_data[i])>1)
+        {
+            relerr = err/fabs(ori_data[i]);
+            if(maxpw_relerr<relerr)
+                maxpw_relerr = relerr;
+        }
+
+        if (diffMax < err){
+            max_index = i;
+            diffMax = err;
+        }
+        prodSum += (ori_data[i]-mean1)*(data[i]-mean2);
+        sum3 += (ori_data[i] - mean1)*(ori_data[i]-mean1);
+        sum4 += (data[i] - mean2)*(data[i]-mean2);
+        sum += err*err; 
+    }
+    double std1 = sqrt(sum3/num_elements);
+    double std2 = sqrt(sum4/num_elements);
+    double ee = prodSum/num_elements;
+    double acEff = ee/std1/std2;
+
+    double mse = sum/num_elements;
+    double range = Max - Min;
+    double psnr = 20*log10(range)-10*log10(mse);
+    nrmse = sqrt(mse)/range;
+
+    printf ("Min=%.20G, Max=%.20G, range=%.20G\n", Min, Max, range);
+    printf ("Max absolute error = %.10f\n", diffMax);
+    printf ("Max absolute error index: %ld\n", max_index);
+    printf ("Max relative error = %f\n", diffMax/(Max-Min));
+    printf ("Max pw relative error = %f\n", maxpw_relerr);
+    printf ("PSNR = %f, NRMSE= %.20G\n", psnr,nrmse);
+    printf ("acEff=%f\n", acEff);   
+}
 
 int main(int argc, char **argv){
     ftk::ndarray<float> grad; //grad是三纬，第一个纬度是2，代表着u或者v，第二个纬度是DH，第三个纬度是DW
     ftk::ndarray<float> grad_out;
     size_t num = 0;
-    float * u = readfile<float>(argv[1], num);
-    float * v = readfile<float>(argv[2], num);
+    float * U = readfile<float>(argv[1], num);
+    float * V = readfile<float>(argv[2], num);
     int DW = atoi(argv[3]); //1800
     int DH = atoi(argv[4]); //1200
     double h = atof(argv[5]); //h 0.05
@@ -84,6 +177,69 @@ int main(int argc, char **argv){
     size_t result_size = 0;
     unsigned char * result = NULL;
     std::set<size_t> all_vertex_for_all_diff_traj = {};
-    result = omp_sz_compress_cp_preserve_2d_fix(u, v, DH, DW, result_size, false, max_eb,all_vertex_for_all_diff_traj, total_thread);
-    
+    auto cpsz_comp_start = std::chrono::high_resolution_clock::now();
+    float * dec_inplace_U = NULL;
+    float * dec_inplace_V = NULL;
+    result = omp_sz_compress_cp_preserve_2d_record_vertex(U,V, DH, DW, result_size, false, max_eb,all_vertex_for_all_diff_traj, total_thread, dec_inplace_U, dec_inplace_V,eb_type);
+    unsigned char * result_after_lossless = NULL;
+    size_t lossless_outsize = sz_lossless_compress(ZSTD_COMPRESSOR, 3, result, result_size, &result_after_lossless);
+    free(result);
+    auto cpsz_comp_end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> cpsz_comp_duration = cpsz_comp_end - cpsz_comp_start;
+    printf("cpsz Compress time: %f\n", cpsz_comp_duration.count());
+    // decomp
+    auto cpsz_decomp_start = std::chrono::high_resolution_clock::now();
+    size_t lossless_output = sz_lossless_decompress(ZSTD_COMPRESSOR, result_after_lossless, lossless_outsize, &result, result_size);
+    float * dec_U = NULL;
+    float * dec_V = NULL;
+    omp_sz_decompress_cp_preserve_2d_online<float>(result, DH,DW, dec_U, dec_V); // use cpsz
+    // calculate compression ratio
+    printf("ori data size: %zu, lossless_output size: %zu\n", (2*DH*DW*sizeof(float)), lossless_output);
+    printf("BEGIN Compressed size(original) = %zu, ratio = %f\n", lossless_outsize, (2*DH*DW*sizeof(float)) * 1.0/lossless_outsize);
+    double cr_ori = (2*DH*DW*sizeof(float)) * 1.0/lossless_outsize; 
+
+    auto cpsz_decomp_end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> cpsz_decomp_duration = cpsz_decomp_end - cpsz_decomp_start;
+    printf("cpsz Decompress time: %f\n", cpsz_decomp_duration.count());
+    // check cp for original data and decompressed data
+    auto critical_points_ori = compute_critical_points(U,V, DH,DW);
+    auto critical_points_dec = compute_critical_points(dec_U, dec_V, DH,DW);
+    auto critical_points_dec_inplace = compute_critical_points(dec_inplace_U, dec_inplace_V, DH,DW);
+    if (critical_points_ori.size() != critical_points_dec.size()) {
+        printf("Error: the number of critical points are different\n");
+        printf("ori size: %ld, dec size: %ld\n", critical_points_ori.size(), critical_points_dec.size());
+    }
+    else{
+        printf("same number of critical points, # cp = %ld\n", critical_points_ori.size());
+    }
+    if (haveSameCriticalPointCoordinates(critical_points_ori, critical_points_dec)) {
+        std::cout << "The two maps have the same critical point coordinates." << std::endl;
+    } else {
+        std::cout << "The two maps do not have the same critical point coordinates." << std::endl;
+    }
+
+    //determine which key dose not in ori
+    for (auto cp: critical_points_dec) {
+        if (critical_points_ori.find(cp.first) == critical_points_ori.end()) {
+            printf("key %ld not in ori\n", cp.first);
+            printf("x: %f, y: %f, type: %d\n", cp.second.x[0], cp.second.x[1], cp.second.type);
+        }
+    }
+
+
+
+    exit(0);
+    printf("critical points dec inplace: %ld\n", critical_points_dec_inplace.size());
+    writefile("dec_inplace_U", dec_inplace_U, DH*DW);
+    writefile("dec_inplace_V", dec_inplace_V, DH*DW);
+    writefile("dec_U", dec_U, DH*DW);
+    writefile("dec_V", dec_V, DH*DW);
+    //print first 10 different critical points key
+    int count = 0;
+
+    double nrmse_u;
+    verify(U, dec_U, DW*DH, nrmse_u);
+
+    // printf("same number of critical points\n");
+    exit(0);
 }

@@ -220,8 +220,7 @@ void Huffman_init_openmp(HuffmanTree* huffmanTree, int *s, size_t length, int th
 	// memset(freq, 0, thread_num*huffmanTree->allNodes*sizeof(size_t));
 	size_t block_size = (length - 1)/ thread_num + 1;
 	size_t block_residue = length - (thread_num - 1) * block_size;
-	// Visual Studio compilers do not like the definition of the variables inside the parallel for loop
-
+	#pragma omp parallel for
 	for(int t=0; t<thread_num; t++){
 		int id = omp_get_thread_num();
 		int * s_pos = s + id * block_size;

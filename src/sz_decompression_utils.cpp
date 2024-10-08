@@ -103,6 +103,7 @@ Huffman_decode_tree_and_data(size_t state_num, size_t num_elements, const unsign
 	int * type = (int *) malloc(num_elements * sizeof(int));
 	decode(compressed_pos, num_elements, root, type);
 	compressed_pos += type_array_size;
+	//printf("node_count=%zu, tree_size=%u, type_array_size=%zu\n", node_count, tree_size, type_array_size);
 	SZ_ReleaseHuffman(huffman);
 	return type;
 }
