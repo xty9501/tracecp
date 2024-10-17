@@ -141,7 +141,50 @@ double frechetDistance(const vector<array<double, 2>>& P, const vector<array<dou
     }
 
     return dp[n-1][m-1];
+    //return early when hit the boundary of the matrix
 }
+
+double ESfrechetDistance(const vector<array<double, 2>>& P, const vector<array<double, 2>>& Q) {
+    int n = P.size();
+    int m = Q.size();
+    vector<vector<double>> dp(n, vector<double>(m, -1.0));
+
+    // 初始化第一个元素
+    dp[0][0] = euclideanDistance(P[0], Q[0]);
+
+    // 计算第一列
+    for (int i = 1; i < n; i++) {
+        dp[i][0] = max(dp[i-1][0], euclideanDistance(P[i], Q[0]));
+    }
+
+    // 计算第一行
+    for (int j = 1; j < m; j++) {
+        dp[0][j] = max(dp[0][j-1], euclideanDistance(P[0], Q[j]));
+    }
+
+    for (int i = 1; i < n; i++) {
+        for (int j = 1; j < m; j++) {
+            dp[i][j] = max(min({dp[i-1][j], dp[i][j-1], dp[i-1][j-1]}), euclideanDistance(P[i], Q[j]));
+        }
+    }
+
+    // 计算最后一行的最小值
+    // double result = dp[n-1][0];
+    // for (int j = 1; j < m; j++) {
+    //     if (dp[n-1][j] < result) {
+    //         result = dp[n-1][j];
+    //     }
+    // }
+    // 计算最后一列的最小值
+    double result = dp[0][m-1];  // 初始化为最后一列的第一个元素
+    for (int i = 1; i < n; i++) {
+        if (dp[i][m-1] < result) {
+            result = dp[i][m-1];  // 找到最后一列的最小值
+        }
+    }
+    return result;
+}
+
 
 void calculateStatistics(const vector<double>& data, double& minVal, double& maxVal, double& medianVal, double& meanVal, double& stdevVal) {
     // 检查输入是否为空
@@ -242,6 +285,7 @@ typedef struct traj_config{
   double h;
   double eps;
   int max_length; 
+  double next_index_coeff;
 } traj_config;
 
 
@@ -562,7 +606,20 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
     }
   }
   printf("critical_points_ori size: %ld, critical_points_dec size: %ld\n", critical_points_ori.size(), critical_points_dec.size());
-  // exit(0);
+
+  // check if all cp are exactly the same
+  for (auto p : critical_points_ori){
+    auto cp_ori = p.second.x;
+    auto cp_dec = critical_points_dec[p.first].x;
+    if (cp_ori[0] != cp_dec[0] || cp_ori[1] != cp_dec[1]){
+      printf("critical point not equal\n");
+      printf("cp_ori: %f, %f\n", cp_ori[0], cp_ori[1]);
+      printf("cp_dec: %f, %f\n", cp_dec[0], cp_dec[1]);
+      exit(0);
+    }
+  }
+
+  exit(0);
 
   //replace all vertex in the boundary to dec_U, dec_V
   // for (size_t i = 0; i < r1; ++i){
@@ -628,7 +685,7 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
       traj.reserve(expected_size); // 预分配容量
   }
 
-  //std::atomic<size_t> trajID_counter(0);
+
   std::vector<std::set<size_t>> thread_lossless_index(totoal_thread);
   #pragma omp parallel for reduction(+:ori_saddle_count)
   // for(const auto& p:critical_points_ori){
@@ -822,64 +879,66 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
   int wrong_num_find_cp = 0;
   std::vector<std::set<size_t>> local_trajID_need_fix(totoal_thread);
 
-  switch(obj){
-    case 0:
-      #pragma omp parallel for reduction(+:num_outside, num_max_iter, num_find_cp, wrong_num_outside, wrong_num_max_iter, wrong_num_find_cp)
-      for(size_t i =0; i< trajs_ori.size(); ++i){
-        //printf("processing traj %ld by thread %d\n", i, omp_get_thread_num());
-        auto t1 = trajs_ori[i];
-        auto t2 = trajs_dec[i];
-        bool cond1 = get_cell_offset(t1.back().data(), DW, DH) == get_cell_offset(t2.back().data(), DW, DH); //ori and dec reach same cp
-        bool cond2 = (t1.size() == t_config.max_length); //ori reach max
-        bool f_dist = frechetDistance(t1, t2) >= threshold;
-        if (LastTwoPointsAreEqual(t1)){
-          num_outside ++;
-          //ori outside
-          if (!LastTwoPointsAreEqual(t2)){
-            //dec inside
-            wrong_num_outside ++;
-            local_trajID_need_fix[omp_get_thread_num()].insert(i);
-          }
-          else{
-            //dec outside
-            //if (euclideanDistance(t1.back(), t2.back()) >= threshold_outside){
-            if ( euclideanDistance(t1.back(), t2.back()) >= threshold_outside && f_dist){
-              wrong_num_outside ++;
-              local_trajID_need_fix[omp_get_thread_num()].insert(i);
-            }
-          }
-        }
-        else if (cond2){
-          num_max_iter ++;
-          //ori reach max
-          //这里的判断是｜｜ 不是&&！！
-          // if ((euclideanDistance(t1.back(), t2.back()) > threshold_max_iter)|| (t2.size() != t_config.max_length)){
-          if (t2.size() != t_config.max_length){
-            //dec not reach max, add
-            wrong_num_max_iter ++;
-            local_trajID_need_fix[omp_get_thread_num()].insert(i);
-          }
-          else{
-            //dec reach max, need to check distance
-            // if (euclideanDistance(t1.back(), t2.back()) >= threshold_max_iter && f_dist){
-            //change:没走到的话，判断末端距离+edr
-            if (euclideanDistance(t1.back(), t2.back()) >= threshold_max_iter && calculateEDR2D(t1,t2,2) > 50){
-              wrong_num_max_iter ++;
-              local_trajID_need_fix[omp_get_thread_num()].insert(i);
-            }
-          }
-        }
-        else {
-          num_find_cp ++;
-          //reach cp
-          if (!cond1 || f_dist){
-            wrong_num_find_cp ++;
-            local_trajID_need_fix[omp_get_thread_num()].insert(i);
-          }
+  // switch(obj){
+  //   case 0:
+  omp_set_num_threads(totoal_thread);
+  #pragma omp parallel for reduction(+:num_outside, num_max_iter, num_find_cp, wrong_num_outside, wrong_num_max_iter, wrong_num_find_cp)
+  for(size_t i =0; i< trajs_ori.size(); ++i){
+    //printf("processing traj %ld by thread %d\n", i, omp_get_thread_num());
+    auto t1 = trajs_ori[i];
+    auto t2 = trajs_dec[i];
+    bool cond1 = get_cell_offset(t1.back().data(), DW, DH) == get_cell_offset(t2.back().data(), DW, DH); //ori and dec reach same cp
+    bool cond2 = (t1.size() == t_config.max_length); //ori reach max
+    //bool f_dist = frechetDistance(t1, t2) >= threshold;
+    if (LastTwoPointsAreEqual(t1)){
+      num_outside ++;
+      //ori outside
+      if (!LastTwoPointsAreEqual(t2)){
+        //dec inside
+        wrong_num_outside ++;
+        local_trajID_need_fix[omp_get_thread_num()].insert(i);
+      }
+      else{
+        //dec outside
+        //if (euclideanDistance(t1.back(), t2.back()) >= threshold_outside){
+        if ( euclideanDistance(t1.back(), t2.back()) >= threshold_outside && frechetDistance(t1, t2) >= threshold){
+          wrong_num_outside ++;
+          local_trajID_need_fix[omp_get_thread_num()].insert(i);
         }
       }
-      break;
+    }
+    else if (cond2){
+      num_max_iter ++;
+      //ori reach max
+      //这里的判断是｜｜ 不是&&！！
+      // if ((euclideanDistance(t1.back(), t2.back()) > threshold_max_iter)|| (t2.size() != t_config.max_length)){
+      if (t2.size() != t_config.max_length){
+        //dec not reach max, add
+        wrong_num_max_iter ++;
+        local_trajID_need_fix[omp_get_thread_num()].insert(i);
+      }
+      else{
+        //dec reach max, need to check distance
+        // if (euclideanDistance(t1.back(), t2.back()) >= threshold_max_iter && f_dist){
+        //change:没走到的话，不判断末尾距离，只判断ESfrechet distance
+        if (euclideanDistance(t1.back(), t2.back()) >= threshold_max_iter && frechetDistance(t1, t2) >= threshold){
+        //if (ESfrechetDistance(t1, t2) >= threshold){
+          wrong_num_max_iter ++;
+          local_trajID_need_fix[omp_get_thread_num()].insert(i);
+        }
+      }
+    }
+    else {
+      num_find_cp ++;
+      //reach cp
+      if (!cond1 || frechetDistance(t1, t2) >= threshold){
+        wrong_num_find_cp ++;
+        local_trajID_need_fix[omp_get_thread_num()].insert(i);
+      }
+    }
   }
+  //     break;
+  // }
 
   //汇总local_trajID_need_fix
   for (const auto& local_set:local_trajID_need_fix){
@@ -923,6 +982,7 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
     origin_traj_detail = {num_outside, num_max_iter, num_find_cp};
   }
 
+  //exit(0);
   //*************开始修复轨迹*************   
   int current_round = 0;
   do
@@ -976,14 +1036,17 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
     printf("all max_iter traj lossless!!, all_vertex_for_all_diff_traj size: %ld\n", all_vertex_for_all_diff_traj.size());
 */  
 
-    #pragma omp parallel for
+    omp_lock_t lock;
+    omp_init_lock(&lock);  // 初始化锁
+    #pragma omp parallel for schedule(dynamic)
     for (size_t i=0;i<trajID_need_fix_vector.size(); ++i){
       auto current_trajID = trajID_need_fix_vector[i];
-      // for (const auto& trajID:trajID_need_fix){
-      //   size_t current_trajID = trajID;
+      auto ori_t = trajs_ori[current_trajID];
+      std::string ori_type = (ori_t.size() == t_config.max_length) ? "max_iter" : (LastTwoPointsAreEqual(ori_t) ? "outside" : "find_cp");
+      //printf("processing current_trajID: %ld by thread:%d, ori_type: %s\n", current_trajID, omp_get_thread_num(), ori_type.c_str());
       bool success = false;
-      auto t1 = trajs_ori[current_trajID];
-      auto t2 = trajs_dec[current_trajID];
+      auto& t1 = trajs_ori[current_trajID];
+      auto& t2 = trajs_dec[current_trajID];
       int start_fix_index = 0;
       //int end_fix_index = t1.size() - 1;
       int end_fix_index = 1;
@@ -993,8 +1056,8 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
       int changed = 0;
       for (size_t j = start_fix_index; j < std::min(t1.size(),t2.size()); ++j){
       //for (size_t j = start_fix_index; j < max_index; ++j){
-        auto p1 = t1[j];
-        auto p2 = t2[j];
+        auto& p1 = t1[j];
+        auto& p2 = t2[j];
         if (j < t1.size() - 1 && j < t2.size() - 1){
           double dist = sqrt(pow(p1[0] - p2[0], 2) + pow(p1[1] - p2[1], 2));
           //auto p1_offset = get_cell_offset(p1.data(), DW, DH);
@@ -1007,38 +1070,28 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
           }
         }
       }
-      if (t1.size() == t_config.max_length){
-        end_fix_index = t1.size() / 2; //从中间开始fix
-      }
+
+      // if (changed == 0){
+      //   if (euclideanDistance(t1.back(), t2.back()) >= threshold){
+      //     // end_fix_index = t1.size() - 1;
+      //   }
+      // }
+
+      // if (t1.size() == t_config.max_length){
+      //   end_fix_index = t1.size() / 2; //从中间开始fix
+      // }
       end_fix_index = std::min(end_fix_index, static_cast<int>(t1.size())); //t1.size() - 1;
-    
-      while (!success){
+
+      do
+      {
         double direction = trajID_direction_vector[current_trajID];
-        //std::unordered_map<size_t, std::set<int>> temp_cellID_trajIDs_map;//需要临时的一个map统计修正的traj经过那些cellID
         std::set<size_t> temp_vertexID;//临时变量记录经过的vertexID
         std::set<size_t> temp_vertexID_check;
-        // std::unordered_map<size_t,double> rollback_dec_u; //记录需要回滚的dec数据
-        // std::unordered_map<size_t,double> rollback_dec_v;
-        // std::set<size_t> rollback_vertexID;
-        //计算一次rk4直到终止点，统计经过的cellID，然后替换数据
-        
-        /* 使用简单的版本*/
-        auto temp_trajs_ori_time_start = std::chrono::high_resolution_clock::now();
-        end_fix_index = std::min(end_fix_index,t_config.max_length);
+        // end_fix_index = std::min(end_fix_index,t_config.max_length);
         auto temp_trajs_ori = trajectory(t1[0].data(), t1[1], direction * t_config.h, end_fix_index, DH, DW, critical_points_ori, grad_ori,temp_vertexID);
-        
-        //auto temp_trajs_ori_time_end = std::chrono::high_resolution_clock::now();
-
-        //此时temp_vertexID记录了从起点到分岔点需要经过的所有vertex
-        // for (auto o:temp_vertexID){
-        //   rollback_dec_u[o] = dec_U[o];
-        //   rollback_dec_v[o] = dec_V[o];
-        //   local_all_vertex_for_all_diff_traj[thread_id].insert(o);
-        //   // rollback_vertexID.insert(o);
-        // }
-        // auto current_divergence_pos = temp_trajs_ori.back();
-        //printf("current_divergence_pos ori data(temp_trajs_ori last element): (%f,%f)\n", current_divergence_pos[0], current_divergence_pos[1]);
-        //printf("current_end_fix_index: %d, t1.size(): %zu, t2.size(): %zu\n", end_fix_index, t1.size(), t2.size());
+        //omp_set_lock(&lock);
+        // #pragma omp critical
+        // {
         for (auto o:temp_vertexID){ // 更新dec_U, dec_V
           dec_U[o] = U[o];
           dec_V[o] = V[o];
@@ -1050,162 +1103,194 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
           grad_dec(1, x, y) = V[o];
           local_all_vertex_for_all_diff_traj[thread_id].insert(o);
         }
-        //检查是不是修正成功
-        /*
-        1. 这里使用简单的traj计算，避免过度开销
-        2. 不从0开始，而是从end_fix_index开始，走max_length-end_fix_index+2步
-        */
-        //auto temp_debug = trajectory(t2[0].data(), t2[1],direction * t_config.h,end_fix_index, DH, DW, critical_points_dec, grad_dec,temp_index_check);
-
+        // }
+        //omp_unset_lock(&lock);
         auto temp_trajs_check = trajectory(t1[0].data(), t1[1], direction * t_config.h, end_fix_index, DH, DW, critical_points_dec, grad_dec,temp_vertexID_check);
-
-      
-        //success = (get_cell_offset(findLastNonNegativeOne(t1).data(), DW, DH) == get_cell_offset(findLastNonNegativeOne(temp_trajs_check).data(), DW, DH));
-        switch (obj)
-        {
-          case 0:
-            // if (LastTwoPointsAreEqual(t1)){
-            //   if (!LastTwoPointsAreEqual(temp_trajs_check)){
-            //     if (SearchElementFromBack(temp_trajs_check, t1.back())){
-            //       success = true;
-            //     }
-            //     else{
-            //       success = false;
-            //     }
-            //   }
-            //   else if (get_cell_offset(t1.back().data(), DW, DH) != get_cell_offset(temp_trajs_check.back().data(), DW, DH)){
-            //     success = false;
-            //   }
-            //   else{
-            //     success = true;
-            //   }
-            // }
-            if (LastTwoPointsAreEqual(t1)){
-              //ori outside
-              if (!LastTwoPointsAreEqual(temp_trajs_check)){
-                //dec inside
-                success = false;
-              }
-              else{
-                //dec outside
-                success = (euclideanDistance(t1.back(), temp_trajs_check.back()) < threshold_outside && frechetDistance(t1, temp_trajs_check) < threshold);
-              }
-            }
-            else if (t1.size() == t_config.max_length){
-              //ori reach max
-              //这里的判断是｜｜ 不是&&！！
-              //success = ((euclideanDistance(t1.back(), temp_trajs_check.back()) < threshold_max_iter) || (temp_trajs_check.size() == t_config.max_length));
-              if ((temp_trajs_check.size() == t_config.max_length)){
-                // if (euclideanDistance(t1.back(), temp_trajs_check.back()) >= threshold_max_iter || frechetDistance(t1, temp_trajs_check) >= threshold){
-                //change:没走到的话，判断末端距离+edr
-                if (euclideanDistance(t1.back(), temp_trajs_check.back()) >= threshold_max_iter && calculateEDR2D(t1,temp_trajs_check,2) > 50){
-                  success = false;
-                }
-                else{
-                  success = true;
-                }
-              }
-              // if (!success){
-              //   printf("phase2 (check succc) ID: %ld, t1 size: %ld, t2 size: %ld,distance: %f\n", current_trajID, t1.size(), temp_trajs_check.size(), euclideanDistance(t1.back(), temp_trajs_check.back()));
-              // }
-            }
-            else{
-              //reach cp
-              if (get_cell_offset(t1.back().data(), DW, DH) == get_cell_offset(temp_trajs_check.back().data(), DW, DH) && frechetDistance(t1, temp_trajs_check) < threshold){
-                success = true;
-              }
-            }
-            break;
-          case 2:
-            // if(t1.back()[0] == -1){
-            //   if (temp_trajs_check.back()[0] != -1){
-            //     success = false;
-            //   }
-            //   //ori outside, dec last non(-1,-1) point should be close
-            //   auto last_inside_ori = findLastNonNegativeOne(t1);
-            //   for(int j = temp_trajs_check.size()-1; j >= 0; --j){
-            //     if (get_cell_offset(last_inside_ori.data(), DW, DH) == get_cell_offset(temp_trajs_check[j].data(), DW, DH)){
-            //       success = true;
-            //       break;
-            //     }
-            //     if (j == 0){//not found
-            //       success = false;
-            //     }
-            //   }
-            // }
-            if (LastTwoPointsAreEqual(t1)){
-              if (!LastTwoPointsAreEqual(temp_trajs_check)){
-                if (SearchElementFromBack(temp_trajs_check, t1.back())){
-                  success = true;
-                }
-                else{
-                  success = false;
-                }
-              }
-              else if (get_cell_offset(t1.back().data(), DW, DH) != get_cell_offset(temp_trajs_check.back().data(), DW, DH)){
-                success = false;
-              }
-              else{
-                success = true;
-              }
-            }
-            else if (t1.size() == t_config.max_length){
-              //ori reach max, dec should reach max as well
-              success = (temp_trajs_check.size() == t_config.max_length);
-            }
-            else{
-              //ori inside, not reach max, ie found cp
-              success = (get_cell_offset(t1.back().data(), DW, DH) == get_cell_offset(temp_trajs_check.back().data(), DW, DH));
-            }
-            break;
-        }
-      
-        if (!success){
-          //rollback
-          // for (auto o:temp_vertexID){
-          //   dec_U[o] = rollback_dec_u[o];
-          //   dec_V[o] = rollback_dec_v[o];
-          //   int x = o % DW;
-          //   int y = o / DW;
-          //   grad_dec(0, x, y) = dec_U[o];
-          //   grad_dec(1, x, y) = dec_V[o];
-          //   local_all_vertex_for_all_diff_traj[thread_id].erase(o);
-          //   // rollback_vertexID.erase(o);
-          // }
-          if (end_fix_index >= static_cast<int>(t1.size())){ //(t1.size()-1)
-
-            printf("t_config.max_length: %d,end_fix_index%d\n", t_config.max_length, end_fix_index);
-            printf("error: current end_fix_index is %d, current ID: %ld\n", end_fix_index, current_trajID);
-            //print all t1,temp_trajs_ori,temp_trajs_check
-            // for (size_t i = 0; i < t1.size(); ++i){
-            //   printf("t1: (%f,%f), temp_trajs_ori: (%f,%f), temp_trajs_check: (%f,%f)\n", t1[i][0], t1[i][1], temp_trajs_ori[i][0], temp_trajs_ori[i][1], temp_trajs_check[i][0], temp_trajs_check[i][1]);
-            // }
-            printf("ori first: (%f,%f), temp_trajs_ori first: (%f,%f), temp_trajs_check first: (%f,%f)\n", t1[0][0], t1[0][1],temp_trajs_ori[0][0], temp_trajs_ori[0][1],temp_trajs_check[0][0], temp_trajs_check[0][1]);
-            printf("ori second: (%f,%f), temp_trajs_ori second: (%f,%f), temp_trajs_check second: (%f,%f)\n", t1[1][0], t1[1][1],temp_trajs_ori[1][0], temp_trajs_ori[1][1],temp_trajs_check[1][0], temp_trajs_check[1][1]);
-            printf("ori last-2 : (%f,%f), temp_trajs_ori last-2: (%f,%f), temp_trajs_check last-2: (%f,%f)\n", t1[t1.size()-3][0], t1[t1.size()-3][1],temp_trajs_ori[temp_trajs_ori.size()-3][0], temp_trajs_ori[temp_trajs_ori.size()-3][1],temp_trajs_check[temp_trajs_check.size()-3][0], temp_trajs_check[temp_trajs_check.size()-3][1]);
-            printf("ori last-1 : (%f,%f), temp_trajs_ori last-1: (%f,%f), temp_trajs_check last-1: (%f,%f)\n", t1[t1.size()-2][0], t1[t1.size()-2][1],temp_trajs_ori[temp_trajs_ori.size()-2][0], temp_trajs_ori[temp_trajs_ori.size()-2][1],temp_trajs_check[temp_trajs_check.size()-2][0], temp_trajs_check[temp_trajs_check.size()-2][1]);
-            printf("ori last : (%f,%f), temp_trajs_ori last: (%f,%f), temp_trajs_check last: (%f,%f)\n", t1.back()[0], t1.back()[1],temp_trajs_ori.back()[0], temp_trajs_ori.back()[1],temp_trajs_check.back()[0], temp_trajs_check.back()[1]);
-            printf("t1 size %zu, temp_trajs_ori size: %zu, temp_trajs_check size: %zu\n", t1.size(), temp_trajs_ori.size(), temp_trajs_check.size());
-            //printf("check temp_trajs_check last is cp: %d\n",check_pt_is_cp(temp_trajs_check.back(),critical_points_dec));//(0.001559,442.715650)
-            //trajID_need_fix_next.insert(current_trajID);
-            //trajs_dec[current_trajID] = temp_trajs_check;
-            break;  
+        //case 0
+        if (LastTwoPointsAreEqual(t1)){
+          //ori outside
+          if (!LastTwoPointsAreEqual(temp_trajs_check)){
+            //dec inside
+            success = false;
           }
-          // end_fix_index = std::min(end_fix_index + 10,static_cast<int>(t1.size()));
-          
-          
-          end_fix_index = std::min(end_fix_index + static_cast<int>(0.005*t_config.max_length),static_cast<int>(t1.size())); //t1.size() - 1
+          else{
+            //dec outside
+            success = (euclideanDistance(t1.back(), temp_trajs_check.back()) < threshold_outside && frechetDistance(t1, temp_trajs_check) < threshold);
+          }
+        }
+        else if (t1.size() == t_config.max_length){
+          //ori reach max
+          //这里的判断是｜｜ 不是&&！！
+          //success = ((euclideanDistance(t1.back(), temp_trajs_check.back()) < threshold_max_iter) || (temp_trajs_check.size() == t_config.max_length));
+          if ((temp_trajs_check.size() == t_config.max_length)){
+            // if (euclideanDistance(t1.back(), temp_trajs_check.back()) >= threshold_max_iter || frechetDistance(t1, temp_trajs_check) >= threshold){
+            //change:没走到的话，不判断末尾距离，只判断ESfrechet distance
+            if (euclideanDistance(t1.back(), temp_trajs_check.back()) >= threshold_max_iter && frechetDistance(t1, temp_trajs_check) >= threshold){
+            //if (ESfrechetDistance(t1, temp_trajs_check) >= threshold){
+              success = false;
+            }
+            else{
+              success = true;
+            }
+          }
         }
         else{
-          //修正成功当前trajectory
-          //printf("fix traj %zu successfully\n",current_trajID);
-          //更新trajs_dec
-          trajs_dec[current_trajID] = temp_trajs_check;
-          // local_all_vertex_for_all_diff_traj[thread_id].insert(rollback_vertexID.begin(), rollback_vertexID.end()); 
-          break;     
+          //reach cp
+          if (get_cell_offset(t1.back().data(), DW, DH) == get_cell_offset(temp_trajs_check.back().data(), DW, DH) && frechetDistance(t1, temp_trajs_check) < threshold){
+            success = true;
+          }
         }
-      }
+
+        if (end_fix_index >= t1.size()){
+          success = true;
+        }
+        else{
+          end_fix_index = std::min(end_fix_index + static_cast<int>(t_config.next_index_coeff*t_config.max_length),static_cast<int>(t1.size()));
+        }
+      } while (success == false);
+      
+      //printf("processed current_trajID: %ld by thread:%d, ori_type: %s, end_fix_index: %d ori_len: %d\n", current_trajID, omp_get_thread_num(), ori_type.c_str(), end_fix_index, t1.size());
+    
+      // while (!success){
+      //   //printf("thread: %d, current_trajID: %ld, current_end_fix_index: %d\n", thread_id, current_trajID, end_fix_index);
+      //   //cout << "thread: " << thread_id << ", current_trajID: " << current_trajID << ", current_end_fix_index: " << end_fix_index << endl;
+      //   double direction = trajID_direction_vector[current_trajID];
+      //   //std::unordered_map<size_t, std::set<int>> temp_cellID_trajIDs_map;//需要临时的一个map统计修正的traj经过那些cellID
+      //   std::set<size_t> temp_vertexID;//临时变量记录经过的vertexID
+      //   std::set<size_t> temp_vertexID_check;
+      //   // std::unordered_map<size_t,double> rollback_dec_u; //记录需要回滚的dec数据
+      //   // std::unordered_map<size_t,double> rollback_dec_v;
+      //   // std::set<size_t> rollback_vertexID;
+      //   //计算一次rk4直到终止点，统计经过的cellID，然后替换数据
+        
+      //   /* 使用简单的版本*/
+      //   auto temp_trajs_ori_time_start = std::chrono::high_resolution_clock::now();
+      //   end_fix_index = std::min(end_fix_index,t_config.max_length);
+      //   auto temp_trajs_ori = trajectory(t1[0].data(), t1[1], direction * t_config.h, end_fix_index, DH, DW, critical_points_ori, grad_ori,temp_vertexID);
+        
+      //   //auto temp_trajs_ori_time_end = std::chrono::high_resolution_clock::now();
+
+      //   //此时temp_vertexID记录了从起点到分岔点需要经过的所有vertex
+      //   // for (auto o:temp_vertexID){
+      //   //   rollback_dec_u[o] = dec_U[o];
+      //   //   rollback_dec_v[o] = dec_V[o];
+      //   //   local_all_vertex_for_all_diff_traj[thread_id].insert(o);
+      //   //   // rollback_vertexID.insert(o);
+      //   // }
+      //   // auto current_divergence_pos = temp_trajs_ori.back();
+      //   //printf("current_divergence_pos ori data(temp_trajs_ori last element): (%f,%f)\n", current_divergence_pos[0], current_divergence_pos[1]);
+      //   //printf("current_end_fix_index: %d, t1.size(): %zu, t2.size(): %zu\n", end_fix_index, t1.size(), t2.size());
+      //   omp_set_lock(&lock);
+      //   for (auto o:temp_vertexID){ // 更新dec_U, dec_V
+      //     dec_U[o] = U[o];
+      //     dec_V[o] = V[o];
+      //     //同时更新grad_dec
+      //     //o 转化为坐标
+      //     int x = o % DW;
+      //     int y = o / DW;
+      //     grad_dec(0, x, y) = U[o];
+      //     grad_dec(1, x, y) = V[o];
+      //     local_all_vertex_for_all_diff_traj[thread_id].insert(o);
+      //   }
+      //   omp_unset_lock(&lock);
+      //   //检查是不是修正成功
+      //   /*
+      //   1. 这里使用简单的traj计算，避免过度开销
+      //   2. 不从0开始，而是从end_fix_index开始，走max_length-end_fix_index+2步
+      //   */
+      //   //auto temp_debug = trajectory(t2[0].data(), t2[1],direction * t_config.h,end_fix_index, DH, DW, critical_points_dec, grad_dec,temp_index_check);
+
+      //   auto temp_trajs_check = trajectory(t1[0].data(), t1[1], direction * t_config.h, end_fix_index, DH, DW, critical_points_dec, grad_dec,temp_vertexID_check);
+
+      //   // switch (obj)
+      //   // {
+      //   //   case 0:
+      //   if (LastTwoPointsAreEqual(t1)){
+      //     //ori outside
+      //     if (!LastTwoPointsAreEqual(temp_trajs_check)){
+      //       //dec inside
+      //       success = false;
+      //     }
+      //     else{
+      //       //dec outside
+      //       success = (euclideanDistance(t1.back(), temp_trajs_check.back()) < threshold_outside && frechetDistance(t1, temp_trajs_check) < threshold);
+      //     }
+      //   }
+      //   else if (t1.size() == t_config.max_length){
+      //     //ori reach max
+      //     //这里的判断是｜｜ 不是&&！！
+      //     //success = ((euclideanDistance(t1.back(), temp_trajs_check.back()) < threshold_max_iter) || (temp_trajs_check.size() == t_config.max_length));
+      //     if ((temp_trajs_check.size() == t_config.max_length)){
+      //       // if (euclideanDistance(t1.back(), temp_trajs_check.back()) >= threshold_max_iter || frechetDistance(t1, temp_trajs_check) >= threshold){
+      //       //change:没走到的话，判断末端距离
+      //       if (euclideanDistance(t1.back(), temp_trajs_check.back()) >= threshold_max_iter && ESfrechetDistance(t1, temp_trajs_check) >= threshold){
+      //         success = false;
+      //       }
+      //       else{
+      //         success = true;
+      //       }
+      //     }
+      //     // if (!success){
+      //     //   printf("phase2 (check succc) ID: %ld, t1 size: %ld, t2 size: %ld,distance: %f\n", current_trajID, t1.size(), temp_trajs_check.size(), euclideanDistance(t1.back(), temp_trajs_check.back()));
+      //     // }
+      //   }
+      //   else{
+      //     //reach cp
+      //     if (get_cell_offset(t1.back().data(), DW, DH) == get_cell_offset(temp_trajs_check.back().data(), DW, DH) && frechetDistance(t1, temp_trajs_check) < threshold){
+      //       success = true;
+      //     }
+      //   }
+      //   //     break;
+      //   // }
+      
+      //   if (!success){
+      //     //rollback
+      //     // for (auto o:temp_vertexID){
+      //     //   dec_U[o] = rollback_dec_u[o];
+      //     //   dec_V[o] = rollback_dec_v[o];
+      //     //   int x = o % DW;
+      //     //   int y = o / DW;
+      //     //   grad_dec(0, x, y) = dec_U[o];
+      //     //   grad_dec(1, x, y) = dec_V[o];
+      //     //   local_all_vertex_for_all_diff_traj[thread_id].erase(o);
+      //     //   // rollback_vertexID.erase(o);
+      //     // }
+      //     if (end_fix_index >= static_cast<int>(t1.size()) || end_fix_index >= t_config.max_length){ //(t1.size()-1)
+      //       printf("t_config.max_length: %d,end_fix_index%d\n", t_config.max_length, end_fix_index);
+      //       printf("error: current end_fix_index is %d, current ID: %ld\n", end_fix_index, current_trajID);
+      //       //print all t1,temp_trajs_ori,temp_trajs_check
+      //       // for (size_t i = 0; i < t1.size(); ++i){
+      //       //   printf("t1: (%f,%f), temp_trajs_ori: (%f,%f), temp_trajs_check: (%f,%f)\n", t1[i][0], t1[i][1], temp_trajs_ori[i][0], temp_trajs_ori[i][1], temp_trajs_check[i][0], temp_trajs_check[i][1]);
+      //       // }
+      //       printf("ori first: (%f,%f), temp_trajs_ori first: (%f,%f), temp_trajs_check first: (%f,%f)\n", t1[0][0], t1[0][1],temp_trajs_ori[0][0], temp_trajs_ori[0][1],temp_trajs_check[0][0], temp_trajs_check[0][1]);
+      //       printf("ori second: (%f,%f), temp_trajs_ori second: (%f,%f), temp_trajs_check second: (%f,%f)\n", t1[1][0], t1[1][1],temp_trajs_ori[1][0], temp_trajs_ori[1][1],temp_trajs_check[1][0], temp_trajs_check[1][1]);
+      //       printf("ori last-2 : (%f,%f), temp_trajs_ori last-2: (%f,%f), temp_trajs_check last-2: (%f,%f)\n", t1[t1.size()-3][0], t1[t1.size()-3][1],temp_trajs_ori[temp_trajs_ori.size()-3][0], temp_trajs_ori[temp_trajs_ori.size()-3][1],temp_trajs_check[temp_trajs_check.size()-3][0], temp_trajs_check[temp_trajs_check.size()-3][1]);
+      //       printf("ori last-1 : (%f,%f), temp_trajs_ori last-1: (%f,%f), temp_trajs_check last-1: (%f,%f)\n", t1[t1.size()-2][0], t1[t1.size()-2][1],temp_trajs_ori[temp_trajs_ori.size()-2][0], temp_trajs_ori[temp_trajs_ori.size()-2][1],temp_trajs_check[temp_trajs_check.size()-2][0], temp_trajs_check[temp_trajs_check.size()-2][1]);
+      //       printf("ori last : (%f,%f), temp_trajs_ori last: (%f,%f), temp_trajs_check last: (%f,%f)\n", t1.back()[0], t1.back()[1],temp_trajs_ori.back()[0], temp_trajs_ori.back()[1],temp_trajs_check.back()[0], temp_trajs_check.back()[1]);
+      //       printf("t1 size %zu, temp_trajs_ori size: %zu, temp_trajs_check size: %zu\n", t1.size(), temp_trajs_ori.size(), temp_trajs_check.size());
+      //       //printf("check temp_trajs_check last is cp: %d\n",check_pt_is_cp(temp_trajs_check.back(),critical_points_dec));//(0.001559,442.715650)
+      //       //trajID_need_fix_next.insert(current_trajID);
+      //       //trajs_dec[current_trajID] = temp_trajs_check;
+      //       success = true;  
+      //     }
+      //     // end_fix_index = std::min(end_fix_index + 10,static_cast<int>(t1.size()));
+      //     else{
+      //       end_fix_index = std::min(end_fix_index + static_cast<int>(0.005*t_config.max_length),static_cast<int>(t1.size())); //t1.size() - 1
+      //     } 
+      //   }
+      //   else{
+      //     //修正成功当前trajectory
+      //     //printf("fix traj %zu successfully\n",current_trajID);
+      //     //更新trajs_dec
+      //     trajs_dec[current_trajID] = temp_trajs_check;
+      //     // local_all_vertex_for_all_diff_traj[thread_id].insert(rollback_vertexID.begin(), rollback_vertexID.end()); 
+      //     success = true;     
+      //   }
+      // }
+      // printf("current_trajID: %ld fixed successfully\n", current_trajID);
     } 
+    printf("all threads have finished fixing traj\n");
+    omp_destroy_lock(&lock);
 
     //汇总all_vertex_for_all_diff_traj
     for (const auto& local_set:local_all_vertex_for_all_diff_traj){
@@ -1292,6 +1377,7 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
     //这个for现在也要并行了，因为frechetDistance算的慢
     std::vector<std::set<size_t>> local_trajID_need_fix_next(totoal_thread);
     auto comp_start = std::chrono::high_resolution_clock::now();
+
     #pragma omp parallel for reduction(+:wrong_num_outside, wrong_num_max_iter, wrong_num_find_cp,wrong)
     for(size_t i=0;i < trajs_ori.size(); ++i){
       auto t1 = trajs_ori[i];
@@ -1299,58 +1385,58 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
       bool cond1 = get_cell_offset(t1.back().data(), DW, DH) == get_cell_offset(t2.back().data(), DW, DH);
       bool cond2 = (t1.size() == t_config.max_length);
       bool cond3 = t2.size() == t_config.max_length;
-      bool f_dis = frechetDistance(t1, t2) >= threshold;
+      // bool f_dis = frechetDistance(t1, t2) >= threshold;
       // bool cond4 = t1.back()[0] == -1;
       // bool cond5 = t2.back()[0] == -1;
-      switch (obj)
-      {
-      case 0:
-        if (LastTwoPointsAreEqual(t1)){
-
-          if (!LastTwoPointsAreEqual(t2)){
+      // switch (obj)
+      // {
+      // case 0:
+      if (LastTwoPointsAreEqual(t1)){
+        if (!LastTwoPointsAreEqual(t2)){
+          wrong ++;
+          wrong_num_outside ++;
+          local_trajID_need_fix_next[omp_get_thread_num()].insert(i);
+        }
+        else{
+          if (euclideanDistance(t1.back(), t2.back()) > threshold_outside || frechetDistance(t1, t2) >= threshold){
             wrong ++;
             wrong_num_outside ++;
             local_trajID_need_fix_next[omp_get_thread_num()].insert(i);
           }
-          else{
-            if (euclideanDistance(t1.back(), t2.back()) > threshold_outside || f_dis){
-              wrong ++;
-              wrong_num_outside ++;
-              local_trajID_need_fix_next[omp_get_thread_num()].insert(i);
-            }
-          }
         }
-        else if (cond2){
-          // ori reach max
-          //这里的判断是｜｜ 不是&&！！
-          // if ((euclideanDistance(t1.back(), t2.back()) > threshold_max_iter) || (t2.size() != t_config.max_length)){
-          if (t2.size() != t_config.max_length){
-            //dec not reach max, add
+      }
+      else if (cond2){
+        // ori reach max
+        //这里的判断是｜｜ 不是&&！！
+        // if ((euclideanDistance(t1.back(), t2.back()) > threshold_max_iter) || (t2.size() != t_config.max_length)){
+        if (t2.size() != t_config.max_length){
+          //dec not reach max, add
+          wrong ++;
+          wrong_num_max_iter ++;
+          local_trajID_need_fix_next[omp_get_thread_num()].insert(i);
+        }
+        else{
+          //dec reach max, need to check distance
+          //change:没走到的话，判断末端距离+edr
+          // if (euclideanDistance(t1.back(), t2.back()) >= threshold_max_iter || f_dis){
+          if (euclideanDistance(t1.back(), t2.back()) >= threshold_max_iter || frechetDistance(t1, t2) >= threshold){
+          //if (ESfrechetDistance(t1, t2) >= threshold){
             wrong ++;
             wrong_num_max_iter ++;
             local_trajID_need_fix_next[omp_get_thread_num()].insert(i);
           }
-          else{
-            //dec reach max, need to check distance
-            //change:没走到的话，判断末端距离+edr
-            // if (euclideanDistance(t1.back(), t2.back()) >= threshold_max_iter || f_dis){
-            if (euclideanDistance(t1.back(), t2.back()) >= threshold_max_iter || calculateEDR2D(t1,t2,2) > 50){
-              wrong ++;
-              wrong_num_max_iter ++;
-              local_trajID_need_fix_next[omp_get_thread_num()].insert(i);
-            }
-          }
         }
-        else{
-          num_find_cp ++;
-          if (!cond1 || f_dis){
-            wrong ++;
-            wrong_num_find_cp ++;
-            local_trajID_need_fix_next[omp_get_thread_num()].insert(i);
-          }
-        }
-        break;
       }
+      else{
+        num_find_cp ++;
+        if (!cond1 || frechetDistance(t1, t2) >= threshold){
+          wrong ++;
+          wrong_num_find_cp ++;
+          local_trajID_need_fix_next[omp_get_thread_num()].insert(i);
+        }
+      }
+      //   break;
+      // }
 
     }
     //汇总local_trajID_need_fix_next
@@ -1441,6 +1527,7 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
 
 
   free(final_result);
+  auto tpsz_decomp_start = std::chrono::high_resolution_clock::now();
   size_t zstd_decompressed_size = sz_lossless_decompress(ZSTD_COMPRESSOR, result_after_zstd, result_after_zstd_size, &final_result, final_result_size);
   //printf("final lossless output size %zu, final_result_size %zu\n",final_lossless_output,final_result_size);//should be same with cpsz出来的大小
   // printf("checkpt3\n");
@@ -1448,6 +1535,9 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
   float * final_dec_U = NULL;
   float * final_dec_V = NULL;
   sz_decompress_cp_preserve_2d_online_record_vertex<float>(final_result, r1, r2, final_dec_U, final_dec_V);
+  auto tpsz_decomp_end = std::chrono::high_resolution_clock::now();
+  std::chrono::duration<double> tpsz_decomp_duration = tpsz_decomp_end - tpsz_decomp_start;
+
   printf("verifying...\n");
  
   verify(U, final_dec_U, r1*r2,nrmse_u);
@@ -1461,9 +1551,10 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
   printf("psnr_overall_cpsz: %f\n",psnr_cpsz_overall);
   printf("FINAL Compressed ratio = %f\n",(2*r1*r2*sizeof(float)) * 1.0/result_after_zstd_size);
   printf("psnr_overall: %f\n", psnr_overall);
-  printf("comp time: %f\n", cpsz_comp_duration.count());
-  printf("decomp time: %f\n", cpsz_decomp_duration.count());
-  printf("%f\n",elapsed_fix.count());
+  printf("comp time cpsz: %f\n", cpsz_comp_duration.count());
+  //printf("decomp time cpsz: %f\n", cpsz_decomp_duration.count());
+  printf("decomp time tpsz: %f\n", tpsz_decomp_duration.count());
+  printf("fix time tpsz: %f\n",elapsed_fix.count());
   printf("%d\n",current_round);
   for (int i = 0; i < trajID_need_fix_next_vec.size(); ++i){
     printf("trajID_need_fix_next: %d, wrong outside: %d, wrong max_iter: %d, wrong find_cp: %d\n", trajID_need_fix_next_vec[i], trajID_need_fix_next_detail_vec[i][0], trajID_need_fix_next_detail_vec[i][1], trajID_need_fix_next_detail_vec[i][2]);
@@ -1536,6 +1627,7 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
 
   //std::atomic<size_t> trajID_counter(0);
   std::vector<std::set<size_t>> thread_lossless_index_final_check(totoal_thread);
+  omp_set_num_threads(totoal_thread);
   #pragma omp parallel for
   // for(const auto& p:critical_points_ori){
   for(size_t j = 0; j < keys.size(); ++j){
@@ -1600,7 +1692,9 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
 
 
   //check if all trajectories are fixed
-  bool terminate = false;
+  // 这里由于改了frechetDistance的计算方式，所以check的时候也要计算frechetDistance，所以很慢，所以要并行
+  size_t terminate = 0;
+  #pragma omp parallel for reduction(+:terminate)
   for (size_t i = 0; i < trajs_final_check.size(); ++i){
     auto t1 = trajs_ori[i];
     auto t2 = trajs_final_check[i];
@@ -1612,12 +1706,14 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
         printf("ori first %f,%f, dec first %f,%f\n", t1[0][0], t1[0][1], t2[0][0], t2[0][1]);
         printf("ori last-1 %f,%f, dec last-1 %f,%f\n", t1[t1.size()-2][0], t1[t1.size()-2][1], t2[t2.size()-2][0], t2[t2.size()-2][1]);
         printf("ori last %f,%f, dec last %f,%f\n", t1.back()[0], t1.back()[1], t2.back()[0], t2.back()[1]);
-        terminate = true;
+        terminate++;
       }
     }
     else if (t1.size() == t_config.max_length){
       //ori reach max, dec should satisfy distance
+      //change: 没走到的话，不判断末尾距离，而是判断ESfrechet distance
       if(euclideanDistance(t1.back(),t2.back()) > threshold_max_iter){
+      //if (ESfrechetDistance(t1, t2) >= threshold){
         printf("some trajectories not fixed(case0-1)\n");
         printf("trajID: %ld\n", i);
         printf("ori length: %zu, dec length: %zu\n", t1.size(), t2.size());
@@ -1625,7 +1721,7 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
         printf("ori second %f,%f, dec second %f,%f\n", t1[1][0], t1[1][1], t2[1][0], t2[1][1]);
         printf("ori last-1 %f,%f, dec last-1 %f,%f\n", t1[t1.size()-2][0], t1[t1.size()-2][1], t2[t2.size()-2][0], t2[t2.size()-2][1]);
         printf("ori last %f,%f, dec last %f,%f,dist: %f\n", t1.back()[0], t1.back()[1], t2.back()[0], t2.back()[1], euclideanDistance(t1.back(),t2.back()));
-        terminate = true;
+        terminate++;
         //print all t1,t2 when different
         for (int i = 0; i < t_config.max_length; ++i){
           if (t1[i][0] != t2[i][0] || t1[i][1] != t2[i][1]){
@@ -1645,11 +1741,11 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
         printf("ori first %f,%f, dec first %f,%f\n", t1[0][0], t1[0][1], t2[0][0], t2[0][1]);
         printf("ori last-1 %f,%f, dec last-1 %f,%f\n", t1[t1.size()-2][0], t1[t1.size()-2][1], t2[t2.size()-2][0], t2[t2.size()-2][1]);
         printf("ori last %f,%f, dec last %f,%f\n", t1.back()[0], t1.back()[1], t2.back()[0], t2.back()[1]);
-        terminate = true;
+        terminate++;
       }
     }
   }
-  if (terminate){
+  if (terminate > 0){
     printf("some trajectories not fixed\n");
     exit(0);
   }
@@ -1882,11 +1978,6 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
   printf("mean: %f\n", meanVal);
   printf("stdev: %f\n", stdevVal);
   printf("Statistics data===============\n");
-  
-  
-
-
-
 
 
   free(result_after_zstd);
@@ -1908,16 +1999,16 @@ int main(int argc, char **argv){
   int max_length = atoi(argv[7]); //max_length 2000
   double max_eb = atof(argv[8]); //max_eb 0.01
   //traj_config t_config = {0.05, 0.01, 2000};
-  traj_config t_config = {h, eps, max_length};
+
   //double max_eb = 0.01;
   int obj = 0;
   std::string eb_type = argv[9];
   //int obj = atoi(argv[9]);
   int total_thread = atoi(argv[10]);
-
   double threshold = atof(argv[11]);
   double threshold_outside = atof(argv[12]);
   double threshold_max_iter = atof(argv[13]);
+  double next_index_coeff = 0.05;
   std::string file_out_dir;
   if (argc == 15){
     file_out_dir = argv[14];
@@ -1925,6 +2016,7 @@ int main(int argc, char **argv){
   else{
     file_out_dir = "";
   }
+  traj_config t_config = {h, eps, max_length,next_index_coeff};
   
   omp_set_num_threads(total_thread);
   /*

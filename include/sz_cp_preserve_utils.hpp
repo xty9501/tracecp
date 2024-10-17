@@ -185,4 +185,9 @@ inline bool in_range(T pos, T n){
 	return (pos >= 0) && (pos < n);
 }
 
+template<typename T>
+inline bool in_local_range(T pos, T start, T end){
+	return (pos >= start) && (pos < end);
+}
+
 #endif

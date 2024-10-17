@@ -1,4 +1,5 @@
 #include "sz_compression_utils.hpp"
+#include <unordered_map>
 
 void
 encode_regression_coefficients_2d(const int * reg_params_type, const float * reg_unpredictable_data, size_t reg_count, size_t reg_unpredictable_count, unsigned char *& compressed_pos){
@@ -114,6 +115,32 @@ Huffman_encode_tree_and_data(size_t state_num, const int * type, size_t num_elem
 }
 
 void
+Huffman_encode_tree_and_data(size_t state_num, const int * type, size_t num_elements, unsigned char*& compressed_pos, size_t& compressed_size){
+	unsigned char* start_pos = compressed_pos;
+	HuffmanTree * huffman = build_Huffman_tree(state_num, type, num_elements);
+	size_t node_count = 0;
+	size_t i = 0;
+	for (i = 0; i < state_num; i++)
+		if (huffman->code[i]) node_count++; 
+	node_count = node_count*2-1;
+	unsigned char *tree_structure = NULL;
+	unsigned int tree_size = convert_HuffTree_to_bytes_anyStates(huffman, node_count, &tree_structure);
+	write_variable_to_dst(compressed_pos, node_count);
+	write_variable_to_dst(compressed_pos, tree_size);
+	write_array_to_dst(compressed_pos, tree_structure, tree_size);
+	unsigned char * type_array_size_pos = compressed_pos;
+	compressed_pos += sizeof(size_t);
+	size_t type_array_size = 0; 
+	encode(huffman, type, num_elements, compressed_pos, &type_array_size);
+	write_variable_to_dst(type_array_size_pos, type_array_size);
+	compressed_pos += type_array_size;
+	compressed_size = compressed_pos - start_pos;
+	free(tree_structure);
+	SZ_ReleaseHuffman(huffman);
+	
+}
+
+void
 omp_Huffman_encode_tree_and_data(size_t state_num, int * type, size_t num_elements, unsigned char*& compressed_pos,size_t * freq, int thread_num){
 	HuffmanTree * huffman = createHuffmanTree(state_num);
 	Huffman_init_openmp(huffman, type, num_elements, thread_num, freq);
@@ -137,6 +164,63 @@ omp_Huffman_encode_tree_and_data(size_t state_num, int * type, size_t num_elemen
 	free(tree_structure);
 	SZ_ReleaseHuffman(huffman);
 }
+
+// void
+// navie_omp_Huffman_encode_tree_and_data(size_t state_num, const int * type, size_t num_elements, unsigned char*& compressed_pos,int num_threads){
+// 	std::vector<std::vector<unsigned char>> compressed_buffers(num_threads);
+// 	//resize the compressed_buffers
+// 	for(int i=0;i<num_threads;i++){
+// 		compressed_buffers[i].resize(2*state_num*sizeof(unsigned int)+num_elements*sizeof(int));
+// 	}
+// 	#pragma omp parallel for num_threads(num_threads)
+// 	for(int i=0;i<num_threads;i++){
+// 		size_t start_pos = i*num_elements/num_threads;
+// 		size_t end_pos = (i+1)*num_elements/num_threads;
+// 		if (i == num_threads - 1) end_pos = num_elements;
+// 		// init(huffman, type+start_pos, end_pos-start_pos);
+// 		//init huffman tree
+// 		int max =  type[start_pos];
+// 		int min =  type[start_pos];
+// 		std::unordered_map<int, size_t> frequency;
+// 		for(size_t j=start_pos;j<end_pos;j++){
+// 			frequency[type[j]]++;
+// 		}
+// 		for (const auto &kv : frequency){
+// 			auto k = kv.first;
+// 			if (k> max) max = k;
+// 			if (k< min) min = k;
+// 		}
+// 		int stateNum = max - min + 2;
+// 		HuffmanTree * huffman = createHuffmanTree(stateNum);
+
+// 		size_t node_count = 0;
+// 		size_t j = 0;
+// 		for (j = 0; j < state_num; j++)
+// 			if (huffman->code[j]) node_count++;
+// 		node_count = node_count*2-1;
+// 		unsigned char *tree_structure = NULL;
+// 		unsigned int tree_size = convert_HuffTree_to_bytes_anyStates(huffman, node_count, &tree_structure);
+// 		unsigned char *local_compressed_pos = compressed_buffers[i].data();
+// 		write_variable_to_dst(local_compressed_pos, node_count);
+// 		write_variable_to_dst(local_compressed_pos, tree_size);
+// 		write_array_to_dst(local_compressed_pos, tree_structure, tree_size);
+// 		unsigned char * type_array_size_pos = local_compressed_pos;
+// 		local_compressed_pos += sizeof(size_t);
+// 		size_t type_array_size = 0;
+// 		encode(huffman, type+start_pos, end_pos-start_pos, local_compressed_pos, &type_array_size);
+// 		write_variable_to_dst(type_array_size_pos, type_array_size);
+// 		local_compressed_pos += type_array_size;
+// 		free(tree_structure);
+// 		SZ_ReleaseHuffman(huffman);
+// 	}
+	
+// 	//merge the compressed_buffers
+// 	for(int i=0;i<num_threads;i++){
+// 		unsigned char *local_compressed_pos = compressed_buffers[i].data();
+// 		memcpy(compressed_pos, local_compressed_pos, compressed_buffers[i].size());
+// 		compressed_pos += compressed_buffers[i].size();
+// 	}
+// }
 
 
 

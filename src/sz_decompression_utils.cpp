@@ -108,6 +108,32 @@ Huffman_decode_tree_and_data(size_t state_num, size_t num_elements, const unsign
 	return type;
 }
 
+// int *
+// naive_omp_decode_tree_and_data(size_t state_num, size_t num_elements, const unsigned char *& compressed_pos, int num_threads){
+// 	std::vector<std::vector<int>> type_buffers(num_threads);
+// 	//resize the type_buffers
+// 	for(int i=0;i<num_threads;i++){
+// 		type_buffers[i].resize(num_elements);
+// 	}
+// 	#pragma omp parallel for num_threads(num_threads)
+// 	for(int i=0;i<num_threads;i++){
+// 		size_t start_pos = i*num_elements/num_threads;
+// 		size_t end_pos = (i+1)*num_elements/num_threads;
+// 		if (i == num_threads - 1) end_pos = num_elements;
 
-
+// 		HuffmanTree* huffman = createHuffmanTree(state_num);
+// 		size_t node_count = 0;
+// 		read_variable_from_src(compressed_pos, node_count);
+// 		unsigned int tree_size = 0;
+// 		read_variable_from_src(compressed_pos, tree_size);
+// 		node root = reconstruct_HuffTree_from_bytes_anyStates(huffman, compressed_pos, node_count);
+// 		compressed_pos += tree_size;
+// 		size_t type_array_size = 0;
+// 		read_variable_from_src(compressed_pos, type_array_size);
+// 		int * type = (int *) malloc(num_elements * sizeof(int));
+// 		decode(compressed_pos, num_elements, root, type);
+// 		compressed_pos += type_array_size;
+// 		//printf("node_count=%zu, tree_size=%u, type_array_size=%zu\n", node_count, tree_size, type_array_size);
+// 		SZ_ReleaseHuffman(huffman);
+// 	}
 

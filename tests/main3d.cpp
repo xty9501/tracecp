@@ -130,6 +130,40 @@ double frechetDistance(const vector<array<double, 3>>& P, const vector<array<dou
     return dp[n-1][m-1];
 }
 
+double ESfrechetDistance(const vector<array<double, 3>>& P, const vector<array<double, 3>>& Q) {
+    int n = P.size();
+    int m = Q.size();
+    vector<vector<double>> dp(n, vector<double>(m, -1.0));  // 初始化 DP 矩阵
+
+    // 初始化第一个元素
+    dp[0][0] = euclideanDistance(P[0], Q[0]);
+
+    // 计算第一列
+    for (int i = 1; i < n; i++) {
+        dp[i][0] = max(dp[i-1][0], euclideanDistance(P[i], Q[0]));
+    }
+
+    // 计算第一行
+    for (int j = 1; j < m; j++) {
+        dp[0][j] = max(dp[0][j-1], euclideanDistance(P[0], Q[j]));
+    }
+
+    // 计算整个矩阵，并在 `P` 走到最后一行时提前返回结果
+    for (int i = 1; i < n; i++) {
+        for (int j = 1; j < m; j++) {
+            dp[i][j] = max(min({dp[i-1][j], dp[i][j-1], dp[i-1][j-1]}), euclideanDistance(P[i], Q[j]));
+        }
+    }
+
+    // `P` 走到头时返回最后一行中最小的 Frechet Distance
+    double result = dp[n-1][0];  // 初始化为最后一行的第一个元素
+    for (int j = 1; j < m; j++) {
+        result = min(result, dp[n-1][j]);  // 找到最后一行的最小值
+    }
+
+    return result;
+}
+
 
 void calculateStatistics(const vector<double>& data, double& minVal, double& maxVal, double& medianVal, double& meanVal, double& stdevVal) {
     // 检查输入是否为空
@@ -1567,65 +1601,65 @@ int main(int argc, char ** argv){
     int wrong_num_max_iter = 0;
     int wrong_num_find_cp = 0;
     std::vector<std::set<size_t>> local_trajID_need_fix(total_thread);
-    switch (obj)
-    {
-    case 0:
-      #pragma omp parallel for reduction(+:num_outside, num_max_iter, num_find_cp, wrong_num_outside, wrong_num_max_iter, wrong_num_find_cp)
-      for(size_t i =0; i< trajs_ori.size(); ++i){
-        auto t1 = trajs_ori[i];
-        auto t2 = trajs_dec[i];
-        bool cond1 = get_cell_offset_3d(t1.back().data(), r3, r2, r1) == get_cell_offset_3d(t2.back().data(), r3, r2, r1);
-        bool cond2 = t1.size() == t_config.max_length;
-        //bool f_dist = frechetDistance(t1, t2) >= threshold;
+    // switch (obj)
+    // {
+    // case 0:
+    #pragma omp parallel for reduction(+:num_outside, num_max_iter, num_find_cp, wrong_num_outside, wrong_num_max_iter, wrong_num_find_cp)
+    for(size_t i =0; i< trajs_ori.size(); ++i){
+      const auto& t1 = trajs_ori[i];
+      const auto& t2 = trajs_dec[i];
+      bool cond1 = get_cell_offset_3d(t1.back().data(), r3, r2, r1) == get_cell_offset_3d(t2.back().data(), r3, r2, r1);
+      bool cond2 = t1.size() == t_config.max_length;
+      //bool f_dist = frechetDistance(t1, t2) >= threshold;
 
-        if (LastTwoPointsAreEqual(t1)){
-          num_outside ++;
-          //ori inside
-          if (!LastTwoPointsAreEqual(t2)){
-            //dec outside
+      if (LastTwoPointsAreEqual(t1)){
+        num_outside ++;
+        //ori inside
+        if (!LastTwoPointsAreEqual(t2)){
+          //dec outside
+          wrong_num_outside ++;
+          // trajID_need_fix.insert(i);
+          local_trajID_need_fix[omp_get_thread_num()].insert(i);
+        }
+        else{
+          //dec outside
+          if ((euclideanDistance(t1.back(), t2.back()) > threshold_outside) && (frechetDistance(t1, t2) >= threshold)){
             wrong_num_outside ++;
             // trajID_need_fix.insert(i);
             local_trajID_need_fix[omp_get_thread_num()].insert(i);
           }
-          else{
-            //dec outside
-            if ((euclideanDistance(t1.back(), t2.back()) > threshold_outside) && (frechetDistance(t1, t2) >= threshold)){
-              wrong_num_outside ++;
-              // trajID_need_fix.insert(i);
-              local_trajID_need_fix[omp_get_thread_num()].insert(i);
-            }
-          }
         }
-        else if (cond2){
-          num_max_iter ++;
-          //ori reach max
-          if (t2.size() != t_config.max_length){
-            //dec not reach max, add
+      }
+      else if (cond2){
+        num_max_iter ++;
+        //ori reach max
+        if (t2.size() != t_config.max_length){
+          //dec not reach max, add
+          wrong_num_max_iter ++;
+          // trajID_need_fix.insert(i);
+          local_trajID_need_fix[omp_get_thread_num()].insert(i);
+        }
+        else{
+          //dec reach max, need to check distance
+          if ((euclideanDistance(t1.back(), t2.back()) > threshold_max_iter) && (frechetDistance(t1, t2) >= threshold)){
             wrong_num_max_iter ++;
             // trajID_need_fix.insert(i);
             local_trajID_need_fix[omp_get_thread_num()].insert(i);
           }
-          else{
-            //dec reach max, need to check distance
-            if ((euclideanDistance(t1.back(), t2.back()) > threshold_max_iter) && (frechetDistance(t1, t2) >= threshold)){
-              wrong_num_max_iter ++;
-              // trajID_need_fix.insert(i);
-              local_trajID_need_fix[omp_get_thread_num()].insert(i);
-            }
-          }
-        }
-        else{
-          //reach cp
-          num_find_cp ++;
-          if(!cond1 || (frechetDistance(t1, t2) >= threshold)){
-            wrong_num_find_cp ++;
-            // trajID_need_fix.insert(i);
-            local_trajID_need_fix[omp_get_thread_num()].insert(i);  
-          }
         }
       }
-      break;
+      else{
+        //reach cp
+        num_find_cp ++;
+        if(!cond1 || (frechetDistance(t1, t2) >= threshold)){
+          wrong_num_find_cp ++;
+          // trajID_need_fix.insert(i);
+          local_trajID_need_fix[omp_get_thread_num()].insert(i);  
+        }
+      }
     }
+    //break;
+    // }
 
     //汇总local_trajID_need_fix
     for (auto& s:local_trajID_need_fix){
