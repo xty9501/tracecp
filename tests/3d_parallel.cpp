@@ -1239,6 +1239,7 @@ int main(int argc, char ** argv){
     begin_cr = (3*num_elements*sizeof(float)) * 1.0/lossless_outsize;
     cout << "Compressed size = " << lossless_outsize << ", ratio = " << (3*num_elements*sizeof(float)) * 1.0/lossless_outsize << endl;
     //decompression
+    auto decomp_time_start = std::chrono::high_resolution_clock::now();
     size_t lossless_output = sz_lossless_decompress(ZSTD_COMPRESSOR, result_after_lossless, lossless_outsize, &result, result_size);
     if (eb_type == "abs"){
         omp_sz_decompress_cp_preserve_3d_online_abs_record_vertex<float>(result, r1, r2, r3,dec_U, dec_V, dec_W);
@@ -1250,6 +1251,10 @@ int main(int argc, char ** argv){
         printf("not support this eb_type\n");
         exit(0);
     }
+    auto decomp_time_end = std::chrono::high_resolution_clock::now();
+    cpsz_decomp_duration = decomp_time_end - decomp_time_start;
+    printf("Decompress time: %f\n", cpsz_decomp_duration.count());
+    // exit(0);
     // writefile<float>("/home/mxi235/data/temp_data/dec_U.bin", dec_U, num_elements);
     // writefile<float>("/home/mxi235/data/temp_data/dec_inplace_U.bin", dec_U_inplace, num_elements);
     //now verify the decompressed data
@@ -1262,9 +1267,10 @@ int main(int argc, char ** argv){
     // printf("====================================\n");
 
     //now check the critical points
-    // auto cp_exist_ori = omp_compute_cp(U, V, W, r1, r2, r3);
-    // auto cp_exist_dec = omp_compute_cp(dec_U, dec_V, dec_W, r1, r2, r3);
-    // printf("ori cp #: %ld, dec cp #: %ld\n", std::count(cp_exist_ori.begin(), cp_exist_ori.end(), true), std::count(cp_exist_dec.begin(), cp_exist_dec.end(), true));
+    auto cp_exist_ori = omp_compute_cp(U, V, W, r1, r2, r3);
+    auto cp_exist_dec = omp_compute_cp(dec_U, dec_V, dec_W, r1, r2, r3);
+    printf("ori cp #: %ld, dec cp #: %ld\n", std::count(cp_exist_ori.begin(), cp_exist_ori.end(), true), std::count(cp_exist_dec.begin(), cp_exist_dec.end(), true));
+    exit(0);
     //check cp_exist_inplace
     //auto cp_exist_dec_inplace = omp_compute_cp(dec_U_inplace, dec_V_inplace, dec_W_inplace, r1, r2, r3);
     //printf("dec inplace cp #: %ld\n", std::count(cp_exist_dec_inplace.begin(), cp_exist_dec_inplace.end(), true));
@@ -1273,33 +1279,58 @@ int main(int argc, char ** argv){
     // exit(0);    
 
     // if dec has more cp than ori, then we need to check the difference
-    // if (std::count(cp_exist_dec.begin(), cp_exist_dec.end(), true) > std::count(cp_exist_ori.begin(), cp_exist_ori.end(), true)){
-    //     for (size_t i = 0; i < cp_exist_ori.size(); i++){
-    //         if (cp_exist_ori[i] != cp_exist_dec[i]){
-    //             //coonvert key to coordinate
-    //             int x = i/(r2*r3);
-    //             int y = (i%(r2*r3))/r3;
-    //             int z = (i%(r2*r3))%r3;
-    //             printf("key %ld, x: %d, y: %d, z: %d\n", i, x, y, z);
-    //         }
-    //     }
-    // }
-    // if dec has same number of cp with ori, check if they are the same
-    // else{
-    //     for (size_t i = 0; i < cp_exist_ori.size(); i++){
-    //         if (cp_exist_ori[i] != cp_exist_dec[i]){
-    //             //coonvert key to coordinate
-    //             int x = i/(r2*r3);
-    //             int y = (i%(r2*r3))/r3;
-    //             int z = (i%(r2*r3))%r3;
-    //             printf("key %ld, x: %d, y: %d, z: %d\n", i, x, y, z);
-    //         }
-    //     }
-    // }
+    if (std::count(cp_exist_dec.begin(), cp_exist_dec.end(), true) > std::count(cp_exist_ori.begin(), cp_exist_ori.end(), true)){
+        for (size_t i = 0; i < cp_exist_ori.size(); i++){
+            if (cp_exist_ori[i] != cp_exist_dec[i]){
+                //coonvert key to coordinate
+                int x = i/(r2*r3);
+                int y = (i%(r2*r3))/r3;
+                int z = (i%(r2*r3))%r3;
+                printf("key %ld, x: %d, y: %d, z: %d\n", i, x, y, z);
+            }
+        }
+    }
+    //if dec has same number of cp with ori, check if they are the same
+    else{
+        for (size_t i = 0; i < cp_exist_ori.size(); i++){
+            if (cp_exist_ori[i] != cp_exist_dec[i]){
+                //coonvert key to coordinate
+                int x = i/(r2*r3);
+                int y = (i%(r2*r3))/r3;
+                int z = (i%(r2*r3))%r3;
+                printf("key %ld, x: %d, y: %d, z: %d\n", i, x, y, z);
+            }
+        }
+    }
 
     auto critical_points_0 = compute_critical_points(U, V, W, r1, r2, r3); //r1=DD,r2=DH,r3=DW
     cout << "detail compute critical points #: " << critical_points_0.size() << endl;
-    cout << "cp_exist size : " << std::count(cp_exist.begin(), cp_exist.end(), true) << endl;
+    auto critical_points_dec_detail = compute_critical_points(dec_U, dec_V, dec_W, r1, r2, r3); //r1=DD,r2=DH,r3=DW
+    if (critical_points_0.size() != critical_points_dec_detail.size()){
+        printf("critical_points_ori_detail size: %ld, critical_points_dec_detail size: %ld\n", critical_points_0.size(), critical_points_dec_detail.size());
+        printf("critical points size not equal\n");
+        exit(0);
+    }
+    else{
+      for (const auto &p : critical_points_0){
+        auto cp_coord = p.second.x;
+        //check if the key in dec critical points
+        auto it = critical_points_dec_detail.find(p.first);
+        if (it == critical_points_dec_detail.end()){
+            printf("key %ld not in dec critical points\n", p.first);
+            exit(0);
+        }
+        else{
+            auto cp_dec_coord = it->second.x;
+            if (cp_coord[0] != cp_dec_coord[0] || cp_coord[1] != cp_dec_coord[1] || cp_coord[2] != cp_dec_coord[2]){
+                printf("key %ld, ori cp: %f, %f, %f, dec cp: %f, %f, %f\n", p.first, cp_coord[0], cp_coord[1], cp_coord[2], cp_dec_coord[0], cp_dec_coord[1], cp_dec_coord[2]);
+                exit(0);
+            }
+        }
+      }
+    }
+    exit(0);
+
 
     // auto critical_points_out = compute_critical_points(dec_U, dec_V, dec_W, r1, r2, r3); //r1=DD,r2=DH,r3=DW
     // if (critical_points_0.size() != critical_points_out.size()){

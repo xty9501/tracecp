@@ -256,7 +256,7 @@ int main(int argc, char **argv){
     auto cpsz_parallel_comp_end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> cpsz_parallel_comp_duration = cpsz_parallel_comp_end - cpsz_parallel_comp_start;
     printf("cpsz parallel Compress time: %f\n", cpsz_parallel_comp_duration.count());
-    exit(0);
+    // exit(0);
     size_t lossless_output = sz_lossless_decompress(ZSTD_COMPRESSOR, result_after_lossless, lossless_outsize, &result, result_size);
     float * dec_U = NULL;
     float * dec_V = NULL;

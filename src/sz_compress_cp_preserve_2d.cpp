@@ -2941,8 +2941,8 @@ omp_sz_compress_cp_preserve_2d_record_vertex(const T * U, const T * V, size_t r1
 	
 
 	// size_t * freq = (size_t *) calloc(num_threads * 4 * 1024, sizeof(size_t));
-	size_t * freq = (size_t *) malloc(num_threads* 4*1024*sizeof(size_t));
-	memset(freq, 0, num_threads* 4*1024*sizeof(size_t));
+	// size_t * freq = (size_t *) malloc(num_threads* 4*1024*sizeof(size_t));
+	// memset(freq, 0, num_threads* 4*1024*sizeof(size_t));
 
 	//std::cout<<"eb max = "<<*std::max_element(eb_quant_index, eb_quant_index + 2*num_elements)<<std::endl;
 	//std::cout<<"eb min = "<<*std::min_element(eb_quant_index, eb_quant_index + 2*num_elements)<<std::endl;
@@ -2964,7 +2964,7 @@ omp_sz_compress_cp_preserve_2d_record_vertex(const T * U, const T * V, size_t r1
 	std::vector<size_t> compressed_sizes(num_threads);
 	//resize
 	for (int i = 0; i < num_threads; i++){
-		compressed_buffers[i].resize(2*num_elements);
+		compressed_buffers[i].resize(2*num_elements / num_threads);
 	}
 	#pragma omp parallel for
 	for (int i = 0; i < num_threads; i++){
@@ -2981,7 +2981,6 @@ omp_sz_compress_cp_preserve_2d_record_vertex(const T * U, const T * V, size_t r1
 		write_variable_to_dst(compressed_pos, compressed_sizes[i]);
 		//printf("comp thread %d, compressed_size = %ld\n", i, compressed_sizes[i]);
 	}
-
 	//merge compressed_buffers write to compressed
 	for (int i = 0; i < num_threads; i++){
 		memcpy(compressed_pos, compressed_buffers[i].data(), compressed_sizes[i]);
@@ -2990,30 +2989,66 @@ omp_sz_compress_cp_preserve_2d_record_vertex(const T * U, const T * V, size_t r1
 	auto parallel_eb_quant_huffman_end = std::chrono::high_resolution_clock::now();
 	std::chrono::duration<double> parallel_eb_quant_huffman_time = parallel_eb_quant_huffman_end - parallel_eb_quant_huffman_start;
 	std::cout<<"parallel_eb_quant_huffman_time = "<<parallel_eb_quant_huffman_time.count()<<std::endl;
-	//naive parallel huffman****************************************************
+	//naive parallel huffman eb quant****************************************************
 	
 	//writefile("comp_eb_quant_index.txt",eb_quant_index, 2*num_elements);
 	printf("done with eb_quant huffman\n");
 	//printf("comp eb max = %d\n", *std::max_element(eb_quant_index, eb_quant_index + 2*num_elements));
 	//printf("comp eb min = %d\n", *std::min_element(eb_quant_index, eb_quant_index + 2*num_elements));
-	// free(eb_quant_index);
-	free(freq);
-	freq = NULL;
+	free(eb_quant_index);
+	// free(freq);
+	// freq = NULL;
 	//freq = (size_t *) calloc(num_threads * 4 * capacity*sizeof(size_t), sizeof(size_t));
-	freq = (size_t *) malloc(num_threads* 4*capacity*sizeof(size_t));
-	memset(freq, 0, num_threads* 4*capacity*sizeof(size_t));
+	// freq = (size_t *) malloc(num_threads* 4*capacity*sizeof(size_t));
+	// memset(freq, 0, num_threads* 4*capacity*sizeof(size_t));
 	//std::cout<<"quant max = "<<*std::max_element(data_quant_index, data_quant_index + 2*num_elements)<<std::endl;
 	//std::cout<<"quant min = "<<*std::min_element(data_quant_index, data_quant_index + 2*num_elements)<<std::endl;
 	//omp_Huffman_encode_tree_and_data(capacity, data_quant_index, 2*num_elements, compressed_pos,freq, num_threads);
+	
+	/*
+	// serial huffman data quant ****************************************************
 	auto data_quant_huffman_start = std::chrono::high_resolution_clock::now();
 	Huffman_encode_tree_and_data(capacity, data_quant_index, 2*num_elements, compressed_pos);
 	auto data_quant_huffman_end = std::chrono::high_resolution_clock::now();
 	std::chrono::duration<double> data_quant_huffman_time = data_quant_huffman_end - data_quant_huffman_start;
-	std::cout<<"data_quant_huffman_time = "<<data_quant_huffman_time.count()<<std::endl;
-	// exit(0);
-	//writefile("comp_data_quant_index.txt",data_quant_index, 2*num_elements);
-	printf("pos after huffman_data_quant_index = %ld\n", compressed_pos - compressed);
-	// printf("unpred_data size = %ld\n", unpredictable_count);
+	std::cout<<"serial data_quant_huffman_time = "<<data_quant_huffman_time.count()<<std::endl;
+	// serial huffman data quant ****************************************************
+	*/
+
+	// parallel huffman data quant ****************************************************
+	auto parallel_data_quant_huffman_start = std::chrono::high_resolution_clock::now();
+	std::vector<std::vector<unsigned char>> compressed_buffers_data_quant(num_threads);
+	std::vector<size_t> compressed_sizes_data_quant(num_threads);
+	//resize
+	for (int i = 0; i < num_threads; i++){
+		compressed_buffers_data_quant[i].resize(2*num_elements / num_threads);
+	}
+	#pragma omp parallel for
+	for (int i = 0; i < num_threads; i++){
+		size_t start_pos = i * num_elements / num_threads;
+		size_t end_pos = (i == num_threads - 1) ? num_elements : (i + 1) * num_elements / num_threads;
+		unsigned char *local_compressed_pos = compressed_buffers_data_quant[i].data();
+		size_t local_compressed_size = 0;
+		Huffman_encode_tree_and_data(capacity,data_quant_index + 2*start_pos, 2*(end_pos - start_pos), local_compressed_pos,local_compressed_size);
+		compressed_sizes_data_quant[i] = local_compressed_size;
+	}
+	//write compressed_sizes_data_quant first
+	for (int i = 0; i < num_threads; i++){
+		write_variable_to_dst(compressed_pos, compressed_sizes_data_quant[i]);
+		//printf("comp thread %d, compressed_size = %ld\n", i, compressed_sizes_data_quant[i]);
+	}
+
+	//merge compressed_buffers_data_quant write to compressed
+	for (int i = 0; i < num_threads; i++){
+		memcpy(compressed_pos, compressed_buffers_data_quant[i].data(), compressed_sizes_data_quant[i]);
+		compressed_pos += compressed_sizes_data_quant[i];
+	}
+	auto parallel_data_quant_huffman_end = std::chrono::high_resolution_clock::now();
+	std::chrono::duration<double> parallel_data_quant_huffman_time = parallel_data_quant_huffman_end - parallel_data_quant_huffman_start;
+	std::cout<<"parallel_data_quant_huffman_time = "<<parallel_data_quant_huffman_time.count()<<std::endl;
+	// parallel huffman data quant ****************************************************
+	printf("comp data max = %d\n", *std::max_element(data_quant_index, data_quant_index + 2*num_elements));
+	printf("comp data min = %d\n", *std::min_element(data_quant_index, data_quant_index + 2*num_elements));
 	free(data_quant_index);
 	compressed_size = compressed_pos - compressed;
 	return compressed;

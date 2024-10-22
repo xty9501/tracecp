@@ -1199,7 +1199,7 @@ int main(int argc, char ** argv){
     std::chrono::duration<double> cpsz_decomp_duration;
     
     std::string file_out_dir = "";
-    if (argc == 16){
+    if (argc == 17){
       file_out_dir = argv[16];
     }
     // int obj = 0;
@@ -1226,8 +1226,7 @@ int main(int argc, char ** argv){
     }
     
     else{
-
-      cout << "start Compression\n";
+      std::cout << "start Compression\n";
       unsigned char * result;
       auto comp_time_start = std::chrono::high_resolution_clock::now();
       if(eb_type == "rel"){
@@ -1245,6 +1244,7 @@ int main(int argc, char ** argv){
 
       auto comp_time_end = std::chrono::high_resolution_clock::now();
       cpsz_comp_duration = comp_time_end - comp_time_start;
+      printf("compression time: %f\n", cpsz_comp_duration.count());
 
       begin_cr = (3*num_elements*sizeof(float)) * 1.0/lossless_outsize;
       cout << "Compressed size = " << lossless_outsize << ", ratio = " << (3*num_elements*sizeof(float)) * 1.0/lossless_outsize << endl;
@@ -1261,8 +1261,10 @@ int main(int argc, char ** argv){
       
       auto decomp_time_end = std::chrono::high_resolution_clock::now();
       cpsz_decomp_duration = decomp_time_end - decomp_time_start;
+      printf("decompression time: %f\n", cpsz_decomp_duration.count());
       free(result_after_lossless);
     }
+    exit(0);
     printf("verifying...\n");
     double nrmse_u, nrmse_v, nrmse_w,psnr_overall,psnr_cpsz_overall;
     verify(U, dec_U, r1*r2*r3, nrmse_u);

@@ -239,9 +239,9 @@ omp_sz_decompress_cp_preserve_2d_online(const unsigned char * compressed, size_t
 		unpred_data_each_thread[i] = std::vector<T>(raw_data, raw_data + unpredictable_count[i]);
 	}
 	//print the detail for each thread
-	for (int i = 0; i < num_threads; i++){
-		printf("decomp thread %d unpredictable data size = %ld, maxval = %f \n", i, unpred_data_each_thread[i].size(), *std::max_element(unpred_data_each_thread[i].begin(), unpred_data_each_thread[i].end()));
-	}
+	// for (int i = 0; i < num_threads; i++){
+	// 	printf("decomp thread %d unpredictable data size = %ld, maxval = %f \n", i, unpred_data_each_thread[i].size(), *std::max_element(unpred_data_each_thread[i].begin(), unpred_data_each_thread[i].end()));
+	// }
 
 	int t = std::sqrt(num_threads);
 	//读每个row的unpred_count
@@ -257,9 +257,9 @@ omp_sz_decompress_cp_preserve_2d_online(const unsigned char * compressed, size_t
 	}
 
 	//print detail for each thread for row
-	for (int i = 0; i < (t-1)*t; i++){
-		printf("decomp thread %d unpredictable row size = %ld, maxval = %f \n", i, unpred_data_row[i].size(), (unpred_data_row[i].size() == 0) ? 0: *std::max_element(unpred_data_row[i].begin(), unpred_data_row[i].end()));
-	}
+	// for (int i = 0; i < (t-1)*t; i++){
+	// 	printf("decomp thread %d unpredictable row size = %ld, maxval = %f \n", i, unpred_data_row[i].size(), (unpred_data_row[i].size() == 0) ? 0: *std::max_element(unpred_data_row[i].begin(), unpred_data_row[i].end()));
+	// }
 
 
 	//读每个col的unpred_count
@@ -312,8 +312,11 @@ omp_sz_decompress_cp_preserve_2d_online(const unsigned char * compressed, size_t
 	// //printf("decomp pos after all upredict_dividing = %ld\n", compressed_pos - compressed);
 	*/
 
+	// serial huffman decode for eb quant ****************************************
 	// int * eb_quant_index = Huffman_decode_tree_and_data(2*1024, 2*num_elements, compressed_pos);
-
+	// serial huffman decode for eb quant ****************************************
+	
+	// parallel huffman decode for eb quant ****************************************
 	// read each compressed_size for eb_quant_index first
 	std::vector<size_t> compressed_size_eb(num_threads);
 	for (int i = 0; i < num_threads; i++){
@@ -340,15 +343,46 @@ omp_sz_decompress_cp_preserve_2d_online(const unsigned char * compressed, size_t
 
 	printf("decomp eb max = %d\n", *std::max_element(eb_quant_index, eb_quant_index + 2*num_elements));
 	printf("decomp eb min = %d\n", *std::min_element(eb_quant_index, eb_quant_index + 2*num_elements));
-	
-	// exit(0);
-	
-	
+	// parallel huffman decode for eb quant ****************************************
+
+	/*	
+	// serial huffman decode for data quant ****************************************
 	int * data_quant_index = Huffman_decode_tree_and_data(capacity, 2*num_elements, compressed_pos);
 	//writefile("decomp_data_quant_index.txt",data_quant_index, 2*num_elements);
 	printf("decomp data max = %d\n", *std::max_element(data_quant_index, data_quant_index + 2*num_elements));
 	printf("decomp data min = %d\n", *std::min_element(data_quant_index, data_quant_index + 2*num_elements));
 	printf("decomp pos after huffman_data_quant_index = %ld\n", compressed_pos - compressed);
+	// serial huffman decode for data quant ****************************************
+	*/
+
+	// parallel huffman decode for data quant ****************************************
+	// read each compressed_size for data_quant_index first
+	std::vector<size_t> compressed_size_data(num_threads);
+	for (int i = 0; i < num_threads; i++){
+		read_variable_from_src(compressed_pos, compressed_size_data[i]);
+		//printf("decomp thread %d data_quant_index size = %ld\n", i, compressed_size_data[i]);
+	}
+	std::vector<const unsigned char *> compressed_chunk_data_start(num_threads);
+	for (int i = 0; i < num_threads; i++){
+		compressed_chunk_data_start[i] = compressed_pos;
+		compressed_pos += compressed_size_data[i];
+	}
+	int * data_quant_index = (int *) malloc(2*num_elements*sizeof(int));
+	#pragma omp parallel for num_threads(num_threads)
+	for (int i = 0; i < num_threads; i++){
+		size_t start_pos = i*num_elements/num_threads;
+		size_t end_pos = (i ==num_threads - 1) ? num_elements : (i+1)*num_elements/num_threads;
+		const unsigned char * local_compressed_pos = compressed_chunk_data_start[i];
+		size_t local_num_elements = 2 * (end_pos - start_pos);
+		int * local_data_quant_index = Huffman_decode_tree_and_data(capacity, local_num_elements, local_compressed_pos);
+		std::copy(local_data_quant_index, local_data_quant_index + local_num_elements, data_quant_index + 2*start_pos);
+		free(local_data_quant_index);
+	}
+	printf("decomp parallel data max = %d\n", *std::max_element(data_quant_index, data_quant_index + 2*num_elements));
+	printf("decomp parallel data min = %d\n", *std::min_element(data_quant_index, data_quant_index + 2*num_elements));
+
+
+
 	// U = (T *) malloc(num_elements*sizeof(T));
 	// V = (T *) malloc(num_elements*sizeof(T));
 	U = (T *) calloc(num_elements*sizeof(T),sizeof(T));
@@ -413,7 +447,7 @@ omp_sz_decompress_cp_preserve_2d_online(const unsigned char * compressed, size_t
 		if (block_col == t - 1) {
 			end_col += remaining_cols;
 		}
-		printf("dec-threadID = %d, block_id = %d, start_row = %d, end_row = %d, start_col = %d, end_col = %d\n", omp_get_thread_num(), block_id, start_row, end_row, start_col, end_col);
+		//printf("dec-threadID = %d, block_id = %d, start_row = %d, end_row = %d, start_col = %d, end_col = %d\n", omp_get_thread_num(), block_id, start_row, end_row, start_col, end_col);
 		T * unpred_data_pos = &unpred_data_each_thread[omp_get_thread_num()][0];
 		//print out each thread process which block
 		//printf("Thread %d process block %d, start_row = %d, end_row = %d, start_col = %d, end_col = %d\n", omp_get_thread_num(), block_id, start_row, end_row, start_col, end_col);
@@ -432,19 +466,19 @@ omp_sz_decompress_cp_preserve_2d_online(const unsigned char * compressed, size_t
 				//get eb
 				//get position index
 				size_t position_idx = (i * r2 + j);
-				if (position_idx == 877*3600+1799){
-					printf("qqqqqq\n");
-					printf("eb_quant_index[2*position_idx] = %d, eb_quant_index[2*position_idx+1] = %d\n", eb_quant_index[2*position_idx], eb_quant_index[2*position_idx+1]);
-					printf("data_quant_index[2*position_idx] = %d, data_quant_index[2*position_idx+1] = %d\n", data_quant_index[2*position_idx], data_quant_index[2*position_idx+1]);
-				}
+				// if (position_idx == 877*3600+1799){
+				// 	printf("qqqqqq\n");
+				// 	printf("eb_quant_index[2*position_idx] = %d, eb_quant_index[2*position_idx+1] = %d\n", eb_quant_index[2*position_idx], eb_quant_index[2*position_idx+1]);
+				// 	printf("data_quant_index[2*position_idx] = %d, data_quant_index[2*position_idx+1] = %d\n", data_quant_index[2*position_idx], data_quant_index[2*position_idx+1]);
+				// }
 				//get eb
 				if(eb_quant_index[2*position_idx] == 0){
 					U[position_idx] = *(unpred_data_pos ++);
 					V[position_idx] = *(unpred_data_pos ++);
-					if(position_idx == 877*3600+1799){
-						printf("Unpredictable..\n");
-						printf("use U=%f, V=%f\n", U[position_idx], V[position_idx]);
-					}
+					// if(position_idx == 877*3600+1799){
+					// 	printf("Unpredictable..\n");
+					// 	printf("use U=%f, V=%f\n", U[position_idx], V[position_idx]);
+					// }
 				}
 				else{
 					for(int k=0; k<2; k++){
@@ -459,11 +493,11 @@ omp_sz_decompress_cp_preserve_2d_online(const unsigned char * compressed, size_t
 						T pred = d1 + d2 - d0;
 						cur_data_pos[position_idx] = pred + 2 * (data_quant_index[2*position_idx + k] - intv_radius) * eb;
 
-						if (position_idx == 877*3600+1799){ //7900187, 1100*3600+1802
-							printf("dec=======\n");
-							printf("i = %d, j = %d, k = %d, d0 = %f, d1 = %f, d2 = %f, pred = %f, eb = %f, data_quant_index = %d, decompressed = %f\n", i, j, k, d0, d1, d2, pred, eb, data_quant_index[2*position_idx + k], cur_data_pos[position_idx]);
-							printf("decomp U[%d] = %f, V[%d] = %f\n", position_idx, U[position_idx], position_idx, V[position_idx]);
-						}
+						// if (position_idx == 877*3600+1799){ //7900187, 1100*3600+1802
+						// 	printf("dec=======\n");
+						// 	printf("i = %d, j = %d, k = %d, d0 = %f, d1 = %f, d2 = %f, pred = %f, eb = %f, data_quant_index = %d, decompressed = %f\n", i, j, k, d0, d1, d2, pred, eb, data_quant_index[2*position_idx + k], cur_data_pos[position_idx]);
+						// 	printf("decomp U[%d] = %f, V[%d] = %f\n", position_idx, U[position_idx], position_idx, V[position_idx]);
+						// }
 					}
 				}
 			}
