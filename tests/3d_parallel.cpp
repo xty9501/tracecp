@@ -1247,7 +1247,6 @@ int main(int argc, char ** argv){
     begin_cr = (3*num_elements*sizeof(float)) * 1.0/lossless_outsize;
     cout << "Compressed size = " << lossless_outsize << ", ratio = " << (3*num_elements*sizeof(float)) * 1.0/lossless_outsize << endl;
     //decompression
-    exit(0);
     auto decomp_time_start = std::chrono::high_resolution_clock::now();
     auto decomp_only_zstd = std::chrono::high_resolution_clock::now();
     size_t lossless_output = sz_lossless_decompress(ZSTD_COMPRESSOR, result_after_lossless, lossless_outsize, &result, result_size);
@@ -1258,6 +1257,9 @@ int main(int argc, char ** argv){
 
         //单线程
         //sz_decompress_cp_preserve_3d_online_abs_record_vertex<float>(result, r1, r2, r3,dec_U, dec_V, dec_W);
+    }
+    else if (eb_type == "rel"){
+        omp_sz_decompress_cp_preserve_3d_record_vertex<float>(result, r1, r2, r3,dec_U, dec_V, dec_W);
     }
     else{
         printf("not support this eb_type\n");
@@ -1277,7 +1279,7 @@ int main(int argc, char ** argv){
     // printf("====================================\n");
     // verify(W, dec_W, r1*r2*r3, nrmse_w);
     // printf("====================================\n");
-
+    exit(0);
     //now check the critical points
     auto cp_exist_ori = omp_compute_cp(U, V, W, r1, r2, r3);
     auto cp_exist_dec = omp_compute_cp(dec_U, dec_V, dec_W, r1, r2, r3);

@@ -1259,7 +1259,7 @@ omp_sz_decompress_cp_preserve_3d_online_abs_record_vertex(const unsigned char * 
 
 template<typename T>
 void
-omp_sz_decompress_cp_preserve_3d_online_record_vertex(const unsigned char * compressed, size_t r1, size_t r2, size_t r3, T *& U, T *& V, T *& W){
+omp_sz_decompress_cp_preserve_3d_record_vertex(const unsigned char * compressed, size_t r1, size_t r2, size_t r3, T *& U, T *& V, T *& W){
 	if(U) free(U);
 	if(V) free(V);
 	if(W) free(W);
@@ -1485,7 +1485,7 @@ omp_sz_decompress_cp_preserve_3d_online_record_vertex(const unsigned char * comp
 	T * W_pos = W;
 	int * eb_quant_index_pos = eb_quant_index;
 	int * data_quant_index_pos = data_quant_index;
-
+	const double threshold=std::numeric_limits<float>::epsilon();
 	double log_of_base = log2(base);
 	int eb_quant_index_max = (int) (log2(1.0 / threshold)/log_of_base) + 1;
 
@@ -2018,3 +2018,11 @@ omp_sz_decompress_cp_preserve_3d_online_record_vertex(const unsigned char * comp
 
 
 }
+
+template
+void
+omp_sz_decompress_cp_preserve_3d_record_vertex(const unsigned char * compressed, size_t r1, size_t r2, size_t r3, float *& U, float *& V, float *& W);
+
+template
+void
+omp_sz_decompress_cp_preserve_3d_record_vertex(const unsigned char * compressed, size_t r1, size_t r2, size_t r3, double *& U, double *& V, double *& W);
