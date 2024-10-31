@@ -49,11 +49,15 @@ target_link_libraries(test_parallel3d PUBLIC FTK::libftk zstd::libzstd_shared Ei
 
 # 查找 OpenMP 包
 find_package(OpenMP REQUIRED)
-
+if(OpenMP_FOUND)
+    message(STATUS "MPI Version: ${MPI_VERSION}")
+else()
+    message(FATAL_ERROR "MPI not found")
+endif()
 
 if(OpenMP_CXX_FOUND)
     # 设置 OpenMP 标志
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
+    #set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
     
     # 链接 OpenMP 库

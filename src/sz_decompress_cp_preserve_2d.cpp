@@ -86,24 +86,22 @@ sz_decompress_cp_preserve_2d_online_record_vertex(const unsigned char * compress
 	size_t num_elements = r1 * r2;
 	const unsigned char * compressed_pos = compressed;
 	int base = 0;
-	//先搞出来bitmap
-	// allocate memory for bitmap
-	unsigned char * bitmap = (unsigned char *) malloc(num_elements * sizeof(unsigned char));
-	size_t num_bytes = (num_elements % 8 == 0) ? num_elements / 8 : num_elements / 8 + 1;
-	convertByteArray2IntArray_fast_1b_sz(num_elements, compressed_pos, num_bytes, bitmap);
-	//bitmap[3]  == 1
-
-	//再搞出来需要无损的大小
+	unsigned char * bitmap;
+	T * lossless_data_U;
+	T * lossless_data_V;
+	//搞出来需要无损的大小
 	size_t lossless_count = 0;
 	read_variable_from_src(compressed_pos, lossless_count);
 	printf("lossless_count = %ld\n", lossless_count);
-	// allocate memory for lossless data
-	T * lossless_data_U;
-	T * lossless_data_V;
-	lossless_data_U = read_array_from_src<T>(compressed_pos,lossless_count);
-	lossless_data_V = read_array_from_src<T>(compressed_pos,lossless_count);
-	T * lossless_data_U_pos = lossless_data_U;
-	T * lossless_data_V_pos = lossless_data_V;
+
+	if (lossless_count != 0){
+		bitmap = (unsigned char *) malloc(num_elements * sizeof(unsigned char));
+		size_t num_bytes = (num_elements % 8 == 0) ? num_elements / 8 : num_elements / 8 + 1;
+		convertByteArray2IntArray_fast_1b_sz(num_elements, compressed_pos, num_bytes, bitmap);
+		lossless_data_U = read_array_from_src<T>(compressed_pos,lossless_count);
+		lossless_data_V = read_array_from_src<T>(compressed_pos,lossless_count);
+	}
+
 
 	read_variable_from_src(compressed_pos, base);
 	printf("base = %d\n", base);
@@ -153,26 +151,30 @@ sz_decompress_cp_preserve_2d_online_record_vertex(const unsigned char * compress
 		}
 	}
 
-	//最后在根据bitmap更新
-	for(int i=0; i<r1; i++){
-		for(int j=0; j<r2; j++){
-		//check bitmap
-			if(static_cast<int>(bitmap[i*r2+j]) == 1){
-				U[i*r2+j] = *(lossless_data_U_pos ++);
-				V[i*r2+j] = *(lossless_data_V_pos ++);
-				lossless_sum_u += U[i*r2+j];
-				continue;
+	if (lossless_count != 0){
+		T * lossless_data_U_pos = lossless_data_U;
+		T * lossless_data_V_pos = lossless_data_V;
+		//最后在根据bitmap更新
+		for(int i=0; i<r1; i++){
+			for(int j=0; j<r2; j++){
+			//check bitmap
+				if(static_cast<int>(bitmap[i*r2+j]) == 1){
+					U[i*r2+j] = *(lossless_data_U_pos ++);
+					V[i*r2+j] = *(lossless_data_V_pos ++);
+					lossless_sum_u += U[i*r2+j];
+					continue;
+				}
 			}
 		}
+		free(bitmap);
+		free(lossless_data_U);
+		free(lossless_data_V);
+		printf("lossless_count = %ld\n", lossless_data_U_pos - lossless_data_U);
 	}
 
 	free(eb_quant_index);
 	free(data_quant_index);
-	free(bitmap);
-	free(lossless_data_U);
-	free(lossless_data_V);
-	printf("lossless_count = %ld\n", lossless_data_U_pos - lossless_data_U);
-	printf("lossless_sum_u_when_decomp = %lf\n", lossless_sum_u);
+
 	// //loop through bitmap, if bitmap[i] == 1, then replace U[i] and V[i] with lossless_data_U[i] and lossless_data_V[i]
 	// size_t count_lossless = 0;
 	// for(size_t i = 0; i < num_elements; i++){
@@ -341,8 +343,8 @@ omp_sz_decompress_cp_preserve_2d_online(const unsigned char * compressed, size_t
 		free(local_eb_quant_index);
 	}
 
-	printf("decomp eb max = %d\n", *std::max_element(eb_quant_index, eb_quant_index + 2*num_elements));
-	printf("decomp eb min = %d\n", *std::min_element(eb_quant_index, eb_quant_index + 2*num_elements));
+	//printf("decomp eb max = %d\n", *std::max_element(eb_quant_index, eb_quant_index + 2*num_elements));
+	//printf("decomp eb min = %d\n", *std::min_element(eb_quant_index, eb_quant_index + 2*num_elements));
 	// parallel huffman decode for eb quant ****************************************
 
 	/*	
@@ -378,8 +380,8 @@ omp_sz_decompress_cp_preserve_2d_online(const unsigned char * compressed, size_t
 		std::copy(local_data_quant_index, local_data_quant_index + local_num_elements, data_quant_index + 2*start_pos);
 		free(local_data_quant_index);
 	}
-	printf("decomp parallel data max = %d\n", *std::max_element(data_quant_index, data_quant_index + 2*num_elements));
-	printf("decomp parallel data min = %d\n", *std::min_element(data_quant_index, data_quant_index + 2*num_elements));
+	//printf("decomp parallel data max = %d\n", *std::max_element(data_quant_index, data_quant_index + 2*num_elements));
+	//printf("decomp parallel data min = %d\n", *std::min_element(data_quant_index, data_quant_index + 2*num_elements));
 
 
 
@@ -431,7 +433,7 @@ omp_sz_decompress_cp_preserve_2d_online(const unsigned char * compressed, size_t
 	omp_set_num_threads(num_threads);
 	size_t total_processed = 0;	
 	// printf("use %d threads for block processing\n", num_threads);
-	#pragma omp parallel for reduction(+:total_processed)
+	#pragma omp parallel for
 	for (int block_id = 0; block_id < total_blocks; ++block_id){
 		int block_row = block_id / t;
 		int block_col = block_id % t;
@@ -462,7 +464,7 @@ omp_sz_decompress_cp_preserve_2d_online(const unsigned char * compressed, size_t
 				if (std::find(dividing_cols.begin(), dividing_cols.end(), j) != dividing_cols.end()) {
 					continue;
 				}
-				total_processed++;
+				//total_processed++;
 				//get eb
 				//get position index
 				size_t position_idx = (i * r2 + j);
@@ -510,7 +512,7 @@ omp_sz_decompress_cp_preserve_2d_online(const unsigned char * compressed, size_t
 	//先处理横着的线（行）
 	omp_set_num_threads((t-1)*t);
 	// printf("use %d threads for row processing\n", (t-1)*t);
-	#pragma omp parallel for collapse(2) reduction(+:total_processed)
+	#pragma omp parallel for collapse(2)
 	for (int i : dividing_rows){
 		for (int j = -1; j < (int)dividing_cols.size(); j++){
 			int thread_id = omp_get_thread_num();
@@ -524,7 +526,7 @@ omp_sz_decompress_cp_preserve_2d_online(const unsigned char * compressed, size_t
 					//k is a dividing point
 					continue;
 				}
-				total_processed++;
+				//total_processed++;
 				size_t position_idx = (i * r2 + c);
 				//get eb
 				if(eb_quant_index[2*position_idx] == 0){
@@ -548,7 +550,7 @@ omp_sz_decompress_cp_preserve_2d_online(const unsigned char * compressed, size_t
 	//再处理竖着的线（列）
 	omp_set_num_threads((t-1)*t);
 	// printf("use %d threads for col processing\n", (t-1)*t);
-	#pragma omp parallel for collapse(2) reduction(+:total_processed)
+	#pragma omp parallel for collapse(2) 
 	for (int j : dividing_cols){
 		for (int i = -1; i < (int)dividing_rows.size(); i++){
 			int thread_id = omp_get_thread_num();
@@ -562,7 +564,7 @@ omp_sz_decompress_cp_preserve_2d_online(const unsigned char * compressed, size_t
 					continue;
 				}
 				size_t position_idx = (r * r2 + j);
-				total_processed++;
+				//total_processed++;
 				//get eb
 				if(eb_quant_index[2*position_idx] == 0){
 					U[position_idx] = *(unpred_data_pos ++);
@@ -589,10 +591,10 @@ omp_sz_decompress_cp_preserve_2d_online(const unsigned char * compressed, size_t
 			size_t position_idx = (i * r2 + j);
 			U[position_idx] = *(unpred_data_pos ++);
 			V[position_idx] = *(unpred_data_pos ++);
-			total_processed++;
+			//total_processed++;
 		}
 	}
-	printf("total_processed = %ld,total_elements = %ld\n", total_processed, num_elements);
+	//printf("total_processed = %ld,total_elements = %ld\n", total_processed, num_elements);
 
 	/*
 	//串行处理划分线上的数据

@@ -241,7 +241,6 @@ int main(int argc, char **argv){
     }
     */
 
-
     printf("=============check parallel=======================\n");
     size_t result_size = 0;
     unsigned char * result = NULL;
@@ -257,10 +256,14 @@ int main(int argc, char **argv){
     std::chrono::duration<double> cpsz_parallel_comp_duration = cpsz_parallel_comp_end - cpsz_parallel_comp_start;
     printf("cpsz parallel Compress time: %f\n", cpsz_parallel_comp_duration.count());
     // exit(0);
+    auto cpsz_parallel_decomp_start = std::chrono::high_resolution_clock::now();
     size_t lossless_output = sz_lossless_decompress(ZSTD_COMPRESSOR, result_after_lossless, lossless_outsize, &result, result_size);
     float * dec_U = NULL;
     float * dec_V = NULL;
     omp_sz_decompress_cp_preserve_2d_online<float>(result, DH,DW, dec_U, dec_V);
+    auto cpsz_parallel_decomp_end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> cpsz_parallel_decomp_duration = cpsz_parallel_decomp_end - cpsz_parallel_decomp_start;
+    printf("cpsz parallel Decompress time: %f\n", cpsz_parallel_decomp_duration.count());
     auto critical_points_ori = compute_critical_points(U, V,DH,DW);
     auto critical_points_dec = compute_critical_points(dec_inplace_U, dec_inplace_V, DH,DW);
     double nrmse = 0;
@@ -304,7 +307,6 @@ int main(int argc, char **argv){
     }
     //print compression ratio
     printf("parallel compression ratio: %f\n", (2*DH*DW*sizeof(float)) * 1.0/lossless_outsize);
-
     printf("=============check serial=======================\n");
     //check 串行和结果是否一致
 
@@ -313,9 +315,10 @@ int main(int argc, char **argv){
 
     size_t result_size_serial = 0;
     unsigned char * result_serial = NULL; 
+    auto serial_comp_start = std::chrono::high_resolution_clock::now();
     if(eb_type == "rel"){
       //****original version of cpsz********
-      result_serial = sz_compress_cp_preserve_2d_fix(U, V, DH, DW, result_size_serial, false, max_eb);
+      result_serial = sz_compress_cp_preserve_2d_record_vertex(U, V, DH, DW, result_size_serial, false, max_eb);
     }
     else if (eb_type == "abs"){
       //****** cpsz with absolute error bound ******
@@ -324,13 +327,18 @@ int main(int argc, char **argv){
     // result = sz_compress_cp_preserve_2d_fix(U, V, DH, DW, result_size, false, max_eb);
     unsigned char * result_after_lossless_serial = NULL;
     size_t lossless_outsize_serial = sz_lossless_compress(ZSTD_COMPRESSOR, 3, result_serial, result_size_serial, &result_after_lossless_serial);
+    auto serial_comp_end = std::chrono::high_resolution_clock::now();
+    printf("serial Compress time: %f\n", std::chrono::duration<double>(serial_comp_end - serial_comp_start).count());
     free(result_serial);
+    auto serial_decomp_start = std::chrono::high_resolution_clock::now();
     size_t lossless_output_serial = sz_lossless_decompress(ZSTD_COMPRESSOR, result_after_lossless_serial, lossless_outsize_serial, &result_serial, result_size_serial);
     
     float * dec_U_serial = NULL;
     float * dec_V_serial = NULL;
-    sz_decompress_cp_preserve_2d_online<float>(result_serial, DH,DW, dec_U_serial, dec_V_serial); // use cpsz
     
+    sz_decompress_cp_preserve_2d_online_record_vertex<float>(result_serial, DH,DW, dec_U_serial, dec_V_serial); // use cpsz
+    auto serial_decomp_end = std::chrono::high_resolution_clock::now();
+    printf("serial Decompress time: %f\n", std::chrono::duration<double>(serial_decomp_end - serial_decomp_start).count());
     auto critical_points_dec_serial = compute_critical_points(dec_U_serial, dec_V_serial, DH,DW);
     if (critical_points_ori.size() != critical_points_dec_serial.size()) {
         printf("Error: the number of critical points are different\n");

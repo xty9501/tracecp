@@ -393,7 +393,7 @@ void write_current_state_data(std::string file_path, const T * U, const T * V, T
 
 template<typename T>
 void
-naive_method(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_config,int totoal_thread, int obj, std::string file_dir = ""){
+naive_method(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_config,int totoal_thread, int obj,std::string eb_type, std::string file_dir = ""){
   //bool write_flag = true;
   int DW = r2;
   int DH = r1;
@@ -432,26 +432,40 @@ naive_method(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_
   size_t result_size = 0;
   unsigned char * result = NULL;
   double current_pwr_eb = 0;
-  result = sz_compress_cp_preserve_2d_fix(U, V, r1, r2, result_size, false, max_pwr_eb, current_pwr_eb);
+  if (eb_type == "rel"){
+    result = sz_compress_cp_preserve_2d_fix(U, V, r1, r2, result_size, false, max_pwr_eb, current_pwr_eb);
+  }
+  else if (eb_type == "abs"){
+    result = sz_compress_cp_preserve_2d_online_abs_record_vertex(U, V, r1, r2, result_size, false, max_pwr_eb);
+  }
+  
   unsigned char * result_after_lossless = NULL;
   size_t lossless_outsize = sz_lossless_compress(ZSTD_COMPRESSOR, 3, result, result_size, &result_after_lossless);
   size_t lossless_output = sz_lossless_decompress(ZSTD_COMPRESSOR, result_after_lossless, lossless_outsize, &result, result_size);
   float * dec_U = NULL;
   float * dec_V = NULL;
-  sz_decompress_cp_preserve_2d_online<float>(result, r1,r2, dec_U, dec_V); // use cpsz
+  if (eb_type == "rel"){
+    sz_decompress_cp_preserve_2d_online<float>(result, r1,r2, dec_U, dec_V); // use cpsz
+  }
+  else if (eb_type == "abs"){
+    printf("use abs decompress\n");
+    sz_decompress_cp_preserve_2d_online_record_vertex<float>(result, r1,r2, dec_U, dec_V); 
+  }
+  
   // calculate compression ratio
   printf("BEGIN Compressed size(original) = %zu, ratio = %f\n", lossless_outsize, (2*r1*r2*sizeof(float)) * 1.0/lossless_outsize);
   double cr_ori = (2*r1*r2*sizeof(float)) * 1.0/lossless_outsize; 
-  // init a unordered_map, key is the index of cell, value is an array which contains the index of trajectory that goes through this cell
-  std::unordered_map<size_t, std::set<int>> cellID_trajIDs_map_ori;
-  std::unordered_map<size_t, std::set<int>> cellID_trajIDs_map_dec;
 
+  auto compute_cp_start = std::chrono::high_resolution_clock::now();
   //get cp for original data
   auto critical_points_ori = compute_critical_points(U, V, r1, r2);
   //get cp for decompressed data
   auto critical_points_dec = compute_critical_points(dec_U, dec_V, r1, r2);
+  auto compute_cp_end = std::chrono::high_resolution_clock::now();
+  std::chrono::duration<double> compute_cp_elapsed = compute_cp_end - compute_cp_start;
 
 
+  auto total_time_start = std::chrono::high_resolution_clock::now();
   //get grad for original data
   ftk::ndarray<float> grad_ori;
   grad_ori.reshape({2, static_cast<unsigned long>(r2), static_cast<unsigned long>(r1)});
@@ -463,7 +477,7 @@ naive_method(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_
   refill_gradient(0, r1, r2, dec_U, grad_dec);
   refill_gradient(1, r1, r2, dec_V, grad_dec);
 
-  auto total_time_start = std::chrono::high_resolution_clock::now();
+  
 
   printf("first time calculate trajectory\n");
   //*************先计算一次整体的traj_ori 和traj_dec,后续只需增量修改*************
@@ -557,23 +571,44 @@ naive_method(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_
   printf("size of vertex_ori: %ld\n", vertex_ori.size());
   //print how many element in trajID_direction_map
   printf("size of trajID_direction_vector: %ld\n", trajID_direction_vector.size());
-  if (std::find(trajID_direction_vector.begin(), trajID_direction_vector.end(), 0.0) != trajID_direction_vector.end()) {
-        std::cout << "Vector contains 0" << std::endl;
-    } else {
-        std::cout << "Vector does not contain 0" << std::endl;
-    }
+  // if (std::find(trajID_direction_vector.begin(), trajID_direction_vector.end(), 0.0) != trajID_direction_vector.end()) {
+  //       std::cout << "Vector contains 0" << std::endl;
+  //   } else {
+  //       std::cout << "Vector does not contain 0" << std::endl;
+  //   }
 
   //把vertex_ori中的点搞到压缩中
   size_t result_size_naive = 0;
   unsigned char * result_naive = NULL;
-  result_naive = sz_compress_cp_preserve_2d_fix(U, V, r1, r2, result_size_naive, false, max_pwr_eb, current_pwr_eb, vertex_ori);
+  if (eb_type == "rel"){
+    result_naive = sz_compress_cp_preserve_2d_fix(U, V, r1, r2, result_size_naive, false, max_pwr_eb, current_pwr_eb, vertex_ori);
+  }
+  else if (eb_type == "abs"){
+    result_naive = sz_compress_cp_preserve_2d_online_abs_record_vertex(U, V, r1, r2, result_size_naive, false, max_pwr_eb, vertex_ori);
+  }
+  
   unsigned char * result_after_lossless_naive = NULL;
   size_t lossless_outsize_naive = sz_lossless_compress(ZSTD_COMPRESSOR, 3, result_naive, result_size_naive, &result_after_lossless_naive);
+  
+  auto total_time_end = std::chrono::high_resolution_clock::now();
+  std::chrono::duration<double> total_time_elapsed = total_time_end - total_time_start;
+  printf("tpsz naive method total time: %f\n", total_time_elapsed.count());
+  
+  auto decompress_start = std::chrono::high_resolution_clock::now();
   size_t lossless_output_naive = sz_lossless_decompress(ZSTD_COMPRESSOR, result_after_lossless_naive, lossless_outsize_naive, &result_naive, result_size_naive);
   float * dec_U_naive = NULL;
   float * dec_V_naive = NULL;
-  sz_decompress_cp_preserve_2d_online<float>(result, r1,r2, dec_U_naive, dec_V_naive); // use cpsz
+  if (eb_type == "rel"){
+    sz_decompress_cp_preserve_2d_online<float>(result, r1,r2, dec_U_naive, dec_V_naive); // use cpsz
+  }
+  else if (eb_type == "abs"){
+    sz_decompress_cp_preserve_2d_online_record_vertex<float>(result, r1,r2, dec_U_naive, dec_V_naive); 
+  }
+  
   // calculate compression ratio
+  auto decompress_end = std::chrono::high_resolution_clock::now();
+  std::chrono::duration<double> decompress_elapsed = decompress_end - decompress_start;
+  printf("tpsz naive method Decompress time: %f\n", decompress_elapsed.count());
   printf("Compression ratio for naive method: %f\n", lossless_outsize_naive, (2*r1*r2*sizeof(float)) * 1.0/lossless_outsize_naive);
   double nrmse_u, nrmse_v, psnr_overall;
   verify(U, dec_U_naive, r1*r2, nrmse_u);
@@ -822,9 +857,14 @@ int main(int argc, char **argv){
   traj_config t_config = {h, eps, max_length};
   //double max_eb = 0.01;
   //int objectives = 0;
-  int obj = atoi(argv[9]);
+  int obj = 0;
+  std::string eb_type = argv[9];
   int total_thread = atoi(argv[10]);
-  std::string file_out_dir = argv[11];
+  std::string file_out_dir ="";
+  if (argc == 12){
+    file_out_dir = argv[11];
+  }
+  
   omp_set_num_threads(total_thread);
   /*
   objectives0: only garantee those trajectories that reach cp are correct
@@ -833,7 +873,7 @@ int main(int argc, char **argv){
 
   */
   //fix_traj(u, v,DH, DW, max_eb, t_config, obj);
-  naive_method(u, v,DH, DW, max_eb, t_config, total_thread,obj, file_out_dir);
+  naive_method(u, v,DH, DW, max_eb, t_config, total_thread,obj,eb_type, file_out_dir);
 
   free(u);
   free(v);

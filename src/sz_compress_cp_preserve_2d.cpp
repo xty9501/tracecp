@@ -1010,28 +1010,32 @@ template<typename T>
 unsigned char *
 sz_compress_cp_preserve_2d_record_vertex(const T * U, const T * V, size_t r1, size_t r2, size_t& compressed_size, bool transpose, double max_pwr_eb,const std::set<size_t> &index_need_to_fix){
 	size_t num_elements = r1 * r2;
-	printf("parpare bitmap\n");
-	//准备bitmap#####################
-	unsigned char * bitmap = (unsigned char *) malloc(num_elements*sizeof(unsigned char));
-	if (bitmap == NULL) {
-    fprintf(stderr, "Failed to allocate memory for bitmap\n");
-    exit(1);
+	unsigned char * bitmap;
+	if (index_need_to_fix.size() != 0){
+		printf("parpare bitmap\n");
+		//准备bitmap#####################
+		bitmap = (unsigned char *) malloc(num_elements*sizeof(unsigned char));
+		if (bitmap == NULL) {
+		fprintf(stderr, "Failed to allocate memory for bitmap\n");
+		exit(1);
+		}
+		// set all to 0
+		// memset(bitmap, 0, num_elements * sizeof(T));
+		memset(bitmap, 0, num_elements * sizeof(unsigned char));
+		//set index_need_to_fix to 1
+		for(auto it = index_need_to_fix.begin(); it != index_need_to_fix.end(); ++it){
+			assert(*it < num_elements);
+			bitmap[*it] = 1;
+		}
+		size_t intArrayLength = num_elements;
+		// 准备输出的长度
+		size_t num_bytes = (intArrayLength % 8 == 0) ? intArrayLength / 8 : intArrayLength / 8 + 1;
+		// unsigned char *compressedArray = new unsigned char[num_bytes];
+		// unsigned char *compressed_pos = compressedArray;  // 指针指向压缩数组的开始
+		// convertIntArray2ByteArray_fast_1b_to_result_sz(bitmap, intArrayLength, compressed_pos);
+		//准备bitmap#####################
 	}
-	// set all to 0
-	// memset(bitmap, 0, num_elements * sizeof(T));
-	memset(bitmap, 0, num_elements * sizeof(unsigned char));
-	//set index_need_to_fix to 1
-	for(auto it = index_need_to_fix.begin(); it != index_need_to_fix.end(); ++it){
-		assert(*it < num_elements);
-		bitmap[*it] = 1;
-	}
-	size_t intArrayLength = num_elements;
-	// 准备输出的长度
-    size_t num_bytes = (intArrayLength % 8 == 0) ? intArrayLength / 8 : intArrayLength / 8 + 1;
-	// unsigned char *compressedArray = new unsigned char[num_bytes];
-    // unsigned char *compressed_pos = compressedArray;  // 指针指向压缩数组的开始
-	// convertIntArray2ByteArray_fast_1b_to_result_sz(bitmap, intArrayLength, compressed_pos);
-	//准备bitmap#####################
+
 
 	T * decompressed_U = (T *) malloc(num_elements*sizeof(T));
 	memcpy(decompressed_U, U, num_elements*sizeof(T));
@@ -1199,23 +1203,21 @@ sz_compress_cp_preserve_2d_record_vertex(const T * U, const T * V, size_t r1, si
 	printf("offsets eb_q, data_q, unpred: %ld %ld %ld\n", eb_quant_index_pos - eb_quant_index, data_quant_index_pos - data_quant_index, unpred_data.size());
 	unsigned char * compressed = (unsigned char *) malloc(2*num_elements*sizeof(T));
 	unsigned char * compressed_pos = compressed;
-	//修改：先写bitmap
-	// write_variable_to_dst(compressed_pos,num_elements); // 处理后的bitmap的长度 size_t
-	//write_array_to_dst(compressed_pos, compressedArray, num_bytes);
-	convertIntArray2ByteArray_fast_1b_to_result_sz(bitmap, num_elements, compressed_pos);
-	printf("bitmap pos = %ld\n", compressed_pos - compressed);
-
-	//再写index_need_to_fix的大小
+	// 写index_need_to_fix的size
 	write_variable_to_dst(compressed_pos, index_need_to_fix.size()); //size_t, index_need_to_fix的大小
-	printf("index_need_to_fix pos = %ld\n", compressed_pos - compressed);
-	//再写index_need_to_fix对应U和V的数据
-	for (auto it = index_need_to_fix.begin(); it != index_need_to_fix.end(); it++){
-		write_variable_to_dst(compressed_pos, U[*it]); //T, index_need_to_fix对应的U的值
+	if (index_need_to_fix.size() != 0){
+		convertIntArray2ByteArray_fast_1b_to_result_sz(bitmap, num_elements, compressed_pos);
+		printf("bitmap pos = %ld\n", compressed_pos - compressed);
+		//再写index_need_to_fix对应U和V的数据
+		for (auto it = index_need_to_fix.begin(); it != index_need_to_fix.end(); it++){
+			write_variable_to_dst(compressed_pos, U[*it]); //T, index_need_to_fix对应的U的值
+		}
+		for (auto it = index_need_to_fix.begin(); it != index_need_to_fix.end(); it++){
+			write_variable_to_dst(compressed_pos, V[*it]); //T, index_need_to_fix对应的V的值
+		}
+		printf("index_need_to_fix lossless data pos = %ld\n", compressed_pos - compressed);
 	}
-	for (auto it = index_need_to_fix.begin(); it != index_need_to_fix.end(); it++){
-		write_variable_to_dst(compressed_pos, V[*it]); //T, index_need_to_fix对应的V的值
-	}
-	printf("index_need_to_fix lossless data pos = %ld\n", compressed_pos - compressed);
+
 
 	write_variable_to_dst(compressed_pos, base); //int
 	write_variable_to_dst(compressed_pos, threshold); //double
@@ -1645,16 +1647,16 @@ sz_compress_cp_preserve_2d_online_abs_record_vertex(const T * U, const T * V, si
 	printf("offsets eb_q, data_q, unpred: %ld %ld %ld\n", eb_quant_index_pos - eb_quant_index, data_quant_index_pos - data_quant_index, unpred_data.size());
 	unsigned char * compressed = (unsigned char *) malloc(2*num_elements*sizeof(T));
 	unsigned char * compressed_pos = compressed;
+	//写index_need_to_fix的大小
+	write_variable_to_dst(compressed_pos, index_need_to_fix.size());
+	printf("index_need_to_fix pos = %ld\n", compressed_pos - compressed);
+	printf("index_need_to_fix size = %ld\n", index_need_to_fix.size());
 	if(index_need_to_fix.size() != 0){
 		//修改：先写bitmap
 		// write_variable_to_dst(compressed_pos,num_elements); // 处理后的bitmap的长度 size_t
 		//write_array_to_dst(compressed_pos, compressedArray, num_bytes);
 		convertIntArray2ByteArray_fast_1b_to_result_sz(bitmap, num_elements, compressed_pos);
 		printf("bitmap pos = %ld\n", compressed_pos - compressed);
-
-		//再写index_need_to_fix的大小
-		write_variable_to_dst(compressed_pos, index_need_to_fix.size()); //size_t, index_need_to_fix的大小
-		printf("index_need_to_fix pos = %ld\n", compressed_pos - compressed);
 		//再写index_need_to_fix对应U和V的数据
 		for (auto it = index_need_to_fix.begin(); it != index_need_to_fix.end(); it++){
 			write_variable_to_dst(compressed_pos, U[*it]); //T, index_need_to_fix对应的U的值
@@ -1984,6 +1986,7 @@ omp_sz_compress_cp_preserve_2d_record_vertex(const T * U, const T * V, size_t r1
 		}
 		//准备bitmap#####################
 	}
+	auto prepare_comp_start = std::chrono::high_resolution_clock::now();
 	//确定线程数是不是平方数
 	int num_threads = n_threads;
 	if (sqrt(num_threads) != (int)sqrt(num_threads)){
@@ -2073,23 +2076,16 @@ omp_sz_compress_cp_preserve_2d_record_vertex(const T * U, const T * V, size_t r1
         dividing_rows.push_back(i * block_height);
         dividing_cols.push_back(i * block_width);
     }
-	// 创建一个一维标记数组，标记哪些数据点位于划分线上
-	std::vector<bool> is_dividing_line(n * m, false);
-	// 标记划分线上的数据点
-	for (int i = 0; i < n; ++i) {
-        for (int col : dividing_cols) {
-            if (col < m) {
-                is_dividing_line[i * m + col] = true;
-            }
-        }
-    }
-    for (int j = 0; j < m; ++j) {
-        for (int row : dividing_rows) {
-            if (row < n) {
-                is_dividing_line[row * m + j] = true;
-            }
-        }
-    }
+
+	std::vector<bool> is_dividing_row(n, false);
+	std::vector<bool> is_dividing_col(m, false);
+	for (int i = 0; i < dividing_rows.size(); ++i) {
+		is_dividing_row[dividing_rows[i]] = true;
+	}
+	for (int i = 0; i < dividing_cols.size(); ++i) {
+		is_dividing_col[dividing_cols[i]] = true;
+	}
+
 	//总数据块数
 	int total_blocks = num_threads;
 
@@ -2148,7 +2144,10 @@ omp_sz_compress_cp_preserve_2d_record_vertex(const T * U, const T * V, size_t r1
 	size_t processed_dot_count = 0;
 	std::vector<int> proccessed_points(num_elements, 0);
 
-
+	auto prepare_comp_end = std::chrono::high_resolution_clock::now();
+	std::chrono::duration<double> prepare_comp_time = prepare_comp_end - prepare_comp_start;
+	printf("prepare_comp_time = %f\n", prepare_comp_time.count());
+	auto comp_start = std::chrono::high_resolution_clock::now();
 	// 并行处理区域，不包括划分线上的数据点
 	omp_set_num_threads(num_threads);
 	#pragma omp parallel for //reduction(+:processed_block_count)
@@ -2179,7 +2178,10 @@ omp_sz_compress_cp_preserve_2d_record_vertex(const T * U, const T * V, size_t r1
 		// 处理块内的数据点
 		for(int i=start_row; i<end_row; ++i){
 			// 跳过划分线上的行
-			if (std::find(dividing_rows.begin(), dividing_rows.end(), i) != dividing_rows.end()) {
+			// if (std::find(dividing_rows.begin(), dividing_rows.end(), i) != dividing_rows.end()) {
+			// 	continue;
+			// }
+			if (is_dividing_row[i]) {
 				continue;
 			}
 			// T * cur_U_pos = U_pos + i * r2 + start_col;
@@ -2187,7 +2189,10 @@ omp_sz_compress_cp_preserve_2d_record_vertex(const T * U, const T * V, size_t r1
 
 			for (int j = start_col; j<end_col; ++j){
 				// 跳过划分线上的列
-				if (is_dividing_line[i * m + j]) {
+				// if (is_dividing_line[i * m + j]) {
+				// 	continue;
+				// }
+				if (is_dividing_col[j]) {
 					continue;
 				}
 				
@@ -2711,7 +2716,6 @@ omp_sz_compress_cp_preserve_2d_record_vertex(const T * U, const T * V, size_t r1
 	//处理点,串行
 	for(int i : dividing_rows){
 		for(int j : dividing_cols){
-			if (is_dividing_line[i * m + j]){
 				processed_dot_count ++;
 				size_t position_idx = (i * r2 + j);
 				proccessed_points[position_idx] ++;
@@ -2723,12 +2727,12 @@ omp_sz_compress_cp_preserve_2d_record_vertex(const T * U, const T * V, size_t r1
 				data_quant_index[2*position_idx + 1] = intv_radius;
 				unpred_dot.push_back(decompressed_U[position_idx]);
 				unpred_dot.push_back(decompressed_V[position_idx]);
-			}
 		}
 	}
 
-
-
+	auto comp_end = std::chrono::high_resolution_clock::now();
+	std::chrono::duration<double> comp_time = comp_end - comp_start;
+	printf("derivation time = %f\n", comp_time.count());
 	// printf("processed_block_count = %ld, processed_edge_row_count = %ld, processed_edge_col_count = %ld, processed_dot_count%ld\n", processed_block_count, processed_edge_row_count, processed_edge_col_count,processed_dot_count);
 	// printf("number of processed points = %ld\n", processed_block_count + processed_edge_row_count + processed_edge_col_count + processed_dot_count);
 	// printf("total number of points = %ld\n", num_elements);
@@ -2865,6 +2869,8 @@ omp_sz_compress_cp_preserve_2d_record_vertex(const T * U, const T * V, size_t r1
 	decompressed_U_ptr = decompressed_U;
 	decompressed_V_ptr = decompressed_V;
 
+	auto write_variables_start = std::chrono::high_resolution_clock::now();
+
 	unsigned char * compressed = (unsigned char *) malloc(2*num_elements*sizeof(T));
 	unsigned char * compressed_pos = compressed;
 	//write size of index_need_to_fix
@@ -2921,7 +2927,9 @@ omp_sz_compress_cp_preserve_2d_record_vertex(const T * U, const T * V, size_t r1
 	//写dot的unpred_data
 	write_array_to_dst(compressed_pos, (T *)&unpred_dot[0], unpred_dot.size());
 
-
+	auto write_variables_end = std::chrono::high_resolution_clock::now();
+	std::chrono::duration<double> write_variable_time = write_variables_end - write_variables_start;
+	printf("write variables time: %f\n",write_variable_time.count());
 	//printf("pos after write all upredict= %ld\n", compressed_pos - compressed);
 	write_variable_to_dst(compressed_pos, base);
 	//printf("base = %d,pos = %ld\n", base, compressed_pos - compressed);
@@ -2966,7 +2974,7 @@ omp_sz_compress_cp_preserve_2d_record_vertex(const T * U, const T * V, size_t r1
 	for (int i = 0; i < num_threads; i++){
 		compressed_buffers[i].resize(2*num_elements / num_threads);
 	}
-	#pragma omp parallel for
+	#pragma omp parallel for num_threads(num_threads)
 	for (int i = 0; i < num_threads; i++){
 		size_t start_pos = i * num_elements / num_threads;
 		size_t end_pos = (i == num_threads - 1) ? num_elements : (i + 1) * num_elements / num_threads;
@@ -3017,13 +3025,17 @@ omp_sz_compress_cp_preserve_2d_record_vertex(const T * U, const T * V, size_t r1
 
 	// parallel huffman data quant ****************************************************
 	auto parallel_data_quant_huffman_start = std::chrono::high_resolution_clock::now();
+	printf("qqqq_num_threads = %d\n", num_threads);	
 	std::vector<std::vector<unsigned char>> compressed_buffers_data_quant(num_threads);
 	std::vector<size_t> compressed_sizes_data_quant(num_threads);
 	//resize
+	auto resize_start = std::chrono::high_resolution_clock::now();
 	for (int i = 0; i < num_threads; i++){
-		compressed_buffers_data_quant[i].resize(2*num_elements / num_threads);
+		compressed_buffers_data_quant[i].resize(2*num_elements);
 	}
-	#pragma omp parallel for
+	auto resize_end = std::chrono::high_resolution_clock::now();
+	printf("resize time = %f\n", std::chrono::duration<double>(resize_end - resize_start).count());
+	#pragma omp parallel for num_threads(num_threads)
 	for (int i = 0; i < num_threads; i++){
 		size_t start_pos = i * num_elements / num_threads;
 		size_t end_pos = (i == num_threads - 1) ? num_elements : (i + 1) * num_elements / num_threads;

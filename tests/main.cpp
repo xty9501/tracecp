@@ -461,25 +461,16 @@ void write_current_state_data(std::string file_path, const T * U, const T * V, T
 template<typename T>
 void
 fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_config,int totoal_thread, int obj,std::string eb_type,double threshold,double threshold_outside, double threshold_max_iter, std::string file_dir = ""){
-  //bool write_flag = true;
+  
+  //控制写入文件的flag
+  bool write_flag = true;
+  
   int DW = r2;
   int DH = r1;
   bool stop = false;
   std::set<size_t> all_vertex_for_all_diff_traj;
 
-  //first add all vertex that in the boundary
-  // for (size_t i = 0; i < r1; ++i){
-  //   all_vertex_for_all_diff_traj.insert(i * DW);
-  //   all_vertex_for_all_diff_traj.insert(i * DW + DW - 1);
-    // all_vertex_for_all_diff_traj.insert(i * DW + 1);
-    // all_vertex_for_all_diff_traj.insert(i * DW + DW - 2);
-  // }
-  // for (size_t i = 0; i < r2; ++i){
-  //   all_vertex_for_all_diff_traj.insert(i);
-  //   all_vertex_for_all_diff_traj.insert((DH - 1) * DW + i);
-    // all_vertex_for_all_diff_traj.insert(DW + i);
-    // all_vertex_for_all_diff_traj.insert((DH - 2) * DW + i);
-  // }
+
 
   int NUM_ITER = 0;
   // double threshold = 0.5;
@@ -540,7 +531,13 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
   size_t lossless_output = sz_lossless_decompress(ZSTD_COMPRESSOR, result_after_lossless, lossless_outsize, &result, result_size);
   float * dec_U = NULL;
   float * dec_V = NULL;
-  sz_decompress_cp_preserve_2d_online<float>(result, r1,r2, dec_U, dec_V); // use cpsz
+  if (eb_type == "rel"){
+    sz_decompress_cp_preserve_2d_online<float>(result, r1,r2, dec_U, dec_V); // use cpsz
+  }
+  else if (eb_type == "abs"){
+    sz_decompress_cp_preserve_2d_online_record_vertex<float>(result, r1,r2, dec_U, dec_V); // use cpsz
+  }
+  //sz_decompress_cp_preserve_2d_online<float>(result, r1,r2, dec_U, dec_V); // use cpsz
   // calculate compression ratio
   printf("BEGIN Compressed size(original) = %zu, ratio = %f\n", lossless_outsize, (2*r1*r2*sizeof(float)) * 1.0/lossless_outsize);
   double cr_ori = (2*r1*r2*sizeof(float)) * 1.0/lossless_outsize; 
@@ -556,6 +553,20 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
   verify(U, dec_U, r1*r2, nrmse_u);
   verify(V, dec_V, r1*r2, nrmse_v);
   psnr_cpsz_overall = 20 * log10(sqrt(2) / sqrt(nrmse_u*nrmse_u + nrmse_v*nrmse_v));
+  printf("cpsz overall PSNR: %f\n", psnr_cpsz_overall);
+
+  if (file_dir != ""){
+    //get which vertex is lossless for cpsz
+    std::vector<size_t> lossless_vertex_cpsz;
+    for (size_t i = 0; i < r1*r2; ++i){
+      if (U[i] == dec_U[i] && V[i] == dec_V[i]){
+        lossless_vertex_cpsz.push_back(i);
+      }
+    }
+    //write to binary
+    writefile((file_dir + "lossless_vertex_cpsz.bin").c_str(),lossless_vertex_cpsz.data(),lossless_vertex_cpsz.size());
+  }
+
 
 
   //get cp for decompressed data
@@ -619,7 +630,7 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
     }
   }
 
-  exit(0);
+  // exit(0);
 
   //replace all vertex in the boundary to dec_U, dec_V
   // for (size_t i = 0; i < r1; ++i){
@@ -747,11 +758,7 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
   printf("size of vertex_ori: %ld\n", vertex_ori.size());
   //print how many element in trajID_direction_map
   printf("size of trajID_direction_vector: %ld\n", trajID_direction_vector.size());
-  if (std::find(trajID_direction_vector.begin(), trajID_direction_vector.end(), 0.0) != trajID_direction_vector.end()) {
-        std::cout << "Vector contains 0" << std::endl;
-    } else {
-        std::cout << "Vector does not contain 0" << std::endl;
-    }
+
 
   
 
@@ -865,8 +872,33 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
   //     grad_dec(1, x, y) = V[v];
   //   }
   // }
-    
-
+  
+  //计算cpsz的frechet distance
+  vector<double> frechetDistances_cpsz(trajs_ori.size(), -1);
+  double max_distance_cpsz = -1.0;
+  int max_index_cpsz = -1;
+  #pragma omp parallel for
+  for (int i = 0; i < trajs_ori.size(); i++) {
+    auto t1 = trajs_ori[i];
+    auto t2 = trajs_dec[i];
+    frechetDistances_cpsz[i] = frechetDistance(t1, t2);
+    #pragma omp critical
+    {
+      if (frechetDistances_cpsz[i] > max_distance_cpsz){
+        max_distance_cpsz = frechetDistances_cpsz[i];
+        max_index_cpsz = i;
+      }
+    }
+  }
+  double minVal_cpsz, maxVal_cpsz, medianVal_cpsz, meanVal_cpsz, stdevVal_cpsz;
+  calculateStatistics(frechetDistances_cpsz, minVal_cpsz, maxVal_cpsz, medianVal_cpsz, meanVal_cpsz, stdevVal_cpsz);
+  printf("Statistics data cpsz frechet distance===============\n");
+  printf("min: %f\n", minVal_cpsz);
+  printf("max: %f\n", maxVal_cpsz);
+  printf("median: %f\n", medianVal_cpsz);
+  printf("mean: %f\n", meanVal_cpsz);
+  printf("stdev: %f\n", stdevVal_cpsz);
+  printf("Statistics data cpsz frechet distance===============\n");
 
   // 计算哪里有问题（init queue）
   std::set<size_t> trajID_need_fix = {};
@@ -964,8 +996,8 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
   }
   else{
     printf("trajID_need_fix size: %ld\n", trajID_need_fix.size());
-    bool write_cpsz_wrong_trajs_flag = true;
-    if (write_cpsz_wrong_trajs_flag && file_dir != ""){
+    bool write_flag = true;
+    if (write_flag && file_dir != ""){
       std::vector<std::vector<std::array<double, 2>>> wrong_trajs_ori;
       std::vector<std::vector<std::array<double, 2>>> wrong_trajs_cpsz;
       for (const auto& trajID:trajID_need_fix){
@@ -982,11 +1014,21 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
     origin_traj_detail = {num_outside, num_max_iter, num_find_cp};
   }
 
+  auto fix_traj_start = std::chrono::high_resolution_clock::now();
   //exit(0);
   //*************开始修复轨迹*************   
   int current_round = 0;
   do
   {
+    if (write_flag && file_dir != "" && (current_round % 2) == 0){
+      std::vector<std::vector<std::array<double, 2>>> wrong_trajs_cpsz_intermidiate;
+      for (const auto& trajID:trajID_need_fix){
+        wrong_trajs_cpsz_intermidiate.push_back(trajs_dec[trajID]);
+      }
+      // printf("writing original and decompressed trajs to file...\n");
+      printf("writing intermidiate wrong trajs to file...\n");
+      save_trajs_to_binary(wrong_trajs_cpsz_intermidiate, file_dir + "state_" + std::to_string(current_round) + "wrong_trajs_cpsz.bin");
+    }
     if (current_round >=30){
       printf("current_round >= 30, exit\n");
       exit(0);
@@ -1000,41 +1042,6 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
     printf("current iteration size: %ld\n", trajID_need_fix_vector.size());
     
     std::vector<std::set<size_t>> local_all_vertex_for_all_diff_traj(totoal_thread);
-
-
-/*
-    #pragma omp parallel for
-    //先把所有max_length的traj直接lossless
-    for(size_t i=0;i<trajID_need_fix_vector.size(); ++i){
-      auto current_trajID = trajID_need_fix_vector[i];
-      auto t1 = trajs_ori[current_trajID];
-      auto t2 = trajs_dec[current_trajID];
-      if (t1.size() == t_config.max_length){
-        double direction = trajID_direction_vector[current_trajID];
-        std::vector<int> temp_index_ori;
-        std::set<size_t> temp_vertexID;
-        // auto temp_trajs_ori = trajectory(t1[0].data(), t1[1], direction * t_config.h, t_config.max_length, DH, DW, critical_points_ori, grad_ori,temp_index_ori, temp_vertexID);
-        auto temp_trajs_ori = trajectory_parallel(t1[0].data(), t1[1], direction * t_config.h, t_config.max_length, DH, DW, critical_points_ori, grad_ori,local_all_vertex_for_all_diff_traj,omp_get_thread_num());
-        for (auto o:temp_vertexID){
-          dec_U[o] = U[o];
-          dec_V[o] = V[o];
-          //同时更新grad_dec
-          //o 转化为坐标
-          int x = o % DW;
-          int y = o / DW;
-          grad_dec(0, x, y) = U[o];
-          grad_dec(1, x, y) = V[o];
-          local_all_vertex_for_all_diff_traj[omp_get_thread_num()].insert(o);
-        }
-      }
-    }
-    //汇总all_vertex_for_all_diff_traj
-    for (const auto& local_set:local_all_vertex_for_all_diff_traj){
-      all_vertex_for_all_diff_traj.insert(local_set.begin(), local_set.end());
-    }
-
-    printf("all max_iter traj lossless!!, all_vertex_for_all_diff_traj size: %ld\n", all_vertex_for_all_diff_traj.size());
-*/  
 
     omp_lock_t lock;
     omp_init_lock(&lock);  // 初始化锁
@@ -1462,21 +1469,17 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
       for(auto o:trajID_need_fix_next){
         trajID_need_fix.insert(o);
       }
-      // if (trajID_need_fix.size() < 5){
-      //   for (auto o:trajID_need_fix){
-      //     printf("trajID %d\n", o);
-      //     printf("ori first: (%f,%f), dec first: (%f,%f)\n", trajs_ori[o][0][0], trajs_ori[o][0][1], trajs_dec[o][0][0], trajs_dec[o][0][1]);
-      //     printf("ori last-1: (%f,%f), dec last-1: (%f,%f)\n", trajs_ori[o][trajs_ori[o].size()-2][0], trajs_ori[o][trajs_ori[o].size()-2][1], trajs_dec[o][trajs_dec[o].size()-2][0], trajs_dec[o][trajs_dec[o].size()-2][1]);
-      //     printf("ori last: (%f,%f), dec last: (%f,%f)\n", trajs_ori[o].back()[0], trajs_ori[o].back()[1], trajs_dec[o].back()[0], trajs_dec[o].back()[1]);
-      //     printf("ori size: %zu, dec size: %zu\n", trajs_ori[o].size(), trajs_dec[o].size());
-      //   }
-      // }
+
+
       trajID_need_fix_next.clear();
     }
     
 
   } while (stop == false);
   
+  auto fix_traj_end = std::chrono::high_resolution_clock::now(); 
+  std::chrono::duration<double> fix_traj_elapsed = fix_traj_end - fix_traj_start;
+  printf("fix_traj time: %f\n", fix_traj_elapsed.count());
   auto total_time_end = std::chrono::high_resolution_clock::now();
   std::chrono::duration<double> elapsed_fix = total_time_end - total_time_start;
   printf("total round: %d\n", current_round);
@@ -1518,7 +1521,7 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
   final_result = sz_compress_cp_preserve_2d_record_vertex(U, V, r1, r2, final_result_size, false, max_pwr_eb, all_vertex_for_all_diff_traj);
 
   }
-  else{
+  else if(eb_type == "abs"){
     final_result = sz_compress_cp_preserve_2d_online_abs_record_vertex(U, V, r1, r2, final_result_size, true, max_pwr_eb, all_vertex_for_all_diff_traj);
   }
   printf("checkpt1\n");
@@ -1554,7 +1557,7 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
   printf("comp time cpsz: %f\n", cpsz_comp_duration.count());
   //printf("decomp time cpsz: %f\n", cpsz_decomp_duration.count());
   printf("decomp time tpsz: %f\n", tpsz_decomp_duration.count());
-  printf("fix time tpsz: %f\n",elapsed_fix.count());
+  printf("fix time tpsz: %f\n",traj_dec_begin_elapsed + traj_ori_begin_elapsed + init_queue_elapsed + fix_traj_elapsed);
   printf("%d\n",current_round);
   for (int i = 0; i < trajID_need_fix_next_vec.size(); ++i){
     printf("trajID_need_fix_next: %d, wrong outside: %d, wrong max_iter: %d, wrong find_cp: %d\n", trajID_need_fix_next_vec[i], trajID_need_fix_next_detail_vec[i][0], trajID_need_fix_next_detail_vec[i][1], trajID_need_fix_next_detail_vec[i][2]);
@@ -1752,6 +1755,11 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
   else{
     printf("all passed!\n");
   }
+  //把all_vertex_for_all_diff_traj这个set里的东西写出来
+  std::vector<size_t> temp_vec(all_vertex_for_all_diff_traj.begin(), all_vertex_for_all_diff_traj.end());
+  writefile((file_dir + "all_vertex_for_all_diff_traj.bin").c_str(), temp_vec.data(), temp_vec.size());
+  printf("write all_vertex_for_all_diff_traj to file sussfully\n");
+  
   // exit(0);
 
 
@@ -2008,7 +2016,7 @@ int main(int argc, char **argv){
   double threshold = atof(argv[11]);
   double threshold_outside = atof(argv[12]);
   double threshold_max_iter = atof(argv[13]);
-  double next_index_coeff = 0.05;
+  double next_index_coeff = 0.01;
   std::string file_out_dir;
   if (argc == 15){
     file_out_dir = argv[14];

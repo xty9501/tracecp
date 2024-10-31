@@ -390,11 +390,11 @@ check_simplex_seq(const double v[4][3], const double X[3][3], const int indices[
   // robust critical point test
 //   bool succ = ftk::robust_critical_point_in_simplex3(vf, indices);
 //   if (!succ) return;
-  // for (int i = 0; i < 4; i++) {
-  //   if (v[i][0] == 0 && v[i][1] == 0 && v[i][2] == 0) {
-  //     return;
-  //   }
-  // }
+  for (int i = 0; i < 4; i++) {
+    if (v[i][0] == 0 && v[i][1] == 0 && v[i][2] == 0) {
+      return;
+    }
+  }
   double threshold = 0.0;
   bool succ2 = ftk::inverse_lerp_s3v3(v, mu, &cond, threshold);
 //   if(!succ2) ftk::clamp_barycentric<4>(mu);
@@ -745,187 +745,114 @@ std::array<Type, 3> newRK4_3d_parallel(const Type* x, const Type* v, const ftk::
 
 
 std::vector<std::array<double, 3>> trajectory_3d_parallel(double *X_original, const std::array<double, 3>& initial_x, const double time_step, const int max_length, const int DW, const int DH, const int DD, const std::unordered_map<size_t, critical_point_t_3d>& critical_points, ftk::ndarray<float>& data,std::vector<std::set<size_t>>& thread_lossless_index,int thread_id) {
-    std::vector<std::array<double, 3>> result;
-    int flag = 0; // 1 means found, -1 means out of bound, 0 means reach max length
-    int length = 0;
-    result.push_back({X_original[0], X_original[1], X_original[2]}); // add original true position
-    length++;
-    int original_offset = get_cell_offset_3d(X_original, DW, DH, DD);
+  std::vector<std::array<double, 3>> result;
+  int flag = 0; // 1 means found, -1 means out of bound, 0 means reach max length
+  int length = 0;
+  result.push_back({X_original[0], X_original[1], X_original[2]}); // add original true position
+  length++;
+  //size_t original_offset = get_cell_offset_3d(X_original, DW, DH, DD);
 
-    std::array<double, 3> current_x = initial_x;
+  std::array<double, 3> current_x = initial_x;
 
-    // add original and initial_x position's offset
-    auto ori_offset = get_four_offsets(X_original, DW, DH, DD);
-    thread_lossless_index[thread_id].insert(ori_offset.begin(), ori_offset.end());
+  // add original and initial_x position's offset
+  auto ori_offset = get_four_offsets(X_original, DW, DH, DD);
+  //thread_lossless_index[thread_id].insert(ori_offset.begin(), ori_offset.end());
+
+  if (!inside_domain(current_x, DH, DW, DD)) {
+      return result;
+  }
+  
+  result.push_back(current_x); // add initial position(seed)
+  length++;
+  auto ini_offset = get_four_offsets(current_x, DW, DH, DD);
+  thread_lossless_index[thread_id].insert(ini_offset.begin(), ini_offset.end());
+  auto original_offset = get_cell_offset_3d(current_x.data(), DW, DH, DD);
+  while (result.size() < max_length){
+    double current_v[3] = {0};
+    std::array<double, 3> RK4result = newRK4_3d_parallel(current_x.data(), current_v, data, time_step, DW, DH, DD, thread_lossless_index, thread_id);
+    size_t current_offset = get_cell_offset_3d(RK4result.data(), DW, DH, DD);
 
     if (!inside_domain(current_x, DH, DW, DD)) {
-        flag = -1;
-        // result.push_back({-1, -1, -1});
-        // length++;
-        return result;
-    } else {
-        result.push_back(current_x); // add initial position(seed)
-        length++;
-        auto ini_offset = get_four_offsets(current_x, DW, DH, DD);
-        thread_lossless_index[thread_id].insert(ini_offset.begin(), ini_offset.end());
+      result.push_back({current_x[0], current_x[1], current_x[2]});
+      return result;
     }
 
-    double rk4_time_count = 0;
-    while (flag == 0) {
-        if (!inside_domain(current_x, DH, DW, DD)) {
-            flag = -1;
-            // result.push_back({-1, -1, -1});
-            result.push_back({current_x[0], current_x[1], current_x[2]});
-            length++;
-            break;
+    if (current_offset != original_offset){
+      auto it = critical_points.find(current_offset);
+      if (it != critical_points.end()){
+        auto cp = it->second;
+        double error = 1e-4;
+        if ((cp.type < 3 || cp.type > 6) && (cp.type != 0) && fabs(RK4result[0] - cp.x[0]) < error && fabs(RK4result[1] - cp.x[1]) < error && fabs(RK4result[2] - cp.x[2]) < error){
+          result.push_back({RK4result[0], RK4result[1], RK4result[2]});
+          std::array<double, 3> true_cp = {cp.x[0], cp.x[1], cp.x[2]};
+          result.push_back(true_cp);
+          auto final_offset_rk = get_four_offsets(RK4result.data(), DW, DH, DD);
+          // auto final_offset_cp = get_four_offsets(cp.x, DW, DH, DD);
+          //printf("reaching cp: %f, %f, %f\n", cp.x[0], cp.x[1], cp.x[2]);
+          thread_lossless_index[thread_id].insert(final_offset_rk.begin(), final_offset_rk.end());
+          // thread_lossless_index[thread_id].insert(final_offset_cp.begin(), final_offset_cp.end());
+          return result;
         }
-        if (length == max_length) {
-            flag = 1;
-            break;
-        }
-
-        double current_v[3] = {0};
-        //interp3d_new(current_x.data(), current_v, data);
-
-        std::array<double, 3> RK4result = newRK4_3d_parallel(current_x.data(), current_v, data, time_step, DW, DH, DD, thread_lossless_index, thread_id);
-
-        // if (RK4result[0] == -1 && RK4result[1] == -1 && RK4result[2] == -1) {
-        //     flag = -1;
-        //     result.push_back({-1, -1, -1});
-        //     length++;
-        //     break;
-        // }
-        if (RK4result[0] == current_x[0] && RK4result[1] == current_x[1] && RK4result[2] == current_x[2]) {
-            flag = -1;
-            // result.push_back({-1, -1, -1});
-            result.push_back({current_x[0], current_x[1], current_x[2]});
-            length++;
-            break;
-        }
-
-        size_t current_offset = get_cell_offset_3d(RK4result.data(), DW, DH, DD);
-
-        if (current_offset != original_offset) {
-            auto it = critical_points.find(current_offset);
-            if (it != critical_points.end()) {
-                auto cp = it->second;
-                double error = 1e-4;
-                if ((cp.type < 3 || cp.type > 6) && (cp.type != 0) && fabs(RK4result[0] - cp.x[0]) < error && fabs(RK4result[1] - cp.x[1]) < error && fabs(RK4result[2] - cp.x[2]) < error) {
-                    flag = 1; // found cp
-                    int cp_offset = get_cell_offset_3d(cp.x, DW, DH, DD);
-                    result.push_back({RK4result[0], RK4result[1], RK4result[2]});
-                    length++;
-                    std::array<double, 3> true_cp = {cp.x[0], cp.x[1], cp.x[2]};
-                    result.push_back(true_cp);
-                    length++;
-                    auto final_offset_rk = get_four_offsets(RK4result.data(), DW, DH, DD);
-                    // auto final_offset_cp = get_four_offsets(cp.x, DW, DH, DD);
-                    //printf("reaching cp: %f, %f, %f\n", cp.x[0], cp.x[1], cp.x[2]);
-                    thread_lossless_index[thread_id].insert(final_offset_rk.begin(), final_offset_rk.end());
-                    // thread_lossless_index[thread_id].insert(final_offset_cp.begin(), final_offset_cp.end());
-                    return result;
-                }
-            }
-        }
-        current_x = RK4result;
-        result.push_back(current_x);
-        length++;
+      }
     }
-    return result;
+    current_x = RK4result;
+    result.push_back(current_x);
+  }
+  return result;
 }
 
 std::vector<std::array<double, 3>> trajectory_3d(double *X_original, const std::array<double, 3>& initial_x, const double time_step, const int max_length, const int DW, const int DH, const int DD, const std::unordered_map<size_t, critical_point_t_3d>& critical_points, ftk::ndarray<float>& data, std::set<size_t>& lossless_index) {
     std::vector<std::array<double, 3>> result;
+    result.reserve(max_length);
     int flag = 0; // 1 means found, -1 means out of bound, 0 means reach max length
     int length = 0;
     result.push_back({X_original[0], X_original[1], X_original[2]}); // add original true position
     length++;
-    int original_offset = get_cell_offset_3d(X_original, DW, DH, DD);
+    //int original_offset = get_cell_offset_3d(X_original, DW, DH, DD);
 
     std::array<double, 3> current_x = initial_x;
 
     // add original and initial_x position's offset
     auto ori_offset = get_four_offsets(X_original, DW, DH, DD);
-    lossless_index.insert(ori_offset.begin(), ori_offset.end());
+    // lossless_index.insert(ori_offset.begin(), ori_offset.end());
 
     if (!inside_domain(current_x, DH, DW, DD)) { //seed out of bound
-        flag = -1;
-        // result.push_back({-1, -1, -1});
-        // result.push_back({current_x[0], current_x[1], current_x[2]});
-        // length++;
-        // length_index.push_back(length);
         return result;
-    } else {
-        result.push_back(current_x); // add initial position(seed)
-        length++;
-        auto ini_offset = get_four_offsets(current_x, DW, DH, DD);
-        lossless_index.insert(ini_offset.begin(), ini_offset.end());
     }
+    result.push_back(current_x); // add initial position(seed)
+    length++;
+    auto ini_offset = get_four_offsets(current_x, DW, DH, DD);
+    lossless_index.insert(ini_offset.begin(), ini_offset.end());
+    auto original_offset = get_cell_offset_3d(current_x.data(), DW, DH, DD);
+    while(result.size() < max_length){
+      double current_v[3] = {0};
+      std::array<double, 3> RK4result = newRK4_3d(current_x.data(), current_v, data, time_step, DW, DH, DD, lossless_index);
+      size_t current_offset = get_cell_offset_3d(RK4result.data(), DW, DH, DD);
 
-    while (flag == 0) {
-        if (!inside_domain(current_x, DH, DW, DD)) {
-            flag = -1;
-            // result.push_back({-1, -1, -1});
-            result.push_back({current_x[0], current_x[1], current_x[2]});
-            length++;
-            break;
-        }
-        if (length == max_length) {
-            flag = 1;
-            break;
-        }
-
-        double current_v[3] = {0};
-        //interp3d_new(current_x.data(), current_v, data);
-
-        std::array<double, 3> RK4result = newRK4_3d(current_x.data(), current_v, data, time_step, DW, DH, DD, lossless_index);
-        // if (RK4result[0] == -1 && RK4result[1] == -1 && RK4result[2] == -1) {
-        //     flag = -1;
-        //     result.push_back({-1, -1, -1});
-        //     length++;
-        //     break;
-        // }
-        if (RK4result[0] == current_x[0] && RK4result[1] == current_x[1] && RK4result[2] == current_x[2]) {
-            flag = -1;
-            // result.push_back({-1, -1, -1});
-            result.push_back({current_x[0], current_x[1], current_x[2]});
-            //这里是不是需要添加最后出界有关的cell的offsets
-            length++;
-            break;
-        }
-
-        size_t current_offset = get_cell_offset_3d(RK4result.data(), DW, DH, DD);
-
-        if (current_offset != original_offset) {
-            auto it = critical_points.find(current_offset);
-            if (it != critical_points.end()) {
-                auto cp = it->second;
-                double error = 1e-4;
-                if ((cp.type < 3 || cp.type > 6) && (cp.type != 0) && fabs(RK4result[0] - cp.x[0]) < error && fabs(RK4result[1] - cp.x[1]) < error && fabs(RK4result[2] - cp.x[2]) < error) {
-                    flag = 1; // found cp
-                    int cp_offset = get_cell_offset_3d(cp.x, DW, DH, DD);
-                    result.push_back({RK4result[0], RK4result[1], RK4result[2]});
-                    length++;
-                    std::array<double, 3> true_cp = {cp.x[0], cp.x[1], cp.x[2]};
-                    result.push_back(true_cp);
-                    length++;
-                    auto final_offset_rk = get_four_offsets(RK4result.data(), DW, DH, DD);
-                    // auto final_offset_cp = get_four_offsets(cp.x, DW, DH, DD);
-                    //printf("reaching cp: %f, %f, %f\n", cp.x[0], cp.x[1], cp.x[2]);
-                    lossless_index.insert(final_offset_rk.begin(), final_offset_rk.end());
-                    // lossless_index.insert(final_offset_cp.begin(), final_offset_cp.end());
-                    //length_index.push_back(length);
-                    return result;
-                }
-            }
-        }
-        current_x = RK4result;
+      if (!inside_domain(RK4result, DH, DW, DD)) {
         result.push_back(current_x);
-        length++;
-    }
-    //length_index.push_back(length);
-    return result;
+        return result;
+      }
 
+      if (current_offset != original_offset){
+        //move to a new cell
+        auto it = critical_points.find(current_offset);
+        if (it != critical_points.end()){
+          auto cp = it->second;
+          double error = 1e-4;
+          if ((cp.type < 3 || cp.type > 6) && fabs(RK4result[0] - cp.x[0]) < error && fabs(RK4result[1] - cp.x[1]) < error && fabs(RK4result[2] - cp.x[2]) < error){
+            result.push_back(RK4result);
+            result.push_back({cp.x[0],cp.x[1],cp.x[2]}); //add critical point
+            auto final_offset_rk = get_four_offsets(RK4result.data(), DW, DH, DD);
+            lossless_index.insert(final_offset_rk.begin(), final_offset_rk.end());
+            return result;
+          }
+        }
+      }
+      current_x = RK4result;
+      result.push_back(current_x);
+    }
+    return result;
   }
 
 void final_check(float *U, float *V, float *W, int r1, int r2, int r3, double eb, int obj,traj_config t_config,int total_thread, std::set<size_t> vertex_need_to_lossless, thresholds th,result_struct results,std::string eb_type, std::string file_out_dir=""){
@@ -940,11 +867,10 @@ void final_check(float *U, float *V, float *W, int r1, int r2, int r3, double eb
   
   unsigned char * result_after_zstd = NULL;
   size_t result_after_zstd_size = sz_lossless_compress(ZSTD_COMPRESSOR, 3, final_result, final_result_size, &result_after_zstd);
-  //printf("BEGIN COmpression ratio =  \n");
-  //printf("FINAL Compressed size = %zu, ratio = %f\n", result_after_zstd_size, (3*r1*r2*r3*sizeof(float)) * 1.0/result_after_zstd_size);
-  
+
 
   free(final_result);
+  auto tpsz_decomp_start = std::chrono::high_resolution_clock::now();
   size_t zstd_decompressed_size = sz_lossless_decompress(ZSTD_COMPRESSOR, result_after_zstd, result_after_zstd_size, &final_result, final_result_size);
   float * final_dec_U = NULL;
   float * final_dec_V = NULL;
@@ -955,6 +881,8 @@ void final_check(float *U, float *V, float *W, int r1, int r2, int r3, double eb
   else if (eb_type == "abs"){
     sz_decompress_cp_preserve_3d_online_abs_record_vertex<float>(final_result, r1, r2, r3, final_dec_U, final_dec_V, final_dec_W);
   }
+  auto tpsz_decomp_end = std::chrono::high_resolution_clock::now();
+  std::chrono::duration<double> tpsz_decomp_time = tpsz_decomp_end - tpsz_decomp_start;
   printf("verifying...\n");
   double nrmse_u, nrmse_v, nrmse_w,psnr_overall,psnr_cpsz_overall;
   verify(U, final_dec_U, r1*r2*r3, nrmse_u);
@@ -972,6 +900,8 @@ void final_check(float *U, float *V, float *W, int r1, int r2, int r3, double eb
   printf("comp time = %f\n", results.cpsz_comp_time_);
   printf("decomp time = %f\n", results.cpsz_decomp_time_);
   printf("algorithm time = %f\n", results.elapsed_alg_time_);
+  printf("tpsz total time = %f\n", results.elapsed_alg_time_ + results.cpsz_comp_time_ + results.pre_compute_cp_time_);
+  printf("tpsz decompress time = %f\n", tpsz_decomp_time.count());
   printf("rounds = %d\n", results.rounds_);
   for (int i = 0; i < results.trajID_need_fix_next_detail_vec_.size(); i++){
     printf("trajID_need_fix_next: %d, wrong outside: %d, wrong max_iter: %d, wrong cp: %d\n", results.trajID_need_fix_next_vec_[i], results.trajID_need_fix_next_detail_vec_[i][0], results.trajID_need_fix_next_detail_vec_[i][1], results.trajID_need_fix_next_detail_vec_[i][2]);
@@ -1215,6 +1145,7 @@ int main(int argc, char ** argv){
     auto cp_cal_end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> cp_cal_duration = cp_cal_end - cp_cal_start;
     cout << "critical points #: " << critical_points_0.size() << endl;
+    printf("pre-compute cp detail time: %f\n", cp_cal_duration.count());
     double begin_cr = 0;
 
     size_t result_size = 0;
@@ -1264,7 +1195,7 @@ int main(int argc, char ** argv){
       printf("decompression time: %f\n", cpsz_decomp_duration.count());
       free(result_after_lossless);
     }
-    exit(0);
+    // exit(0);
     printf("verifying...\n");
     double nrmse_u, nrmse_v, nrmse_w,psnr_overall,psnr_cpsz_overall;
     verify(U, dec_U, r1*r2*r3, nrmse_u);
@@ -1272,13 +1203,14 @@ int main(int argc, char ** argv){
     verify(W, dec_W, r1*r2*r3, nrmse_w);
     psnr_cpsz_overall = 20 * log10(sqrt(3) / sqrt(nrmse_u * nrmse_u + nrmse_v * nrmse_v + nrmse_w * nrmse_w));
     
+    
 
-    if (writeout_flag == 1){
-      writefile<float>("/home/mxi235/data/temp_data/dec_U.bin", dec_U, num_elements);
-      writefile<float>("/home/mxi235/data/temp_data/dec_V.bin", dec_V, num_elements);
-      writefile<float>("/home/mxi235/data/temp_data/dec_W.bin", dec_W, num_elements);
-      printf("success write out\n");
-    }
+    // if (writeout_flag == 1){
+    //   writefile<float>("/home/mxi235/data/temp_data/dec_U.bin", dec_U, num_elements);
+    //   writefile<float>("/home/mxi235/data/temp_data/dec_V.bin", dec_V, num_elements);
+    //   writefile<float>("/home/mxi235/data/temp_data/dec_W.bin", dec_W, num_elements);
+    //   printf("success write out\n");
+    // }
 
 
 
@@ -1291,14 +1223,20 @@ int main(int argc, char ** argv){
     if (critical_points_0.size() != critical_points_out.size()){
     printf("critical_points_ori size: %ld, critical_points_out size: %ld\n", critical_points_0.size(), critical_points_out.size());
     printf("critical points size not equal\n");
-    exit(0);
     }
     //check two critical points are the same
     for (auto p:critical_points_0){
-      auto p_out = critical_points_0[p.first];
-      if (p.second.x[0] != p_out.x[0] || p.second.x[1] != p_out.x[1] || p.second.x[2] != p_out.x[2]){
-        printf("critical points not equal\n");
-        exit(0);
+      //find the same point in critical_points_out
+      auto it = critical_points_out.find(p.first);
+      if (it != critical_points_out.end()){
+        auto cp_ori = p.second;
+        auto cp_dec = it->second;
+        if (cp_ori.x[0] != cp_dec.x[0] || cp_ori.x[1] != cp_dec.x[1] || cp_ori.x[2] != cp_dec.x[2]){
+          printf("critical points not equal\n");
+          printf("ori: %.10f, %.10f, %.10f, dec: %.10f, %.10f, %.10f\n", cp_ori.x[0], cp_ori.x[1], cp_ori.x[2], cp_dec.x[0], cp_dec.x[1], cp_dec.x[2]);
+          //print u,v,w
+          
+        }
       }
     }
 
@@ -1556,7 +1494,39 @@ int main(int argc, char ** argv){
     //     }
     // }
 
-    save_trajs_to_binary_3d(trajs_dec, file_out_dir + "cpsz_traj_3d.bin");
+    if (file_out_dir != ""){
+      save_trajs_to_binary_3d(trajs_dec, file_out_dir + "cpsz_traj_3d.bin");
+    }
+
+    //计算frechet distance between trajs_ori and trajs_dec(cpsz)
+
+    vector<double> frechetDistances_cpsz(trajs_ori.size(), -1);
+    double max_distance_cpsz = -1.0;
+    int max_index_cpsz = -1;
+    #pragma omp parallel for
+    for (int i = 0; i < trajs_ori.size(); i++){
+      auto traj1 = trajs_ori[i];
+      auto traj2 = trajs_dec[i];
+      frechetDistances_cpsz[i] = frechetDistance(traj1,traj2);
+      #pragma omp critical
+      {
+        if(frechetDistances_cpsz[i] > max_distance_cpsz){
+          max_distance_cpsz = frechetDistances_cpsz[i];
+          max_index_cpsz = i;
+        }
+      }
+    }
+      //计算统计量
+    double minVal_cpsz, maxVal_cpsz, medianVal_cpsz, meanVal_cpsz, stdevVal_cpsz;
+    calculateStatistics(frechetDistances_cpsz, minVal_cpsz, maxVal_cpsz, medianVal_cpsz, meanVal_cpsz, stdevVal_cpsz);
+    printf("Statistics data cpsz===============\n");
+    printf("min: %f\n", minVal_cpsz);
+    printf("max: %f\n", maxVal_cpsz);
+    printf("median: %f\n", medianVal_cpsz);
+    printf("mean: %f\n", meanVal_cpsz);
+    printf("stdev: %f\n", stdevVal_cpsz);
+    printf("Statistics data cpsz===============\n");
+    
 
 
     // int last_two_pt_same = 0;
@@ -1793,40 +1763,37 @@ int main(int argc, char ** argv){
 
           //auto temp_trajs_check = trajectory_3d(current_divergence_pos.data(), current_divergence_pos, h * direction, t1.size()-end_fix_index+2, r3, r2, r1, critical_points_out, grad_dec,temp_index_check,temp_var);
           auto temp_trajs_check = trajectory_3d(t1[0].data(), t1[1], h * direction, end_fix_index, r3, r2, r1, critical_points_0, grad_dec,temp_var);
-          switch(obj)
-          {
-            case 0:
-            if (LastTwoPointsAreEqual(t1)){
-              //ori outside
-              if (!LastTwoPointsAreEqual(temp_trajs_check)){
-                //dec inside
-                success = false;
-              }
-              else{
-                //dec outside
-                if ((euclideanDistance(t1.back(), temp_trajs_check.back()) < threshold_outside) && (frechetDistance(t1, temp_trajs_check) < threshold)){
-                  success = true;
-                }
-              }
-            }
-            else if (t1.size() == t_config.max_length){
-              if ((temp_trajs_check.size() == t_config.max_length)){
-                if ((euclideanDistance(t1.back(), temp_trajs_check.back()) >=threshold_max_iter) || (frechetDistance(t1, temp_trajs_check) >= threshold)){
-                  success = false;
-                }
-                else{
-                  success = true;
-                }
-              }
+
+          if (LastTwoPointsAreEqual(t1)){
+            //ori outside
+            if (!LastTwoPointsAreEqual(temp_trajs_check)){
+              //dec inside
+              success = false;
             }
             else{
-              //reach cp
-              if ((get_cell_offset_3d(t1.back().data(), r3, r2, r1) == get_cell_offset_3d(temp_trajs_check.back().data(), r3, r2, r1)) && (frechetDistance(t1, temp_trajs_check) < threshold)){
+              //dec outside
+              if ((euclideanDistance(t1.back(), temp_trajs_check.back()) < threshold_outside) && (frechetDistance(t1, temp_trajs_check) < threshold)){
                 success = true;
               }
             }
-            break;
           }
+          else if (t1.size() == t_config.max_length){
+            if ((temp_trajs_check.size() == t_config.max_length)){
+              if ((euclideanDistance(t1.back(), temp_trajs_check.back()) >=threshold_max_iter) || (frechetDistance(t1, temp_trajs_check) >= threshold)){
+                success = false;
+              }
+              else{
+                success = true;
+              }
+            }
+          }
+          else{
+            //reach cp
+            if ((get_cell_offset_3d(t1.back().data(), r3, r2, r1) == get_cell_offset_3d(temp_trajs_check.back().data(), r3, r2, r1)) && (frechetDistance(t1, temp_trajs_check) < threshold)){
+              success = true;
+            }
+          }
+
       
           if (!success){
             //线程争抢可能导致没发fix
@@ -1949,6 +1916,7 @@ int main(int argc, char ** argv){
       //这个for现在也要并行了，因为frechetDistance算的慢
       std::vector<std::set<size_t>> local_trajID_need_fix_next(total_thread);
       auto compare_traj_start = std::chrono::high_resolution_clock::now();
+      #pragma omp parallel for reduction(+:wrong, wrong_num_outside, wrong_num_max_iter, wrong_num_find_cp)
       for (size_t i =0; i< trajs_ori.size(); ++i){
         auto t1 = trajs_ori[i];
         auto t2 = trajs_dec[i];
@@ -1956,55 +1924,51 @@ int main(int argc, char ** argv){
         bool cond2 = t1.size() == t_config.max_length;
         bool cond3 = t2.size() == t_config.max_length;
         // bool f_dis = frechetDistance(t1, t2) >= threshold;
-        switch(obj)
-        {
-          case 0:
-            if (LastTwoPointsAreEqual(t1)){
-              //ori outside
-              if (!LastTwoPointsAreEqual(t2)){
-                //dec inside
-                wrong ++;
-                wrong_num_outside ++;
-                // trajID_need_fix_next.insert(i);
-                local_trajID_need_fix_next[omp_get_thread_num()].insert(i);
-              }
-              else{
-                //dec outside
-                if ((euclideanDistance(t1.back(), t2.back()) > threshold_outside) || (frechetDistance(t1, t2) >= threshold)){
-                  wrong ++;
-                  wrong_num_outside ++;
-                  // trajID_need_fix_next.insert(i);
-                  local_trajID_need_fix_next[omp_get_thread_num()].insert(i);
-                }
-              }
+        if (LastTwoPointsAreEqual(t1)){
+          //ori outside
+          if (!LastTwoPointsAreEqual(t2)){
+            //dec inside
+            wrong ++;
+            wrong_num_outside ++;
+            // trajID_need_fix_next.insert(i);
+            local_trajID_need_fix_next[omp_get_thread_num()].insert(i);
+          }
+          else{
+            //dec outside
+            if ((euclideanDistance(t1.back(), t2.back()) > threshold_outside) || (frechetDistance(t1, t2) >= threshold)){
+              wrong ++;
+              wrong_num_outside ++;
+              // trajID_need_fix_next.insert(i);
+              local_trajID_need_fix_next[omp_get_thread_num()].insert(i);
             }
-            else if (cond2){
-              if (t2.size() != t_config.max_length){
-                wrong ++;
-                wrong_num_max_iter ++;
-                // trajID_need_fix_next.insert(i);
-                local_trajID_need_fix_next[omp_get_thread_num()].insert(i);
-              }
-              else{
-                if ((euclideanDistance(t1.back(), t2.back()) > threshold_max_iter) || (frechetDistance(t1, t2) >= threshold)){
-                  wrong ++;
-                  wrong_num_max_iter ++;
-                  // trajID_need_fix_next.insert(i);
-                  local_trajID_need_fix_next[omp_get_thread_num()].insert(i);
-                }
-              }
-            }
-            else{
-              //reach cp
-              if(!cond1 || (frechetDistance(t1, t2) >= threshold)){
-                wrong ++;
-                wrong_num_find_cp ++;
-                // trajID_need_fix_next.insert(i);
-                local_trajID_need_fix_next[omp_get_thread_num()].insert(i);
-              }
-            }     
-            break;
+          }
         }
+        else if (cond2){
+          if (t2.size() != t_config.max_length){
+            wrong ++;
+            wrong_num_max_iter ++;
+            // trajID_need_fix_next.insert(i);
+            local_trajID_need_fix_next[omp_get_thread_num()].insert(i);
+          }
+          else{
+            if ((euclideanDistance(t1.back(), t2.back()) > threshold_max_iter) || (frechetDistance(t1, t2) >= threshold)){
+              wrong ++;
+              wrong_num_max_iter ++;
+              // trajID_need_fix_next.insert(i);
+              local_trajID_need_fix_next[omp_get_thread_num()].insert(i);
+            }
+          }
+        }
+        else{
+          //reach cp
+          if(!cond1 || (frechetDistance(t1, t2) >= threshold)){
+            wrong ++;
+            wrong_num_find_cp ++;
+            // trajID_need_fix_next.insert(i);
+            local_trajID_need_fix_next[omp_get_thread_num()].insert(i);
+          }
+        }     
+
       }
       //汇总local_trajID_need_fix_next
       for (auto& s:local_trajID_need_fix_next){

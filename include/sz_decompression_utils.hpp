@@ -46,6 +46,13 @@ read_array_from_src(const unsigned char *& src, size_t length){
     src += length*sizeof(T);
     return array;
 }
+template <typename T>
+inline void
+read_array_from_src_to_stdarray(const unsigned char *& src, std::vector<T>& dest, size_t length){
+    dest.resize(length);  // 调整 vector 大小以容纳新数据
+    memcpy(dest.data(), src, length * sizeof(T));  // 将数据直接复制到 vector 的内存中
+    src += length * sizeof(T);
+}
 
 // de-quantization, for regression
 template<typename T>
