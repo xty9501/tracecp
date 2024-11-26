@@ -340,15 +340,16 @@ sz_decompress_cp_preserve_3d_record_vertex(const unsigned char * compressed, siz
 			}
 		}
 		free(bitmap);
+		free(lossless_data_U);
+		free(lossless_data_V);
+		free(lossless_data_W);
 	}
 	free(sign_map_u);
 	free(sign_map_v);
 	free(sign_map_w);
 	free(eb_quant_index);
 	free(data_quant_index);
-	free(lossless_data_U);
-	free(lossless_data_V);
-	free(lossless_data_W);
+
 }
 
 template
@@ -367,6 +368,12 @@ sz_decompress_cp_preserve_3d_online_abs_record_vertex(const unsigned char * comp
 	const unsigned char * compressed_pos = compressed;
 	int base = 0;
 	unsigned char * bitmap;
+	T * lossless_data_U = NULL;
+	T * lossless_data_V = NULL;
+	T * lossless_data_W = NULL;
+	T * lossless_data_U_pos = NULL;
+	T * lossless_data_V_pos = NULL;
+	T * lossless_data_W_pos = NULL;
 	//先搞出来需要无损的大小
 	size_t lossless_count = 0;
 	read_variable_from_src(compressed_pos, lossless_count);
@@ -379,22 +386,16 @@ sz_decompress_cp_preserve_3d_online_abs_record_vertex(const unsigned char * comp
 		memset(bitmap, 0, num_elements * sizeof(unsigned char));
 		size_t num_bytes = (num_elements % 8 == 0) ? num_elements / 8 : num_elements / 8 + 1;
 		convertByteArray2IntArray_fast_1b_sz(num_elements, compressed_pos, num_bytes, bitmap);
-
-	}
-
-
-	// allocate memory for lossless data
-	T * lossless_data_U;
-	T * lossless_data_V;
-	T * lossless_data_W;
-	if (lossless_count != 0){
+		printf("bitmap done\n");
 		lossless_data_U = read_array_from_src<T>(compressed_pos,lossless_count);
 		lossless_data_V = read_array_from_src<T>(compressed_pos,lossless_count);
 		lossless_data_W = read_array_from_src<T>(compressed_pos,lossless_count);
+		lossless_data_U_pos = lossless_data_U;
+		lossless_data_V_pos = lossless_data_V;
+		lossless_data_W_pos = lossless_data_W;
 	}
-	T * lossless_data_U_pos = lossless_data_U;
-	T * lossless_data_V_pos = lossless_data_V;
-	T * lossless_data_W_pos = lossless_data_W;
+
+
 
 	read_variable_from_src(compressed_pos, base);
 	printf("base = %d\n", base);
@@ -474,10 +475,10 @@ sz_decompress_cp_preserve_3d_online_abs_record_vertex(const unsigned char * comp
 				}
 			}
 		}
-	free(lossless_data_U);
-	free(lossless_data_V);
-	free(lossless_data_W);
-	free(bitmap);
+		free(lossless_data_U);
+		free(lossless_data_V);
+		free(lossless_data_W);
+		free(bitmap);
 	}
 	free(eb_quant_index);
 	free(data_quant_index);
@@ -510,6 +511,7 @@ omp_sz_decompress_cp_preserve_3d_online_abs_record_vertex(const unsigned char * 
 	//first read index_need_to_fix_size
 	size_t index_need_to_fix_size = 0;
 	read_variable_from_src(compressed_pos, index_need_to_fix_size);
+	printf("decomp: index_need_to_fix_size = %ld\n", index_need_to_fix_size);
 	//if not 0, then read bitmap and lossless data
 	if (index_need_to_fix_size != 0){
 		// allocate memory for bitmap
@@ -518,9 +520,9 @@ omp_sz_decompress_cp_preserve_3d_online_abs_record_vertex(const unsigned char * 
 		size_t num_bytes = (num_elements % 8 == 0) ? num_elements / 8 : num_elements / 8 + 1;
 		convertByteArray2IntArray_fast_1b_sz(num_elements, compressed_pos, num_bytes, bitmap);
 		//再搞出来需要无损的大小
-		size_t lossless_count = 0;
-		read_variable_from_src(compressed_pos, lossless_count);
-		printf("lossless_count = %ld\n", lossless_count);
+		size_t lossless_count = index_need_to_fix_size;
+		// read_variable_from_src(compressed_pos, lossless_count);
+		// printf("lossless_count = %ld\n", lossless_count);
 		// allocate memory for lossless data
 		lossless_data_U = read_array_from_src<T>(compressed_pos,lossless_count);
 		lossless_data_V = read_array_from_src<T>(compressed_pos,lossless_count);
@@ -912,7 +914,9 @@ omp_sz_decompress_cp_preserve_3d_online_abs_record_vertex(const unsigned char * 
 		//并行处理face_x
 		//omp_set_num_threads(num_faces);
 		// Process faces perpendicular to the X-axis(jk-plane)
-		#pragma omp for collapse(3) nowait
+		
+		// #pragma omp for collapse(3) nowait
+		#pragma omp for collapse(3) 
 		for (int i : dividing_r1){
 			for (int j = -1; j < (int)dividing_r2.size(); j++){
 				for (int k = -1; k < (int)dividing_r3.size(); k++){
@@ -965,7 +969,8 @@ omp_sz_decompress_cp_preserve_3d_online_abs_record_vertex(const unsigned char * 
 
 		//并行处理face_y
 		//omp_set_num_threads(num_faces);
-		#pragma omp for collapse(3) nowait
+		// #pragma omp for collapse(3) nowait
+		#pragma omp for collapse(3)
 		for (int j : dividing_r2){
 			for (int i = -1; i < (int)dividing_r1.size(); i++){
 				for (int k = -1; k < (int)dividing_r3.size(); k++){
@@ -1018,7 +1023,8 @@ omp_sz_decompress_cp_preserve_3d_online_abs_record_vertex(const unsigned char * 
 
 		//并行处理face_z
 		//omp_set_num_threads(num_faces);
-		#pragma omp for collapse(3) nowait
+		// #pragma omp for collapse(3) nowait
+		#pragma omp for collapse(3)
 		for (int k : dividing_r3){
 			for (int i = -1; i < (int)dividing_r1.size(); i++){
 				for (int j = -1; j < (int)dividing_r2.size(); j++){
@@ -1075,7 +1081,8 @@ omp_sz_decompress_cp_preserve_3d_online_abs_record_vertex(const unsigned char * 
 	{
 		//并行处理edge_x
 		//omp_set_num_threads(num_edges);
-		#pragma omp for collapse(3) nowait
+		// #pragma omp for collapse(3) nowait
+		#pragma omp for collapse(3) 
 		for (int i : dividing_r1){
 			for (int j :dividing_r2){
 				for (int k = -1; k < (int)dividing_r3.size(); k++){
@@ -1117,7 +1124,8 @@ omp_sz_decompress_cp_preserve_3d_online_abs_record_vertex(const unsigned char * 
 
 		//并行处理edge_y
 		//omp_set_num_threads(num_edges);
-		#pragma omp for collapse(3) nowait
+		// #pragma omp for collapse(3) nowait
+		#pragma omp for collapse(3) 
 		for (int j : dividing_r2){
 			for (int k : dividing_r3){
 				for (int i = -1; i < (int)dividing_r1.size(); i++){
@@ -1160,7 +1168,8 @@ omp_sz_decompress_cp_preserve_3d_online_abs_record_vertex(const unsigned char * 
 
 		//并行处理edge_z
 		//omp_set_num_threads(num_edges);
-		#pragma omp for collapse(3) nowait
+		// #pragma omp for collapse(3) nowait
+		#pragma omp for collapse(3) 
 		for (int k : dividing_r3){
 			for (int i : dividing_r1){
 				for (int j = -1; j < (int)dividing_r2.size(); j++){
@@ -1220,18 +1229,70 @@ omp_sz_decompress_cp_preserve_3d_online_abs_record_vertex(const unsigned char * 
 
 	printf("decomp: check if all data points are processed: %ld, %ld\n", processed_data_dec_count, num_elements);
 	//最后再根据bitmap来处理lossless的数据
+
 	if (index_need_to_fix_size != 0){
-		for(int i=0; i< r1; i++){
-			for(int j=0; j< r2; j++){
-				for(int k=0; k< r3; k++){
-					if(static_cast<int>(bitmap[i*r2*r3 + j*r3 + k])){
-						U[i*r2*r3 + j*r3 + k] = *(lossless_data_U_pos++);
-						V[i*r2*r3 + j*r3 + k] = *(lossless_data_V_pos++);
-						W[i*r2*r3 + j*r3 + k] = *(lossless_data_W_pos++);
-						
-					}
+		/*
+		//tmd 这段写的好像有问题？有空再优化，先用串行
+		// 计算每个线程的起始位置和数据范围
+		std::vector<size_t> thread_start_pos(num_threads + 1, 0);
+		std::vector<size_t> data_pos_start(num_threads, 0);
+		size_t current_pos = 0;
+		// 预计算所有需要填充的点数，存储每个线程需要处理的起始索引
+		for (int i = 0; i < num_threads; ++i) {
+			size_t count = (num_elements / num_threads) + (i < num_elements % num_threads ? 1 : 0);
+			thread_start_pos[i] = current_pos;
+			current_pos += count;
+		}
+		thread_start_pos[num_threads] = current_pos; // 最后一个线程的结束位置
+		
+		#pragma omp parallel for
+		for (int t = 0; t < num_threads; ++t) {
+			size_t start = thread_start_pos[t];  // 当前线程的 index 起始位置
+			size_t end = thread_start_pos[t + 1]; // 当前线程的 index 结束位置
+			for (size_t i = start; i < end; ++i) {
+				data_pos_start[t] += bitmap[i]; // 当前线程的 lossless_data 起始位置
+			}
+		}
+
+		// 使用 OpenMP 并行化遍历 bitmap，并根据线程位置填充 lossless_data
+		#pragma omp parallel for
+		for (int t = 0; t < num_threads; ++t) {
+			size_t start = thread_start_pos[t];  // 当前线程的 lossless_data_u 起始位置
+			size_t end = thread_start_pos[t + 1]; // 当前线程的 lossless_data_u 结束位置
+			size_t pos = data_pos_start[t]; // 当前线程的 lossless_data_u 填充位置
+			for (int i = start; i < end; ++i) {
+				if (bitmap[i] == 1) { // 需要替换的位置
+					U[i] = lossless_data_U[pos]; // 线程独立的 pos
+					V[i] = lossless_data_V[pos];
+					W[i] = lossless_data_W[pos];
+					pos++;
 				}
 			}
+		}
+		*/
+		// for(int i=0; i< r1; i++){
+		// 	for(int j=0; j< r2; j++){
+		// 		for(int k=0; k< r3; k++){
+		// 			if(static_cast<int>(bitmap[i*r2*r3 + j*r3 + k])){
+		// 				U[i*r2*r3 + j*r3 + k] = *(lossless_data_U_pos++);
+		// 				V[i*r2*r3 + j*r3 + k] = *(lossless_data_V_pos++);
+		// 				W[i*r2*r3 + j*r3 + k] = *(lossless_data_W_pos++);
+						
+		// 			}
+		// 		}
+		// 	}
+		// }
+		std::vector<size_t> indices;
+		for (size_t i = 0; i < r1 * r2 * r3; i++) {
+			if (bitmap[i]) indices.push_back(i);
+		}
+
+		#pragma omp parallel for
+		for (size_t i = 0; i < indices.size(); i++) {
+			size_t idx = indices[i];
+			U[idx] = lossless_data_U[i];
+			V[idx] = lossless_data_V[i];
+			W[idx] = lossless_data_W[i];
 		}
 	free(lossless_data_U);
 	free(lossless_data_V);
@@ -1308,7 +1369,7 @@ omp_sz_decompress_cp_preserve_3d_record_vertex(const unsigned char * compressed,
 	
 	int num_threads = 0;
 	read_variable_from_src(compressed_pos, num_threads);
-	printf("num_threads = %d\n", num_threads);
+	printf("decomp num_threads = %d\n", num_threads);
 
 	auto read_variables_time_start = std::chrono::high_resolution_clock::now();
 	// 读每一个block的unpred_data size
@@ -1316,6 +1377,7 @@ omp_sz_decompress_cp_preserve_3d_record_vertex(const unsigned char * compressed,
 	for (int i = 0; i < num_threads; i++){
 		read_variable_from_src(compressed_pos, unpred_data_count[i]);
 	}
+	printf("decomp last thread block has size: %ld\n", unpred_data_count[num_threads-1]);
 	//读每个block的unpred_data
 	std::vector<std::vector<T>> unpred_data_each_thread(num_threads);
 	for (int i = 0; i < num_threads; i++){
@@ -1325,92 +1387,101 @@ omp_sz_decompress_cp_preserve_3d_record_vertex(const unsigned char * compressed,
 		//compressed_pos is the sum of previous unpred_data_count
 		//read_array_from_src_to_stdarray<T>(compressed_pos, unpred_data_each_thread[i], unpred_data_count[i]);
 	}
+	printf("decomp: compressed_pos after block = %ld\n",compressed_pos - compressed);
 
 	int t = std::round(std::cbrt(num_threads));
+	printf("t = %d\n", t);
 	int num_faces = (t-1) * t * t;
 	int num_edges = t*(t-1)*(t-1);
 	//读每个face_x的unpred_data size
-	std::vector<size_t> face_x_data_count(num_threads);
+	std::vector<size_t> face_x_data_count(num_faces);
 	for (int i = 0; i < num_faces; i++){
 		read_variable_from_src(compressed_pos, face_x_data_count[i]);
 	}
 	//读每个face_x的unpred_data
-	std::vector<std::vector<T>> face_x_data_each_thread(num_threads);
+	std::vector<std::vector<T>> face_x_data_each_thread(num_faces);
 	for (int i = 0; i < num_faces; i++){
 		T * raw_data = read_array_from_src<T>(compressed_pos, face_x_data_count[i]);
 		face_x_data_each_thread[i] = std::vector<T>(raw_data, raw_data + face_x_data_count[i]);
 		free(raw_data);
 	}
 	//读每个face_y的unpred_data size
-	std::vector<size_t> face_y_data_count(num_threads);
+	std::vector<size_t> face_y_data_count(num_faces);
 	for (int i = 0; i < num_faces; i++){
 		read_variable_from_src(compressed_pos, face_y_data_count[i]);
 	}
 	//读每个face_y的unpred_data
-	std::vector<std::vector<T>> face_y_data_each_thread(num_threads);
+	std::vector<std::vector<T>> face_y_data_each_thread(num_faces);
 	for (int i = 0; i < num_faces; i++){
 		T * raw_data = read_array_from_src<T>(compressed_pos, face_y_data_count[i]);
 		face_y_data_each_thread[i] = std::vector<T>(raw_data, raw_data + face_y_data_count[i]);
 		free(raw_data);
 	}
 	//读每个face_z的unpred_data size
-	std::vector<size_t> face_z_data_count(num_threads);
+	std::vector<size_t> face_z_data_count(num_faces);
 	for (int i = 0; i < num_faces; i++){
 		read_variable_from_src(compressed_pos, face_z_data_count[i]);
 	}
 	//读每个face_z的unpred_data
-	std::vector<std::vector<T>> face_z_data_each_thread(num_threads);
+	std::vector<std::vector<T>> face_z_data_each_thread(num_faces);
 	for (int i = 0; i < num_faces; i++){
 		T * raw_data = read_array_from_src<T>(compressed_pos, face_z_data_count[i]);
 		face_z_data_each_thread[i] = std::vector<T>(raw_data, raw_data + face_z_data_count[i]);
 		free(raw_data);
 	}
+	printf("decomp last face_z size: %ld\n", face_z_data_count[num_faces-1]);
+
 	//读每个edge_x的unpred_data size
-	std::vector<size_t> edge_x_data_count(num_threads);
+	std::vector<size_t> edge_x_data_count(num_edges);
 	for (int i = 0; i < num_edges; i++){
 		read_variable_from_src(compressed_pos, edge_x_data_count[i]);
 	}
 	//读每个edge_x的unpred_data
-	std::vector<std::vector<T>> edge_x_data_each_thread(num_threads);
+	std::vector<std::vector<T>> edge_x_data_each_thread(num_edges);
 	for (int i = 0; i < num_edges; i++){
 		T * raw_data = read_array_from_src<T>(compressed_pos, edge_x_data_count[i]);
 		edge_x_data_each_thread[i] = std::vector<T>(raw_data, raw_data + edge_x_data_count[i]);
 		free(raw_data);
 	}
 	//读每个edge_y的unpred_data size
-	std::vector<size_t> edge_y_data_count(num_threads);
+	std::vector<size_t> edge_y_data_count(num_edges);
 	for (int i = 0; i < num_edges; i++){
 		read_variable_from_src(compressed_pos, edge_y_data_count[i]);
 	}
 	//读每个edge_y的unpred_data
-	std::vector<std::vector<T>> edge_y_data_each_thread(num_threads);
+	std::vector<std::vector<T>> edge_y_data_each_thread(num_edges);
 	for (int i = 0; i < num_edges; i++){
 		T * raw_data = read_array_from_src<T>(compressed_pos, edge_y_data_count[i]);
 		edge_y_data_each_thread[i] = std::vector<T>(raw_data, raw_data + edge_y_data_count[i]);
 		free(raw_data);
 	}
 	//读每个edge_z的unpred_data size
-	std::vector<size_t> edge_z_data_count(num_threads);
+	std::vector<size_t> edge_z_data_count(num_edges);
 	for (int i = 0; i < num_edges; i++){
 		read_variable_from_src(compressed_pos, edge_z_data_count[i]);
 	}
 	//读每个edge_z的unpred_data
-	std::vector<std::vector<T>> edge_z_data_each_thread(num_threads);
+	std::vector<std::vector<T>> edge_z_data_each_thread(num_edges);
 	for (int i = 0; i < num_edges; i++){
 		T * raw_data = read_array_from_src<T>(compressed_pos, edge_z_data_count[i]);
 		edge_z_data_each_thread[i] = std::vector<T>(raw_data, raw_data + edge_z_data_count[i]);
 		free(raw_data);
 	}
+	
+	//printf("decomp last edge_z size: %ld\n", edge_z_data_count[num_edges-1]);
+
 	// 读 dot的unpred_data size
 	size_t dot_data_count = 0;
 	read_variable_from_src(compressed_pos, dot_data_count);
+	printf("decomp dot size = %ld\n", dot_data_count);
 	// 读dot的unpred_data
 	T * dot_data = read_array_from_src<T>(compressed_pos, dot_data_count);
+	//printf("decomp: dot maxval = %f, minval = %f\n", *std::max_element(dot_data, dot_data + dot_data_count), *std::min_element(dot_data, dot_data + dot_data_count));
 
 	auto read_variables_time_end = std::chrono::high_resolution_clock::now();
 	printf("time for get other variables in second: %f\n", std::chrono::duration<double>(read_variables_time_end - read_variables_time_start).count());
 	
-
+	//std::vector<int> check_list = {26739302,26739404,26739506,26739608,26999910,27000012,27000114,80477490,106955570,107215974,107216280};
 
 	auto readAndDecode_EbQuant_start = std::chrono::high_resolution_clock::now();
 	// now read eb_quant_index
@@ -1552,6 +1623,7 @@ omp_sz_decompress_cp_preserve_3d_record_vertex(const unsigned char * compressed,
 	// }
 	
 	size_t processed_data_dec_count = 0;
+	std::vector<std::unordered_set<int>> unpred_data_indices(num_threads);
 	// 处理块
 	int total_block = t * t * t;
 	omp_set_num_threads(total_block);
@@ -1606,14 +1678,24 @@ omp_sz_decompress_cp_preserve_3d_record_vertex(const unsigned char * compressed,
 					//开始处理数据
 					//processed_data_dec_count++;
 					size_t position_idx = i * r2 * r3 + j * r3 + k;
+					// if (std::count(check_list.begin(), check_list.end(), position_idx)){
+					// 	printf("id %ld in block %d\n", position_idx, block_id);
+					// }
 					//get eb
-					if (eb_quant_index[position_idx] == 0){
-						U[position_idx] = *(unpred_data_pos++);
-						V[position_idx] = *(unpred_data_pos++);
-						W[position_idx] = *(unpred_data_pos++);
+					if (eb_quant_index[position_idx] == 0 || eb_quant_index[position_idx] == eb_quant_index_max){
+						unpred_data_indices[omp_get_thread_num()].insert(position_idx);
+						for (int p = 0; p < 3; ++p){
+							T *cur_data_field = (p == 0) ? U : (p == 1) ? V : W;
+							T cur_data = *(unpred_data_pos++);
+							cur_data_field[position_idx] = (cur_data == 0) ? -100 : log2f(fabs(cur_data));
+						}
+						// U[position_idx] = *(unpred_data_pos++);
+						// V[position_idx] = *(unpred_data_pos++);
+						// W[position_idx] = *(unpred_data_pos++);
 					}
 					else{
-						double eb = pow(base, eb_quant_index[position_idx]) * threshold;
+						// double eb = pow(base, eb_quant_index[position_idx]) * threshold;
+						double eb = (eb_quant_index[position_idx] == 0) ? 0 : pow(base, eb_quant_index[position_idx]) * threshold;
 						for (int p = 0; p < 3; ++p){
 							T *cur_data_field = (p == 0) ? U : (p == 1) ? V : W;
 							T d0 = ((i && j && k) && (i - start_i != 1 && j - start_j != 1 && k - start_k != 1)) ? cur_data_field[position_idx - r2 * r3 - r3 - 1] : 0;
@@ -1631,44 +1713,48 @@ omp_sz_decompress_cp_preserve_3d_record_vertex(const unsigned char * compressed,
 			}
 		}
 		
-	}
-
-
-	//串行
-	/*
-	//现在特殊处理划分线上的数据
-	T *unpred_data_dividing_pos = &unpred_data_dividing[0];
-	for (int i = 0; i < r1; ++i) {
-		for (int j = 0; j < r2; ++j) {
-			for (int k = 0; k < r3; ++k) {
-				if (on_dividing_line[i * r2 * r3 + j * r3 + k]) {
-					//开始处理数据
+		//recover data done
+		unpred_data_pos = &unpred_data_each_thread[omp_get_thread_num()][0];
+		for (int i = start_i; i < end_i; ++i) {
+			// if (std::find(dividing_r1.begin(), dividing_r1.end(), i) != dividing_r1.end()) {
+			// 	continue;
+			// }
+			if (is_dividing_r1[i]) {
+				continue;
+			}
+			for (int j = start_j; j < end_j; ++j) {
+				// if (std::find(dividing_r2.begin(), dividing_r2.end(), j) != dividing_r2.end()) {
+				// 	continue;
+				// }
+				if (is_dividing_r2[j]) {
+					continue;
+				}
+				for (int k = start_k; k < end_k; ++k) {
+					// if (std::find(dividing_r3.begin(), dividing_r3.end(), k) != dividing_r3.end()) {
+					// 	continue;
+					// }
+					if (is_dividing_r3[k]) {
+						continue;
+					}
 					size_t position_idx = i * r2 * r3 + j * r3 + k;
-					if (eb_quant_index[position_idx] == 0){
-						U[position_idx] = *(unpred_data_dividing_pos++);
-						V[position_idx] = *(unpred_data_dividing_pos++);
-						W[position_idx] = *(unpred_data_dividing_pos++);
+					if (unpred_data_indices[omp_get_thread_num()].count(position_idx)){
+						U[position_idx] = *(unpred_data_pos++);
+						V[position_idx] = *(unpred_data_pos++);
+						W[position_idx] = *(unpred_data_pos++);
 					}
 					else{
-						double eb = pow(base, eb_quant_index[position_idx]) * threshold;
-						for (int p = 0; p < 3; ++p){
-							T *cur_data_field = (p == 0) ? U : (p == 1) ? V : W;
-							T d0 = (i && j && k) ? cur_data_field[position_idx - r2 * r3 - r3 - 1] : 0;
-							T d1 = (i && j) ? cur_data_field[position_idx - r2 * r3 - r3] : 0;
-							T d2 = (i && k) ? cur_data_field[position_idx - r2 * r3 - 1] : 0;
-							T d3 = (i) ? cur_data_field[position_idx - r2 * r3] : 0;
-							T d4 = (j && k) ? cur_data_field[position_idx - r3 - 1] : 0;
-							T d5 = (j) ? cur_data_field[position_idx - r3] : 0;
-							T d6 = (k) ? cur_data_field[position_idx - 1] : 0;
-							T pred = d0 + d3 + d5 + d6 - d1 - d2 - d4;
-							cur_data_field[position_idx] = pred + 2 * (data_quant_index[3 * position_idx + p] - intv_radius) * eb;
-						}
+						if (U[position_idx] < -99) U[i] = 0;
+						else U[position_idx] = sign_map_u[position_idx] ? exp2(U[position_idx]) : -exp2(U[position_idx]);
+						if (V[position_idx] < -99) V[i] = 0;
+						else V[position_idx] = sign_map_v[position_idx] ? exp2(V[position_idx]) : -exp2(V[position_idx]);
+						if (W[position_idx] < -99) W[i] = 0;
+						else W[position_idx] = sign_map_w[position_idx] ? exp2(W[position_idx]) : -exp2(W[position_idx]);
 					}
 				}
 			}
 		}
 	}
-	*/
+
 
 	//优化: 并行解压TODO
 	ptrdiff_t dim0_offset = r2 * r3;
@@ -1676,13 +1762,20 @@ omp_sz_decompress_cp_preserve_3d_record_vertex(const unsigned char * compressed,
 	ptrdiff_t cell_dim0_offset = (r2-1) * (r3-1);
 	ptrdiff_t cell_dim1_offset = r3-1;
 
+	std::vector<std::unordered_set<int>> face_x_unpred_data_indices(num_faces);
+	std::vector<std::unordered_set<int>> face_y_unpred_data_indices(num_faces);
+	std::vector<std::unordered_set<int>> face_z_unpred_data_indices(num_faces);
+	std::vector<std::unordered_set<int>> edge_x_unpred_data_indices(num_edges);
+	std::vector<std::unordered_set<int>> edge_y_unpred_data_indices(num_edges);
+	std::vector<std::unordered_set<int>> edge_z_unpred_data_indices(num_edges);
+
 
 	#pragma omp parallel
 	{
 		//并行处理face_x
 		//omp_set_num_threads(num_faces);
 		// Process faces perpendicular to the X-axis(jk-plane)
-		#pragma omp for collapse(3) nowait
+		#pragma omp for collapse(3) 
 		for (int i : dividing_r1){
 			for (int j = -1; j < (int)dividing_r2.size(); j++){
 				for (int k = -1; k < (int)dividing_r3.size(); k++){
@@ -1709,14 +1802,23 @@ omp_sz_decompress_cp_preserve_3d_record_vertex(const unsigned char * compressed,
 							}
 							//开始处理数据
 							size_t position_idx = i * r2 * r3 + jj * r3 + kk;
+							// if (std::count(check_list.begin(), check_list.end(), position_idx)){
+							// 	printf("id %ld in face_x %d\n", position_idx,thread_id);
+							// }
 							//processed_data_dec_count++;
-							if (eb_quant_index[position_idx] == 0){
-								U[position_idx] = *(unpred_data_pos++);
-								V[position_idx] = *(unpred_data_pos++);
-								W[position_idx] = *(unpred_data_pos++);
+							if (eb_quant_index[position_idx] == 0 || eb_quant_index[position_idx] == eb_quant_index_max){
+								face_x_unpred_data_indices[thread_id].insert(position_idx);
+								for (int p = 0; p < 3; ++p){
+									T *cur_data_field = (p == 0) ? U : (p == 1) ? V : W;
+									T cur_data = *(unpred_data_pos++);
+									cur_data_field[position_idx] = (cur_data == 0) ? -100 : log2f(fabs(cur_data));
+								}
+								// U[position_idx] = *(unpred_data_pos++);
+								// V[position_idx] = *(unpred_data_pos++);
+								// W[position_idx] = *(unpred_data_pos++);
 							}
 							else{
-								double eb = pow(base, eb_quant_index[position_idx]) * threshold;
+								double eb = (eb_quant_index[position_idx] == 0) ? 0 : pow(base, eb_quant_index[position_idx]) * threshold;
 								for (int p = 0; p < 3; ++p){
 									//degrade to 2D
 									T *cur_data_field = (p == 0) ? U : (p == 1) ? V : W;
@@ -1729,13 +1831,47 @@ omp_sz_decompress_cp_preserve_3d_record_vertex(const unsigned char * compressed,
 							}
 						}
 					}
+				
+					// recover data done
+					unpred_data_pos = &face_x_data_each_thread[thread_id][0];
+					for (int jj = start_j; jj < end_j; ++jj){
+						// if (std::find(dividing_r2.begin(), dividing_r2.end(), j) != dividing_r2.end()){
+						// 	continue;
+						// }
+						if (is_dividing_r2[jj]){
+							continue;
+						}
+						for (int kk = start_k; kk < end_k; ++kk){
+							// if (std::find(dividing_r3.begin(), dividing_r3.end(), k) != dividing_r3.end()){
+							// 	continue;
+							// }
+							if (is_dividing_r3[kk]){
+								continue;
+							}
+							size_t position_idx = i * r2 * r3 + jj * r3 + kk;
+							if (face_x_unpred_data_indices[thread_id].count(position_idx)){
+								U[position_idx] = *(unpred_data_pos++);
+								V[position_idx] = *(unpred_data_pos++);
+								W[position_idx] = *(unpred_data_pos++);
+							}
+							else{
+								if (U[position_idx] < -99) U[i] = 0;
+								else U[position_idx] = sign_map_u[position_idx] ? exp2(U[position_idx]) : -exp2(U[position_idx]);
+								if (V[position_idx] < -99) V[i] = 0;
+								else V[position_idx] = sign_map_v[position_idx] ? exp2(V[position_idx]) : -exp2(V[position_idx]);
+								if (W[position_idx] < -99) W[i] = 0;
+								else W[position_idx] = sign_map_w[position_idx] ? exp2(W[position_idx]) : -exp2(W[position_idx]);
+							}
+						}
+					}
 				}
 			}
 		}
 
+
 		//并行处理face_y
 		//omp_set_num_threads(num_faces);
-		#pragma omp for collapse(3) nowait
+		#pragma omp for collapse(3) 
 		for (int j : dividing_r2){
 			for (int i = -1; i < (int)dividing_r1.size(); i++){
 				for (int k = -1; k < (int)dividing_r3.size(); k++){
@@ -1762,14 +1898,23 @@ omp_sz_decompress_cp_preserve_3d_record_vertex(const unsigned char * compressed,
 							}
 							//开始处理数据
 							size_t position_idx = ii * r2 * r3 + j * r3 + kk;
+							// if (std::count(check_list.begin(), check_list.end(), position_idx)){
+							// 	printf("id %ld in face_y %d\n",position_idx,thread_id);
+							// }
 							//processed_data_dec_count++;
-							if (eb_quant_index[position_idx] == 0){
-								U[position_idx] = *(unpred_data_pos++);
-								V[position_idx] = *(unpred_data_pos++);
-								W[position_idx] = *(unpred_data_pos++);
+							if (eb_quant_index[position_idx] == 0 || eb_quant_index[position_idx] == eb_quant_index_max){
+								face_y_unpred_data_indices[thread_id].insert(position_idx);
+								for (int p = 0; p < 3; ++p){
+									T *cur_data_field = (p == 0) ? U : (p == 1) ? V : W;
+									T cur_data = *(unpred_data_pos++);
+									cur_data_field[position_idx] = (cur_data == 0) ? -100 : log2f(fabs(cur_data));
+								}
+								// U[position_idx] = *(unpred_data_pos++);
+								// V[position_idx] = *(unpred_data_pos++);
+								// W[position_idx] = *(unpred_data_pos++);
 							}
 							else{
-								double eb = pow(base, eb_quant_index[position_idx]) * threshold;
+								double eb = (eb_quant_index[position_idx] == 0) ? 0 : pow(base, eb_quant_index[position_idx]) * threshold;
 								for (int p = 0; p < 3; ++p){
 									//degrade to 2D
 									T *cur_data_field = (p == 0) ? U : (p == 1) ? V : W;
@@ -1782,13 +1927,46 @@ omp_sz_decompress_cp_preserve_3d_record_vertex(const unsigned char * compressed,
 							}
 						}
 					}
+
+					// recover data done
+					unpred_data_pos = &face_y_data_each_thread[thread_id][0];
+					for (int ii = start_i; ii < end_i; ++ii){
+						// if (std::find(dividing_r1.begin(), dividing_r1.end(), i) != dividing_r1.end()){
+						// 	continue;
+						// }
+						if (is_dividing_r1[ii]){
+							continue;
+						}
+						for (int kk = start_k; kk < end_k; ++kk){
+							// if (std::find(dividing_r3.begin(), dividing_r3.end(), k) != dividing_r3.end()){
+							// 	continue;
+							// }
+							if (is_dividing_r3[kk]){
+								continue;
+							}
+							size_t position_idx = ii * r2 * r3 + j * r3 + kk;
+							if (face_y_unpred_data_indices[thread_id].count(position_idx)){
+								U[position_idx] = *(unpred_data_pos++);
+								V[position_idx] = *(unpred_data_pos++);
+								W[position_idx] = *(unpred_data_pos++);
+							}
+							else{
+								if (U[position_idx] < -99) U[i] = 0;
+								else U[position_idx] = sign_map_u[position_idx] ? exp2(U[position_idx]) : -exp2(U[position_idx]);
+								if (V[position_idx] < -99) V[i] = 0;
+								else V[position_idx] = sign_map_v[position_idx] ? exp2(V[position_idx]) : -exp2(V[position_idx]);
+								if (W[position_idx] < -99) W[i] = 0;
+								else W[position_idx] = sign_map_w[position_idx] ? exp2(W[position_idx]) : -exp2(W[position_idx]);
+							}
+						}
+					}
 				}
 			}
 		}
 
 		//并行处理face_z
 		//omp_set_num_threads(num_faces);
-		#pragma omp for collapse(3) nowait
+		#pragma omp for collapse(3) 
 		for (int k : dividing_r3){
 			for (int i = -1; i < (int)dividing_r1.size(); i++){
 				for (int j = -1; j < (int)dividing_r2.size(); j++){
@@ -1815,14 +1993,23 @@ omp_sz_decompress_cp_preserve_3d_record_vertex(const unsigned char * compressed,
 							}
 							//开始处理数据
 							size_t position_idx = ii * r2 * r3 + jj * r3 + k;
+							// if (std::count(check_list.begin(), check_list.end(), position_idx)){
+							// 	printf("id %ld in face_z %d\n", position_idx, thread_id);
+							// }
 							//processed_data_dec_count++;
-							if (eb_quant_index[position_idx] == 0){
-								U[position_idx] = *(unpred_data_pos++);
-								V[position_idx] = *(unpred_data_pos++);
-								W[position_idx] = *(unpred_data_pos++);
+							if (eb_quant_index[position_idx] == 0 || eb_quant_index[position_idx] == eb_quant_index_max){
+								face_z_unpred_data_indices[thread_id].insert(position_idx);
+								for (int p = 0; p < 3; ++p){
+									T *cur_data_field = (p == 0) ? U : (p == 1) ? V : W;
+									T cur_data = *(unpred_data_pos++);
+									cur_data_field[position_idx] = (cur_data == 0) ? -100 : log2f(fabs(cur_data));
+								}
+								// U[position_idx] = *(unpred_data_pos++);
+								// V[position_idx] = *(unpred_data_pos++);
+								// W[position_idx] = *(unpred_data_pos++);
 							}
 							else{
-								double eb = pow(base, eb_quant_index[position_idx]) * threshold;
+								double eb = (eb_quant_index[position_idx] == 0) ? 0 : pow(base, eb_quant_index[position_idx]) * threshold;
 								for (int p = 0; p < 3; ++p){
 									//degrade to 2D
 									T *cur_data_field = (p == 0) ? U : (p == 1) ? V : W;
@@ -1832,6 +2019,39 @@ omp_sz_decompress_cp_preserve_3d_record_vertex(const unsigned char * compressed,
 									T pred = d1 + d2 - d0;
 									cur_data_field[position_idx] = pred + 2 * (data_quant_index[3 * position_idx + p] - intv_radius) * eb;
 								}
+							}
+						}
+					}
+				
+					// recover data done
+					unpred_data_pos = &face_z_data_each_thread[thread_id][0];
+					for (int ii = start_i; ii < end_i; ++ii){
+						// if (std::find(dividing_r1.begin(), dividing_r1.end(), i) != dividing_r1.end()){
+						// 	continue;
+						// }
+						if (is_dividing_r1[ii]){
+							continue;
+						}
+						for (int jj = start_j; jj < end_j; ++jj){
+							// if (std::find(dividing_r2.begin(), dividing_r2.end(), j) != dividing_r2.end()){
+							// 	continue;
+							// }
+							if (is_dividing_r2[jj]){
+								continue;
+							}
+							size_t position_idx = ii * r2 * r3 + jj * r3 + k;
+							if (face_z_unpred_data_indices[thread_id].count(position_idx)){
+								U[position_idx] = *(unpred_data_pos++);
+								V[position_idx] = *(unpred_data_pos++);
+								W[position_idx] = *(unpred_data_pos++);
+							}
+							else{
+								if (U[position_idx] < -99) U[i] = 0;
+								else U[position_idx] = sign_map_u[position_idx] ? exp2(U[position_idx]) : -exp2(U[position_idx]);
+								if (V[position_idx] < -99) V[i] = 0;
+								else V[position_idx] = sign_map_v[position_idx] ? exp2(V[position_idx]) : -exp2(V[position_idx]);
+								if (W[position_idx] < -99) W[i] = 0;
+								else W[position_idx] = sign_map_w[position_idx] ? exp2(W[position_idx]) : -exp2(W[position_idx]);
 							}
 						}
 					}
@@ -1845,7 +2065,7 @@ omp_sz_decompress_cp_preserve_3d_record_vertex(const unsigned char * compressed,
 	{
 		//并行处理edge_x
 		//omp_set_num_threads(num_edges);
-		#pragma omp for collapse(3) nowait
+		#pragma omp for collapse(3)
 		for (int i : dividing_r1){
 			for (int j :dividing_r2){
 				for (int k = -1; k < (int)dividing_r3.size(); k++){
@@ -1864,14 +2084,23 @@ omp_sz_decompress_cp_preserve_3d_record_vertex(const unsigned char * compressed,
 						}
 						//开始处理数据
 						size_t position_idx = i * r2 * r3 + j * r3 + kk;
+						// if (std::count(check_list.begin(), check_list.end(), position_idx)){
+						// 	printf("id %ld in edge_x %d\n", position_idx, thread_id);
+						// }
 						//processed_data_dec_count++;
-						if (eb_quant_index[position_idx] == 0){
-							U[position_idx] = *(unpred_data_pos++);
-							V[position_idx] = *(unpred_data_pos++);
-							W[position_idx] = *(unpred_data_pos++);
+						if (eb_quant_index[position_idx] == 0 || eb_quant_index[position_idx] == eb_quant_index_max){
+							edge_x_unpred_data_indices[thread_id].insert(position_idx);
+							for (int p = 0; p < 3; ++p){
+								T *cur_data_field = (p == 0) ? U : (p == 1) ? V : W;
+								T cur_data = *(unpred_data_pos++);
+								cur_data_field[position_idx] = (cur_data == 0) ? -100 : log2f(fabs(cur_data));
+							}
+							// U[position_idx] = *(unpred_data_pos++);
+							// V[position_idx] = *(unpred_data_pos++);
+							// W[position_idx] = *(unpred_data_pos++);
 						}
 						else{
-							double eb = pow(base, eb_quant_index[position_idx]) * threshold;
+							double eb = (eb_quant_index[position_idx] == 0) ? 0 : pow(base, eb_quant_index[position_idx]) * threshold;
 							for (int p = 0; p < 3; ++p){
 								//degrade to 1D
 								T *cur_data_field = (p == 0) ? U : (p == 1) ? V : W;
@@ -1881,13 +2110,38 @@ omp_sz_decompress_cp_preserve_3d_record_vertex(const unsigned char * compressed,
 							}
 						}
 					}
+				
+					// recover data done
+					unpred_data_pos = &edge_x_data_each_thread[thread_id][0];
+					for (int kk = start_k; kk < end_k; ++kk){
+						// if (std::find(dividing_r3.begin(), dividing_r3.end(), k) != dividing_r3.end()){
+						// 	continue;
+						// }
+						if (is_dividing_r3[kk]){
+							continue;
+						}
+						size_t position_idx = i * r2 * r3 + j * r3 + kk;
+						if (edge_x_unpred_data_indices[thread_id].count(position_idx)){
+							U[position_idx] = *(unpred_data_pos++);
+							V[position_idx] = *(unpred_data_pos++);
+							W[position_idx] = *(unpred_data_pos++);
+						}
+						else{
+							if (U[position_idx] < -99) U[i] = 0;
+							else U[position_idx] = sign_map_u[position_idx] ? exp2(U[position_idx]) : -exp2(U[position_idx]);
+							if (V[position_idx] < -99) V[i] = 0;
+							else V[position_idx] = sign_map_v[position_idx] ? exp2(V[position_idx]) : -exp2(V[position_idx]);
+							if (W[position_idx] < -99) W[i] = 0;
+							else W[position_idx] = sign_map_w[position_idx] ? exp2(W[position_idx]) : -exp2(W[position_idx]);
+						}
+					}
 				}
 			}
 		}
 
 		//并行处理edge_y
 		//omp_set_num_threads(num_edges);
-		#pragma omp for collapse(3) nowait
+		#pragma omp for collapse(3)
 		for (int j : dividing_r2){
 			for (int k : dividing_r3){
 				for (int i = -1; i < (int)dividing_r1.size(); i++){
@@ -1906,14 +2160,23 @@ omp_sz_decompress_cp_preserve_3d_record_vertex(const unsigned char * compressed,
 						}
 						//开始处理数据
 						size_t position_idx = ii * r2 * r3 + j * r3 + k;
+						// if (std::count(check_list.begin(), check_list.end(), position_idx)){
+						// 	printf("id %ld in edge_y %d\n", position_idx, thread_id);
+						// }
 						//processed_data_dec_count++;
-						if (eb_quant_index[position_idx] == 0){
-							U[position_idx] = *(unpred_data_pos++);
-							V[position_idx] = *(unpred_data_pos++);
-							W[position_idx] = *(unpred_data_pos++);
+						if (eb_quant_index[position_idx] == 0 || eb_quant_index[position_idx] == eb_quant_index_max){
+							edge_y_unpred_data_indices[thread_id].insert(position_idx);
+							for (int p = 0; p < 3; ++p){
+								T *cur_data_field = (p == 0) ? U : (p == 1) ? V : W;
+								T cur_data = *(unpred_data_pos++);
+								cur_data_field[position_idx] = (cur_data == 0) ? -100 : log2f(fabs(cur_data));
+							}
+							// U[position_idx] = *(unpred_data_pos++);
+							// V[position_idx] = *(unpred_data_pos++);
+							// W[position_idx] = *(unpred_data_pos++);
 						}
 						else{
-							double eb = pow(base, eb_quant_index[position_idx]) * threshold;
+							double eb = (eb_quant_index[position_idx] == 0) ? 0 : pow(base, eb_quant_index[position_idx]) * threshold;
 							for (int p = 0; p < 3; ++p){
 								//degrade to 1D
 								T *cur_data_field = (p == 0) ? U : (p == 1) ? V : W;
@@ -1924,13 +2187,38 @@ omp_sz_decompress_cp_preserve_3d_record_vertex(const unsigned char * compressed,
 							}
 						}
 					}
+				
+					// recover data done
+					unpred_data_pos = &edge_y_data_each_thread[thread_id][0];
+					for (int ii = start_i; ii < end_i; ++ii){
+						// if (std::find(dividing_r1.begin(), dividing_r1.end(), i) != dividing_r1.end()){
+						// 	continue;
+						// }
+						if (is_dividing_r1[ii]){
+							continue;
+						}
+						size_t position_idx = ii * r2 * r3 + j * r3 + k;
+						if (edge_y_unpred_data_indices[thread_id].count(position_idx)){
+							U[position_idx] = *(unpred_data_pos++);
+							V[position_idx] = *(unpred_data_pos++);
+							W[position_idx] = *(unpred_data_pos++);
+						}
+						else{
+							if (U[position_idx] < -99) U[i] = 0;
+							else U[position_idx] = sign_map_u[position_idx] ? exp2(U[position_idx]) : -exp2(U[position_idx]);
+							if (V[position_idx] < -99) V[i] = 0;
+							else V[position_idx] = sign_map_v[position_idx] ? exp2(V[position_idx]) : -exp2(V[position_idx]);
+							if (W[position_idx] < -99) W[i] = 0;
+							else W[position_idx] = sign_map_w[position_idx] ? exp2(W[position_idx]) : -exp2(W[position_idx]);
+						}
+					}
 				}
 			}
 		}
 
 		//并行处理edge_z
 		//omp_set_num_threads(num_edges);
-		#pragma omp for collapse(3) nowait
+		#pragma omp for collapse(3)
 		for (int k : dividing_r3){
 			for (int i : dividing_r1){
 				for (int j = -1; j < (int)dividing_r2.size(); j++){
@@ -1949,13 +2237,22 @@ omp_sz_decompress_cp_preserve_3d_record_vertex(const unsigned char * compressed,
 						}
 						//processed_data_dec_count++;
 						size_t position_idx = i * r2 * r3 + jj * r3 + k;
-						if (eb_quant_index[position_idx] == 0){
-							U[position_idx] = *(unpred_data_pos++);
-							V[position_idx] = *(unpred_data_pos++);
-							W[position_idx] = *(unpred_data_pos++);
+						// if (std::count(check_list.begin(), check_list.end(), position_idx)){
+						// 	printf("id %ld in edge_z %d\n", position_idx, thread_id);
+						// }
+						if (eb_quant_index[position_idx] == 0 || eb_quant_index[position_idx] == eb_quant_index_max){
+							edge_z_unpred_data_indices[thread_id].insert(position_idx);
+							for (int p = 0; p < 3; ++p){
+								T *cur_data_field = (p == 0) ? U : (p == 1) ? V : W;
+								T cur_data = *(unpred_data_pos++);
+								cur_data_field[position_idx] = (cur_data == 0) ? -100 : log2f(fabs(cur_data));
+							}
+							// U[position_idx] = *(unpred_data_pos++);
+							// V[position_idx] = *(unpred_data_pos++);
+							// W[position_idx] = *(unpred_data_pos++);
 						}
 						else{
-							double eb = pow(base, eb_quant_index[position_idx]) * threshold;
+							double eb = (eb_quant_index[position_idx] == 0) ? 0 : pow(base, eb_quant_index[position_idx]) * threshold;
 							for (int p = 0; p < 3; ++p){
 								//degrade to 1D
 								T *cur_data_field = (p == 0) ? U : (p == 1) ? V : W;
@@ -1963,6 +2260,32 @@ omp_sz_decompress_cp_preserve_3d_record_vertex(const unsigned char * compressed,
 								T pred = d0;
 								cur_data_field[position_idx] = pred + 2 * (data_quant_index[3 * position_idx + p] - intv_radius) * eb;
 							}
+						}
+					}
+				
+
+					// recover data done
+					unpred_data_pos = &edge_z_data_each_thread[thread_id][0];
+					for (int jj = start_j; jj < end_j; ++jj){
+						// if (std::find(dividing_r2.begin(), dividing_r2.end(), j) != dividing_r2.end()){
+						// 	continue;
+						// }
+						if (is_dividing_r2[jj]){
+							continue;
+						}
+						size_t position_idx = i * r2 * r3 + jj * r3 + k;
+						if (edge_z_unpred_data_indices[thread_id].count(position_idx)){
+							U[position_idx] = *(unpred_data_pos++);
+							V[position_idx] = *(unpred_data_pos++);
+							W[position_idx] = *(unpred_data_pos++);
+						}
+						else{
+							if (U[position_idx] < -99) U[i] = 0;
+							else U[position_idx] = sign_map_u[position_idx] ? exp2(U[position_idx]) : -exp2(U[position_idx]);
+							if (V[position_idx] < -99) V[i] = 0;
+							else V[position_idx] = sign_map_v[position_idx] ? exp2(V[position_idx]) : -exp2(V[position_idx]);
+							if (W[position_idx] < -99) W[i] = 0;
+							else W[position_idx] = sign_map_w[position_idx] ? exp2(W[position_idx]) : -exp2(W[position_idx]);
 						}
 					}
 				}
@@ -1978,31 +2301,117 @@ omp_sz_decompress_cp_preserve_3d_record_vertex(const unsigned char * compressed,
 		for (int j : dividing_r2){
 			for (int k : dividing_r3){
 				size_t position_idx = i * r2 * r3 + j * r3 + k;
+				// if (std::count(check_list.begin(), check_list.end(), position_idx)){
+				// 	printf("id %ld in dot \n", position_idx);
+				// }
+				//printf("dot coord: x: %d, y: %d, z: %d\n", i, j, k);
 				//processed_data_dec_count++;
-				U[position_idx] = *(unpred_data_pos++);
-				V[position_idx] = *(unpred_data_pos++);
-				W[position_idx] = *(unpred_data_pos++);
+				if (eb_quant_index[position_idx] == 0 || eb_quant_index[position_idx] == eb_quant_index_max){
+					for (int p = 0; p < 3; ++p){
+						T *cur_data_field = (p == 0) ? U : (p == 1) ? V : W;
+						T cur_data = *(unpred_data_pos++);
+						cur_data_field[position_idx] = (cur_data == 0) ? -100 : log2f(fabs(cur_data));
+					}
+					// U[position_idx] = *(unpred_data_pos++);
+					// V[position_idx] = *(unpred_data_pos++);
+					// W[position_idx] = *(unpred_data_pos++);
+				}
+				else{
+					printf("dot data should not predict\n");
+				}
+				// U[position_idx] = *(unpred_data_pos++);
+				// V[position_idx] = *(unpred_data_pos++);
+				// W[position_idx] = *(unpred_data_pos++);
 			}
 		}
 	}
+	
+	// recover data done
+	unpred_data_pos = dot_data;
+	for (int i : dividing_r1){
+		for (int j : dividing_r2){
+			for (int k : dividing_r3){
+				size_t position_idx = i * r2 * r3 + j * r3 + k;
+				if (U[position_idx] < -99) U[i] = 0;
+				else U[position_idx] = sign_map_u[position_idx] ? exp2(U[position_idx]) : -exp2(U[position_idx]);
+				if (V[position_idx] < -99) V[i] = 0;
+				else V[position_idx] = sign_map_v[position_idx] ? exp2(V[position_idx]) : -exp2(V[position_idx]);
+				if (W[position_idx] < -99) W[i] = 0;
+				else W[position_idx] = sign_map_w[position_idx] ? exp2(W[position_idx]) : -exp2(W[position_idx]);
+			}
+		}
+	}
+	
+	
 	auto pred_dot_time_end = std::chrono::high_resolution_clock::now();
 	printf("time for pred dot in second: %f\n", std::chrono::duration<double>(pred_dot_time_end - pred_dot_time_start).count());
 
 	printf("decomp: check if all data points are processed: %ld, %ld\n", processed_data_dec_count, num_elements);
 	//最后再根据bitmap来处理lossless的数据
 	if (index_need_to_fix_size != 0){
-		for(int i=0; i< r1; i++){
-			for(int j=0; j< r2; j++){
-				for(int k=0; k< r3; k++){
-					if(static_cast<int>(bitmap[i*r2*r3 + j*r3 + k])){
-						U[i*r2*r3 + j*r3 + k] = *(lossless_data_U_pos++);
-						V[i*r2*r3 + j*r3 + k] = *(lossless_data_V_pos++);
-						W[i*r2*r3 + j*r3 + k] = *(lossless_data_W_pos++);
+		//擦 这里也要注释掉。。
+		// 计算每个线程的起始位置和数据范围
+		// std::vector<size_t> thread_start_pos(num_threads + 1, 0);
+		// std::vector<size_t> data_pos_start(num_threads, 0);
+		// size_t current_pos = 0;
+		// // 预计算所有需要填充的点数，存储每个线程需要处理的起始索引
+		// for (int i = 0; i < num_threads; ++i) {
+		// 	size_t count = (num_elements / num_threads) + (i < num_elements % num_threads ? 1 : 0);
+		// 	thread_start_pos[i] = current_pos;
+		// 	current_pos += count;
+		// }
+		// thread_start_pos[num_threads] = current_pos; // 最后一个线程的结束位置
+		
+		// #pragma omp parallel for
+		// for (int t = 0; t < num_threads; ++t) {
+		// 	size_t start = thread_start_pos[t];  // 当前线程的 index 起始位置
+		// 	size_t end = thread_start_pos[t + 1]; // 当前线程的 index 结束位置
+		// 	for (size_t i = start; i < end; ++i) {
+		// 		data_pos_start[t] += bitmap[i]; // 当前线程的 lossless_data 起始位置
+		// 	}
+		// }
+
+		// // 使用 OpenMP 并行化遍历 bitmap，并根据线程位置填充 lossless_data
+		// #pragma omp parallel for
+		// for (int t = 0; t < num_threads; ++t) {
+		// 	size_t start = thread_start_pos[t];  // 当前线程的 lossless_data_u 起始位置
+		// 	size_t end = thread_start_pos[t + 1]; // 当前线程的 lossless_data_u 结束位置
+		// 	size_t pos = data_pos_start[t]; // 当前线程的 lossless_data_u 填充位置
+		// 	for (int i = start; i < end; ++i) {
+		// 		if (bitmap[i] == 1) { // 需要替换的位置
+		// 			U[i] = lossless_data_U[pos]; // 线程独立的 pos
+		// 			V[i] = lossless_data_V[pos];
+		// 			W[i] = lossless_data_W[pos];
+		// 			pos++;
+		// 		}
+		// 	}
+		// }
+
+		// for(int i=0; i< r1; i++){
+		// 	for(int j=0; j< r2; j++){
+		// 		for(int k=0; k< r3; k++){
+		// 			if(static_cast<int>(bitmap[i*r2*r3 + j*r3 + k])){
+		// 				U[i*r2*r3 + j*r3 + k] = *(lossless_data_U_pos++);
+		// 				V[i*r2*r3 + j*r3 + k] = *(lossless_data_V_pos++);
+		// 				W[i*r2*r3 + j*r3 + k] = *(lossless_data_W_pos++);
 						
-					}
-				}
-			}
-		}
+		// 			}
+		// 		}
+		// 	}
+		// }
+
+	std::vector<size_t> indices;
+	for (size_t i = 0; i < r1 * r2 * r3; i++) {
+		if (bitmap[i]) indices.push_back(i);
+	}
+
+	#pragma omp parallel for
+	for (size_t i = 0; i < indices.size(); i++) {
+		size_t idx = indices[i];
+		U[idx] = lossless_data_U[i];
+		V[idx] = lossless_data_V[i];
+		W[idx] = lossless_data_W[i];
+	}
 	free(lossless_data_U);
 	free(lossless_data_V);
 	free(lossless_data_W);

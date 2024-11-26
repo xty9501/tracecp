@@ -442,6 +442,9 @@ void verify(Type * ori_data, Type * data, size_t num_elements, double &nrmse){
             // if (abserr >  0.05){
             //     printf("x=%d, y=%d, z=%d, ori=%f, dec=%f\n", i/(512*512), (i%(512*512))/512, i%512, ori_data[i], data[i]);
             // }
+            if (relerr > 0.05){
+                printf("x=%d, y=%d, z=%d, ori=%f, dec=%f, index = %ld\n", i/(512*512), (i%(512*512))/512, i%512, ori_data[i], data[i], i);
+            }
         }
 
         if (diffMax < err)
@@ -534,11 +537,11 @@ check_simplex_seq(const double v[4][3], const double X[3][3], const int indices[
   // robust critical point test
 //   bool succ = ftk::robust_critical_point_in_simplex3(vf, indices);
 //   if (!succ) return;
-  // for (int i = 0; i < 4; i++) {
-  //   if (v[i][0] == 0 && v[i][1] == 0 && v[i][2] == 0) {
-  //     return;
-  //   }
-  // }
+  for (int i = 0; i < 4; i++) {
+    if (v[i][0] == 0 && v[i][1] == 0 && v[i][2] == 0) {
+      return;
+    }
+  }
   double threshold = 0.0;
   bool succ2 = ftk::inverse_lerp_s3v3(v, mu, &cond, threshold);
 //   if(!succ2) ftk::clamp_barycentric<4>(mu);
@@ -1141,7 +1144,7 @@ int main(int argc, char ** argv){
     std::vector<int> trajID_need_fix_next_vec;
     std::vector<std::array<int,3>> trajID_need_fix_next_detail_vec; //0:outside, 1.reach max iter, 2.find cp
     std::array<int,3> origin_traj_detail;
-    std::set<size_t> final_vertex_need_to_lossless; //最终需要lossless的点的index
+    std::set<size_t> final_vertex_need_to_lossless = {}; //最终需要lossless的点的index
     bool stop = false; //算法停止flag
     std::vector<int> fixed_cpsz_trajID;
     size_t num_elements = 0;
@@ -1220,26 +1223,36 @@ int main(int argc, char ** argv){
     float * dec_V_inplace = NULL;
     float * dec_W_inplace = NULL;
     if(eb_type == "abs"){
-    
-    result = omp_sz_compress_cp_preserve_3d_online_abs_record_vertex(U,V,W, r1, r2, r3, result_size, max_eb,final_vertex_need_to_lossless, total_thread, dec_U_inplace, dec_V_inplace, dec_W_inplace,cp_exist);
-    
-    free(dec_U_inplace);
-    free(dec_V_inplace);
-    free(dec_W_inplace);
-    //单线程
-    //result = sz_compress_cp_preserve_3d_online_abs_record_vertex(U,V,W, r1, r2, r3, result_size, max_eb,final_vertex_need_to_lossless);
+      
+      if(total_thread == 1){
+        //单线程
+        result = sz_compress_cp_preserve_3d_online_abs_record_vertex(U,V,W, r1, r2, r3, result_size, max_eb,final_vertex_need_to_lossless);
+      }
+      else{
+        result = omp_sz_compress_cp_preserve_3d_online_abs_record_vertex(U,V,W, r1, r2, r3, result_size, max_eb,final_vertex_need_to_lossless, total_thread, dec_U_inplace, dec_V_inplace, dec_W_inplace,cp_exist);
+        free(dec_U_inplace);
+        free(dec_V_inplace);
+        free(dec_W_inplace);
+      }
     }
     else if (eb_type == "rel"){
+      if (total_thread == 1){
+        //单线程
+        result = sz_compress_cp_preserve_3d_record_vertex(U,V,W, r1, r2, r3, result_size,false, max_eb,final_vertex_need_to_lossless);
+      }
+      else{
       result = omp_sz_compress_cp_preserve_3d_record_vertex(U,V,W, r1, r2, r3, result_size, max_eb,final_vertex_need_to_lossless, total_thread, dec_U_inplace, dec_V_inplace, dec_W_inplace);
+      }
     }
     else{
         printf("not support this eb_type\n");
         exit(0);
     }
 
-
+    printf("Compression done\n");
     unsigned char * result_after_lossless = NULL;
     size_t lossless_outsize = sz_lossless_compress(ZSTD_COMPRESSOR, 3, result, result_size, &result_after_lossless);
+    printf("zstd done\n");
 
     auto comp_time_end = std::chrono::high_resolution_clock::now();
     cpsz_comp_duration = comp_time_end - comp_time_start;
@@ -1253,13 +1266,22 @@ int main(int argc, char ** argv){
     auto decomp_only_zstd_end = std::chrono::high_resolution_clock::now();
     printf("Zstd only decompress time: %f\n", std::chrono::duration<double>(decomp_only_zstd_end - decomp_only_zstd).count());
     if (eb_type == "abs"){
-        omp_sz_decompress_cp_preserve_3d_online_abs_record_vertex<float>(result, r1, r2, r3,dec_U, dec_V, dec_W);
-
+        if(total_thread == 1){
         //单线程
-        //sz_decompress_cp_preserve_3d_online_abs_record_vertex<float>(result, r1, r2, r3,dec_U, dec_V, dec_W);
+        sz_decompress_cp_preserve_3d_online_abs_record_vertex<float>(result, r1, r2, r3,dec_U, dec_V, dec_W);
+        }
+        else{
+          omp_sz_decompress_cp_preserve_3d_online_abs_record_vertex<float>(result, r1, r2, r3,dec_U, dec_V, dec_W);
+        }
     }
     else if (eb_type == "rel"){
-        omp_sz_decompress_cp_preserve_3d_record_vertex<float>(result, r1, r2, r3,dec_U, dec_V, dec_W);
+        if(total_thread == 1){
+          //单线程
+          sz_decompress_cp_preserve_3d_record_vertex<float>(result, r1, r2, r3,dec_U, dec_V, dec_W);
+        }
+        else{
+          omp_sz_decompress_cp_preserve_3d_record_vertex<float>(result, r1, r2, r3,dec_U, dec_V, dec_W);
+        }
     }
     else{
         printf("not support this eb_type\n");
@@ -1274,12 +1296,13 @@ int main(int argc, char ** argv){
     //now verify the decompressed data
     double nrmse_u, nrmse_v, nrmse_w;
     verify(U, dec_U, r1*r2*r3, nrmse_u);
+    // verify(U,dec_U_inplace, r1*r2*r3, nrmse_u);
     printf("====================================\n");
     // verify(V, dec_V, r1*r2*r3, nrmse_v);
     // printf("====================================\n");
     // verify(W, dec_W, r1*r2*r3, nrmse_w);
     // printf("====================================\n");
-    exit(0);
+    // exit(0);
     //now check the critical points
     auto cp_exist_ori = omp_compute_cp(U, V, W, r1, r2, r3);
     auto cp_exist_dec = omp_compute_cp(dec_U, dec_V, dec_W, r1, r2, r3);
@@ -1772,7 +1795,7 @@ int main(int argc, char ** argv){
               printf("t1 size: %zu, temp_trajs_ori size: %zu, temp_trajs_check size: %zu\n",t1.size(),temp_trajs_ori.size(),temp_trajs_check.size());
               break;
             }
-            end_fix_index = std::min(end_fix_index + static_cast<int>(0.005*t_config.max_length), static_cast<int>(t1.size()));
+            end_fix_index = std::min(end_fix_index + static_cast<int>(1*t_config.max_length), static_cast<int>(t1.size()));
           }
           else{
             //成功修正当前trajectory

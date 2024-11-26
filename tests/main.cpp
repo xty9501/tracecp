@@ -49,6 +49,8 @@
 #include <algorithm>
 #include<omp.h>
 
+#define CPSZ_OMP_FLAG 0
+
 std::array<double, 2> findLastNonNegativeOne(const std::vector<std::array<double, 2>>& vec) {
     for (auto it = vec.rbegin(); it != vec.rend(); ++it) {
         if ((*it)[0] != -1 && (*it)[1] != -1) {
@@ -502,11 +504,30 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
   double current_pwr_eb = 0;
   if(eb_type == "rel"){
     //****original version of cpsz********
-    result = sz_compress_cp_preserve_2d_fix(U, V, r1, r2, result_size, false, max_pwr_eb, current_pwr_eb);
+    if (CPSZ_OMP_FLAG == 0){
+      result = sz_compress_cp_preserve_2d_fix(U, V, r1, r2, result_size, false, max_pwr_eb, current_pwr_eb);
+    }
+    else{
+      //use omp version
+      std::set<size_t> empty_set;
+      float * dec_inplace_U = NULL;
+      float * dec_inplace_V = NULL;
+      result = omp_sz_compress_cp_preserve_2d_record_vertex(U, V, r1, r2,result_size,false,max_pwr_eb,empty_set,totoal_thread,dec_inplace_U,dec_inplace_V,eb_type);
+    }
+    
   }
   else if (eb_type == "abs"){
-    //****** cpsz with absolute error bound ******
-    result = sz_compress_cp_preserve_2d_online_abs_record_vertex(U, V, r1, r2, result_size, false, max_pwr_eb);
+    if (CPSZ_OMP_FLAG == 0){
+      //****** cpsz with absolute error bound ******
+      result = sz_compress_cp_preserve_2d_online_abs_record_vertex(U, V, r1, r2, result_size, false, max_pwr_eb);
+    }
+    else{
+      std::set<size_t> empty_set;
+      float * dec_inplace_U = NULL;
+      float * dec_inplace_V = NULL;
+      result = omp_sz_compress_cp_preserve_2d_record_vertex(U, V, r1, r2,result_size,false,max_pwr_eb,empty_set,totoal_thread,dec_inplace_U,dec_inplace_V,eb_type);
+    }
+    
   }
   else{
     printf("eb_type must be rel or abs\n");
@@ -532,10 +553,21 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
   float * dec_U = NULL;
   float * dec_V = NULL;
   if (eb_type == "rel"){
-    sz_decompress_cp_preserve_2d_online<float>(result, r1,r2, dec_U, dec_V); // use cpsz
+    if (CPSZ_OMP_FLAG == 0){
+      sz_decompress_cp_preserve_2d_online<float>(result, r1,r2, dec_U, dec_V); // use cpsz
+    }
+    else{
+      omp_sz_decompress_cp_preserve_2d_online(result, r1,r2, dec_U, dec_V);
+    }
   }
   else if (eb_type == "abs"){
-    sz_decompress_cp_preserve_2d_online_record_vertex<float>(result, r1,r2, dec_U, dec_V); // use cpsz
+    if (CPSZ_OMP_FLAG == 0){
+      sz_decompress_cp_preserve_2d_online_record_vertex<float>(result, r1,r2, dec_U, dec_V); // use cpsz
+    }
+    else{
+      omp_sz_decompress_cp_preserve_2d_online(result, r1,r2, dec_U, dec_V);
+    }
+    
   }
   //sz_decompress_cp_preserve_2d_online<float>(result, r1,r2, dec_U, dec_V); // use cpsz
   // calculate compression ratio
@@ -547,6 +579,9 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
   printf("cpsz Decompress time: %f\n", cpsz_decomp_duration.count());
 
   // exit(0);
+  if (WRITE_OUT_EB == 1){
+    exit(0);
+  }
 
 
   double nrmse_u, nrmse_v,psnr_overall,psnr_cpsz_overall;
@@ -752,7 +787,8 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
   // }
   auto end = std::chrono::high_resolution_clock::now();
   std::chrono::duration<double> traj_ori_begin_elapsed = end - start;
-  printf("Time for original trajectory calculation: %f\n", traj_ori_begin_elapsed.count()); 
+  printf("Time for original trajectory calculation: %f\n", traj_ori_begin_elapsed.count());
+  printf("ori_cp_count: %ld\n", critical_points_ori.size());
   printf("ori_saddle_count: %ld\n", ori_saddle_count);
   printf("size of trajs_ori: %ld\n", trajs_ori.size());
   printf("size of vertex_ori: %ld\n", vertex_ori.size());
@@ -893,12 +929,15 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
   double minVal_cpsz, maxVal_cpsz, medianVal_cpsz, meanVal_cpsz, stdevVal_cpsz;
   calculateStatistics(frechetDistances_cpsz, minVal_cpsz, maxVal_cpsz, medianVal_cpsz, meanVal_cpsz, stdevVal_cpsz);
   printf("Statistics data cpsz frechet distance===============\n");
+
   printf("min: %f\n", minVal_cpsz);
   printf("max: %f\n", maxVal_cpsz);
   printf("median: %f\n", medianVal_cpsz);
   printf("mean: %f\n", meanVal_cpsz);
   printf("stdev: %f\n", stdevVal_cpsz);
+  printf("max index: %d,second index: %d, third index: %d\n", max_index_cpsz);
   printf("Statistics data cpsz frechet distance===============\n");
+
 
   // 计算哪里有问题（init queue）
   std::set<size_t> trajID_need_fix = {};
@@ -952,7 +991,6 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
       else{
         //dec reach max, need to check distance
         // if (euclideanDistance(t1.back(), t2.back()) >= threshold_max_iter && f_dist){
-        //change:没走到的话，不判断末尾距离，只判断ESfrechet distance
         if (euclideanDistance(t1.back(), t2.back()) >= threshold_max_iter && frechetDistance(t1, t2) >= threshold){
         //if (ESfrechetDistance(t1, t2) >= threshold){
           wrong_num_max_iter ++;
@@ -1061,7 +1099,8 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
 
       //find the first different point
       int changed = 0;
-      for (size_t j = start_fix_index; j < std::min(t1.size(),t2.size()); ++j){
+      //for (size_t j = start_fix_index; j < std::min(t1.size(),t2.size()); ++j){
+      for (size_t j = start_fix_index; j < t1.size(); ++j){
       //for (size_t j = start_fix_index; j < max_index; ++j){
         auto& p1 = t1[j];
         auto& p2 = t2[j];
@@ -1087,7 +1126,7 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
       // if (t1.size() == t_config.max_length){
       //   end_fix_index = t1.size() / 2; //从中间开始fix
       // }
-      end_fix_index = std::min(end_fix_index, static_cast<int>(t1.size())); //t1.size() - 1;
+      // end_fix_index = std::min(end_fix_index, static_cast<int>(t1.size())); //t1.size() - 1;
 
       do
       {
@@ -1152,6 +1191,7 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
           success = true;
         }
         else{
+          //printf("INCREASE END_FIX_INDEX!! current_trajID: %ld, end_fix_index: %d, t1.size(): %zu\n", current_trajID, end_fix_index, t1.size());
           end_fix_index = std::min(end_fix_index + static_cast<int>(t_config.next_index_coeff*t_config.max_length),static_cast<int>(t1.size()));
         }
       } while (success == false);
@@ -1303,6 +1343,7 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
     for (const auto& local_set:local_all_vertex_for_all_diff_traj){
       all_vertex_for_all_diff_traj.insert(local_set.begin(), local_set.end());
     }
+    printf("all_vertex_for_all_diff_traj size: %ld\n", all_vertex_for_all_diff_traj.size());
     
     
     auto index_time_end = std::chrono::high_resolution_clock::now();
@@ -1515,15 +1556,41 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
   printf("all_vertex_for_all_diff_traj size: %ld\n", all_vertex_for_all_diff_traj.size());
 
   //check compression ratio
+  auto tpsz_comp_time_start = std::chrono::high_resolution_clock::now();
   unsigned char * final_result = NULL;
   size_t final_result_size = 0;
   if(eb_type == "rel"){
-  final_result = sz_compress_cp_preserve_2d_record_vertex(U, V, r1, r2, final_result_size, false, max_pwr_eb, all_vertex_for_all_diff_traj);
+    if (CPSZ_OMP_FLAG == 0){
+      final_result = sz_compress_cp_preserve_2d_record_vertex(U, V, r1, r2, final_result_size, false, max_pwr_eb, all_vertex_for_all_diff_traj);
+    }
+    else{
+      float * dec_inplace_U = NULL;
+      float * dec_inplace_V = NULL;
+      final_result = omp_sz_compress_cp_preserve_2d_record_vertex(U, V, r1, r2, final_result_size, false, max_pwr_eb, all_vertex_for_all_diff_traj,totoal_thread,dec_inplace_U,dec_inplace_V,eb_type);
+      free(dec_inplace_U);
+      free(dec_inplace_V);
+    }
+  
 
   }
   else if(eb_type == "abs"){
+    if (CPSZ_OMP_FLAG == 0){
     final_result = sz_compress_cp_preserve_2d_online_abs_record_vertex(U, V, r1, r2, final_result_size, true, max_pwr_eb, all_vertex_for_all_diff_traj);
+    final_result = sz_compress_cp_preserve_2d_online_abs_record_vertex(U, V, r1, r2, final_result_size, true, max_pwr_eb, all_vertex_for_all_diff_traj);
+      final_result = sz_compress_cp_preserve_2d_online_abs_record_vertex(U, V, r1, r2, final_result_size, true, max_pwr_eb, all_vertex_for_all_diff_traj);
+    }
+    else{
+      float * dec_inplace_U = NULL;
+      float * dec_inplace_V = NULL;
+      final_result = omp_sz_compress_cp_preserve_2d_record_vertex(U, V, r1, r2, final_result_size, true, max_pwr_eb, all_vertex_for_all_diff_traj,totoal_thread,dec_inplace_U,dec_inplace_V,eb_type);
+      free(dec_inplace_U);
+      free(dec_inplace_V);
+    }
+    
   }
+  auto tpsz_comp_time_end = std::chrono::high_resolution_clock::now();
+  std::chrono::duration<double> tpsz_comp_duration = tpsz_comp_time_end - tpsz_comp_time_start;
+
   printf("checkpt1\n");
   unsigned char * result_after_zstd = NULL;
   size_t result_after_zstd_size = sz_lossless_compress(ZSTD_COMPRESSOR, 3, final_result, final_result_size, &result_after_zstd);
@@ -1537,7 +1604,13 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
   // free(final_result);
   float * final_dec_U = NULL;
   float * final_dec_V = NULL;
-  sz_decompress_cp_preserve_2d_online_record_vertex<float>(final_result, r1, r2, final_dec_U, final_dec_V);
+  if (CPSZ_OMP_FLAG == 0){
+    sz_decompress_cp_preserve_2d_online_record_vertex<float>(final_result, r1, r2, final_dec_U, final_dec_V);
+  }
+  else{
+    omp_sz_decompress_cp_preserve_2d_online(final_result, r1, r2, final_dec_U, final_dec_V);
+  }
+  
   auto tpsz_decomp_end = std::chrono::high_resolution_clock::now();
   std::chrono::duration<double> tpsz_decomp_duration = tpsz_decomp_end - tpsz_decomp_start;
 
@@ -1554,10 +1627,14 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
   printf("psnr_overall_cpsz: %f\n",psnr_cpsz_overall);
   printf("FINAL Compressed ratio = %f\n",(2*r1*r2*sizeof(float)) * 1.0/result_after_zstd_size);
   printf("psnr_overall: %f\n", psnr_overall);
+
   printf("comp time cpsz: %f\n", cpsz_comp_duration.count());
-  //printf("decomp time cpsz: %f\n", cpsz_decomp_duration.count());
+  printf("decomp time cpsz: %f\n", cpsz_decomp_duration.count());
+  printf("fix time tpsz: %f\n",traj_dec_begin_elapsed.count() + traj_ori_begin_elapsed.count() + init_queue_elapsed.count() + fix_traj_elapsed.count());
+  printf("comp Total time tpsz: %f\n",traj_dec_begin_elapsed.count() + traj_ori_begin_elapsed.count() + init_queue_elapsed.count() + fix_traj_elapsed.count() + tpsz_comp_duration.count());
   printf("decomp time tpsz: %f\n", tpsz_decomp_duration.count());
-  printf("fix time tpsz: %f\n",traj_dec_begin_elapsed + traj_ori_begin_elapsed + init_queue_elapsed + fix_traj_elapsed);
+
+  
   printf("%d\n",current_round);
   for (int i = 0; i < trajID_need_fix_next_vec.size(); ++i){
     printf("trajID_need_fix_next: %d, wrong outside: %d, wrong max_iter: %d, wrong find_cp: %d\n", trajID_need_fix_next_vec[i], trajID_need_fix_next_detail_vec[i][0], trajID_need_fix_next_detail_vec[i][1], trajID_need_fix_next_detail_vec[i][2]);
@@ -1754,11 +1831,15 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
   }
   else{
     printf("all passed!\n");
+    printf("all_vertex_for_all_diff_traj size: %ld\n", all_vertex_for_all_diff_traj.size());
   }
   //把all_vertex_for_all_diff_traj这个set里的东西写出来
   std::vector<size_t> temp_vec(all_vertex_for_all_diff_traj.begin(), all_vertex_for_all_diff_traj.end());
-  writefile((file_dir + "all_vertex_for_all_diff_traj.bin").c_str(), temp_vec.data(), temp_vec.size());
-  printf("write all_vertex_for_all_diff_traj to file sussfully\n");
+  if(file_dir != ""){
+    writefile((file_dir + "all_vertex_for_all_diff_traj.bin").c_str(), temp_vec.data(), temp_vec.size());
+    printf("write all_vertex_for_all_diff_traj to file sussfully\n");
+  }
+
   
   // exit(0);
 
@@ -2016,10 +2097,17 @@ int main(int argc, char **argv){
   double threshold = atof(argv[11]);
   double threshold_outside = atof(argv[12]);
   double threshold_max_iter = atof(argv[13]);
-  double next_index_coeff = 0.01;
-  std::string file_out_dir;
+  double next_index_coeff;
   if (argc == 15){
-    file_out_dir = argv[14];
+    next_index_coeff = atof(argv[14]);
+  }
+  else{
+    next_index_coeff = 1.0;
+  }
+  printf("next_index_coeff: %f\n", next_index_coeff);
+  std::string file_out_dir;
+  if (argc == 16){
+    file_out_dir = argv[15];
   }
   else{
     file_out_dir = "";

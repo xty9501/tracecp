@@ -35,7 +35,7 @@ template <typename T>
 unsigned char * omp_sz_compress_cp_preserve_3d_online_abs_record_vertex(
     const T * U, const T * V, const T * W, size_t r1, size_t r2, size_t r3, 
     size_t& compressed_size, double max_eb, const std::set<size_t>& index_need_to_lossless, 
-    int n_threads, T* &decompressed_U_ptr, T* &decompressed_V_ptr, T* &decompressed_W_ptr, std::vector<bool> &cp_exist_vec) ;
+    int n_threads, T* &decompressed_U_ptr, T* &decompressed_V_ptr, T* &decompressed_W_ptr, std::vector<bool> &cp_exist_vec);
 
 template <typename T>
 unsigned char * omp_sz_compress_cp_preserve_3d_record_vertex(

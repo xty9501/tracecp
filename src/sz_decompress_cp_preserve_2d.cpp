@@ -7,6 +7,7 @@
 
 
 
+
 template<typename T>
 void
 sz_decompress_cp_preserve_2d_online(const unsigned char * compressed, size_t r1, size_t r2, T *& U, T *& V){
@@ -66,6 +67,14 @@ sz_decompress_cp_preserve_2d_online(const unsigned char * compressed, size_t r1,
 			data_quant_index_pos += 2;
 		}
 	}
+
+	// if (WRITE_OUT_EB == 1){
+	// 	std::vector<float> result_eb(num_elements);
+	// 	for (int i = 0; i < 2*num_elements; i+2){
+	// 		result_eb[i] = pow(base, eb_quant_index[i]) * threshold;
+	// 	}
+	// 	writefile(("~/data/ocean_eb_rel.bin"), result_eb.data(), result_eb.size());
+	// }
 	free(eb_quant_index);
 	free(data_quant_index);
 }
@@ -150,6 +159,14 @@ sz_decompress_cp_preserve_2d_online_record_vertex(const unsigned char * compress
 			data_quant_index_pos += 2;
 		}
 	}
+
+	// if(WRITE_OUT_EB == 1){
+	// 	std::vector<float> result_eb(num_elements);
+	// 	for (int i = 0; i < 2*num_elements; i+2){
+	// 		result_eb[i] = pow(base, eb_quant_index[i]) * threshold;
+	// 	}
+	// 	writefile(("~/data/ocean_eb_abs.bin"), result_eb.data(), result_eb.size());
+	// }
 
 	if (lossless_count != 0){
 		T * lossless_data_U_pos = lossless_data_U;

@@ -10,6 +10,7 @@
 #include <omp.h>
 #include "utilsIO.h"
 
+
 inline std::set<size_t> convert_simplexID_to_coords(const std::set<size_t>& simplex, const int DW, const int DH){
   std::set<size_t> result;
   for (const auto& simplex_ID : simplex){
@@ -818,6 +819,9 @@ sz_compress_cp_preserve_2d_online(const double * U, const double * V, size_t r1,
 template<typename T>
 unsigned char *
 sz_compress_cp_preserve_2d_fix(const T * U, const T * V, size_t r1, size_t r2, size_t& compressed_size, bool transpose, double max_pwr_eb,double modified_eb,const std::set<size_t> &index_need_to_fix){
+	
+	std::vector<float> eb_result(r1*r2, 0);
+
 	size_t num_elements = r1 * r2;
 	T * decompressed_U = (T *) malloc(num_elements*sizeof(T));
 	memcpy(decompressed_U, U, num_elements*sizeof(T));
@@ -908,6 +912,10 @@ sz_compress_cp_preserve_2d_fix(const T * U, const T * V, size_t r1, size_t r2, s
 			}
 
 			if(required_eb > 0){
+				if(WRITE_OUT_EB == 1){
+					eb_result[vertex_index] = required_eb;
+				}
+				
 				bool unpred_flag = false;
 				T decompressed[2];
 				// compress U and V
@@ -977,6 +985,11 @@ sz_compress_cp_preserve_2d_fix(const T * U, const T * V, size_t r1, size_t r2, s
 		}
 		U_pos += r2;
 		V_pos += r2;
+	}
+	if(WRITE_OUT_EB == 1){
+		writefile("/home/mxi235/data/eb_result/eb_result_rel.bin", &eb_result[0], eb_result.size());
+		writefile("/home/mxi235/data/eb_result/rel_dec_U.bin", decompressed_U, num_elements);
+		writefile("/home/mxi235/data/eb_result/rel_dec_V.bin", decompressed_V, num_elements);
 	}
 	free(decompressed_U);
 	free(decompressed_V);
@@ -1467,6 +1480,7 @@ sz_compress_cp_preserve_2d_st2_fix(const float * U, const float * V, size_t r1, 
 template<typename T>
 unsigned char *
 sz_compress_cp_preserve_2d_online_abs_record_vertex(const T * U, const T * V, size_t r1, size_t r2, size_t& compressed_size, bool transpose, double max_pwr_eb, const std::set<size_t> &index_need_to_fix){
+	std::vector<float> eb_result(r1*r2, 0);
 	size_t num_elements = r1 * r2;
 	size_t intArrayLength = num_elements;
 	size_t num_bytes = (intArrayLength % 8 == 0) ? intArrayLength / 8 : intArrayLength / 8 + 1;
@@ -1572,6 +1586,9 @@ sz_compress_cp_preserve_2d_online_abs_record_vertex(const T * U, const T * V, si
 				}				
 			}
 			if(required_eb > 0){
+				if(WRITE_OUT_EB ==1){
+					eb_result[i*r2 + j] = required_eb;
+				}
 				bool unpred_flag = false;
 				T decompressed[2];
 				// compress U and V
@@ -1642,10 +1659,15 @@ sz_compress_cp_preserve_2d_online_abs_record_vertex(const T * U, const T * V, si
 		U_pos += r2;
 		V_pos += r2;
 	}
+	if(WRITE_OUT_EB == 1){
+		writefile("/home/mxi235/data/eb_result/eb_result_abs.bin", &eb_result[0], eb_result.size());
+		writefile("/home/mxi235/data/eb_result/abs_dec_U.bin", decompressed_U, num_elements);
+		writefile("/home/mxi235/data/eb_result/abs_dec_V.bin", decompressed_V, num_elements);
+	}
 	free(decompressed_U);
 	free(decompressed_V);
 	printf("offsets eb_q, data_q, unpred: %ld %ld %ld\n", eb_quant_index_pos - eb_quant_index, data_quant_index_pos - data_quant_index, unpred_data.size());
-	unsigned char * compressed = (unsigned char *) malloc(2*num_elements*sizeof(T));
+	unsigned char * compressed = (unsigned char *) malloc(3*num_elements*sizeof(T));
 	unsigned char * compressed_pos = compressed;
 	//写index_need_to_fix的大小
 	write_variable_to_dst(compressed_pos, index_need_to_fix.size());

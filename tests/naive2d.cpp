@@ -48,6 +48,7 @@
 #include <iostream> 
 #include <algorithm>
 #include<omp.h>
+#define CPSZ_OMP_FLAG 1
 
 std::array<double, 2> findLastNonNegativeOne(const std::vector<std::array<double, 2>>& vec) {
     for (auto it = vec.rbegin(); it != vec.rend(); ++it) {
@@ -433,23 +434,56 @@ naive_method(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_
   unsigned char * result = NULL;
   double current_pwr_eb = 0;
   if (eb_type == "rel"){
+    if (CPSZ_OMP_FLAG == 0)
     result = sz_compress_cp_preserve_2d_fix(U, V, r1, r2, result_size, false, max_pwr_eb, current_pwr_eb);
+    else{
+      float * dec_U_inplace = NULL;
+      float * dec_V_inplace = NULL;
+      std::set<size_t> empty_set;
+      result = omp_sz_compress_cp_preserve_2d_record_vertex(U, V, r1, r2, result_size, false, max_pwr_eb, empty_set, totoal_thread,dec_U_inplace,dec_V_inplace,eb_type);
+      free(dec_U_inplace);
+      free(dec_V_inplace);
+    }
   }
   else if (eb_type == "abs"){
-    result = sz_compress_cp_preserve_2d_online_abs_record_vertex(U, V, r1, r2, result_size, false, max_pwr_eb);
+    if (CPSZ_OMP_FLAG == 0){
+      result = sz_compress_cp_preserve_2d_online_abs_record_vertex(U, V, r1, r2, result_size, false, max_pwr_eb);
+    }
+    else{
+      //use omp version
+      float * dec_U_inplace = NULL;
+      float * dec_V_inplace = NULL;
+      std::set<size_t> empty_set;
+      result = omp_sz_compress_cp_preserve_2d_record_vertex(U, V, r1, r2, result_size, false, max_pwr_eb, empty_set, totoal_thread,dec_U_inplace,dec_V_inplace,eb_type);
+      free(dec_U_inplace);
+      free(dec_V_inplace);
+    }
+    
   }
   
   unsigned char * result_after_lossless = NULL;
   size_t lossless_outsize = sz_lossless_compress(ZSTD_COMPRESSOR, 3, result, result_size, &result_after_lossless);
+  free(result);
   size_t lossless_output = sz_lossless_decompress(ZSTD_COMPRESSOR, result_after_lossless, lossless_outsize, &result, result_size);
   float * dec_U = NULL;
   float * dec_V = NULL;
   if (eb_type == "rel"){
-    sz_decompress_cp_preserve_2d_online<float>(result, r1,r2, dec_U, dec_V); // use cpsz
+    if (CPSZ_OMP_FLAG == 0){
+      sz_decompress_cp_preserve_2d_online<float>(result, r1,r2, dec_U, dec_V); // use cpsz
+    }
+    else{
+      omp_sz_decompress_cp_preserve_2d_online(result, r1,r2, dec_U, dec_V);
+    }
+    
   }
   else if (eb_type == "abs"){
-    printf("use abs decompress\n");
-    sz_decompress_cp_preserve_2d_online_record_vertex<float>(result, r1,r2, dec_U, dec_V); 
+    if (CPSZ_OMP_FLAG == 0){
+      sz_decompress_cp_preserve_2d_online_record_vertex<float>(result, r1,r2, dec_U, dec_V); 
+    }
+    else{
+      omp_sz_decompress_cp_preserve_2d_online(result, r1,r2, dec_U, dec_V);
+    }
+    
   }
   
   // calculate compression ratio
@@ -581,10 +615,29 @@ naive_method(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_
   size_t result_size_naive = 0;
   unsigned char * result_naive = NULL;
   if (eb_type == "rel"){
-    result_naive = sz_compress_cp_preserve_2d_fix(U, V, r1, r2, result_size_naive, false, max_pwr_eb, current_pwr_eb, vertex_ori);
+    if(CPSZ_OMP_FLAG == 0){
+      result_naive = sz_compress_cp_preserve_2d_fix(U, V, r1, r2, result_size_naive, false, max_pwr_eb, current_pwr_eb, vertex_ori);
+    }
+    else{
+      float * dec_U_inplace = NULL;
+      float * dec_V_inplace = NULL;
+      result_naive = omp_sz_compress_cp_preserve_2d_record_vertex(U, V, r1, r2, result_size_naive, false, max_pwr_eb, vertex_ori, totoal_thread,dec_U_inplace,dec_V_inplace,eb_type);
+      free(dec_U_inplace);
+      free(dec_V_inplace);
+    }
+    
   }
   else if (eb_type == "abs"){
+    if(CPSZ_OMP_FLAG == 0){
     result_naive = sz_compress_cp_preserve_2d_online_abs_record_vertex(U, V, r1, r2, result_size_naive, false, max_pwr_eb, vertex_ori);
+    }
+    else{
+      float * dec_U_inplace = NULL;
+      float * dec_V_inplace = NULL;
+      result_naive = omp_sz_compress_cp_preserve_2d_record_vertex(U, V, r1, r2, result_size_naive, false, max_pwr_eb, vertex_ori, totoal_thread,dec_U_inplace,dec_V_inplace,eb_type);
+      free(dec_U_inplace);
+      free(dec_V_inplace);
+    }
   }
   
   unsigned char * result_after_lossless_naive = NULL;
@@ -599,10 +652,21 @@ naive_method(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_
   float * dec_U_naive = NULL;
   float * dec_V_naive = NULL;
   if (eb_type == "rel"){
-    sz_decompress_cp_preserve_2d_online<float>(result, r1,r2, dec_U_naive, dec_V_naive); // use cpsz
+    if (CPSZ_OMP_FLAG == 0){
+      sz_decompress_cp_preserve_2d_online<float>(result, r1,r2, dec_U_naive, dec_V_naive); // use cpsz
+    }
+    else{
+      omp_sz_decompress_cp_preserve_2d_online(result, r1,r2, dec_U_naive, dec_V_naive);
+    }
+    
   }
   else if (eb_type == "abs"){
+    if (CPSZ_OMP_FLAG == 0){
     sz_decompress_cp_preserve_2d_online_record_vertex<float>(result, r1,r2, dec_U_naive, dec_V_naive); 
+    }
+    else{
+      omp_sz_decompress_cp_preserve_2d_online(result, r1,r2, dec_U_naive, dec_V_naive);
+    }
   }
   
   // calculate compression ratio

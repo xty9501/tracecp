@@ -1,6 +1,6 @@
 #ifndef _sz_compress_cp_preserve_2d_hpp
 #define _sz_compress_cp_preserve_2d_hpp
-
+#define WRITE_OUT_EB 0
 #include <cstddef>
 #include <unordered_map>
 #include <set>
