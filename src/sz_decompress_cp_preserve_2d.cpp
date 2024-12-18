@@ -243,7 +243,19 @@ omp_sz_decompress_cp_preserve_2d_online(const unsigned char * compressed, size_t
 	int num_threads = 0;
 	read_variable_from_src(compressed_pos, num_threads);
 	printf("decomp num_threads = %d,pos = %ld\n", num_threads, compressed_pos - compressed);
-	
+	int M = (int)floor(sqrt(num_threads));
+	int K;
+
+	// 从 M 往下找，直到找到一个能整除 n 的因子
+	while (M > 0 && num_threads % M != 0) {
+		M--;
+	}
+
+	// 找到因子后，K = n / M
+	K = num_threads / M;
+
+	int num_edge_x = M*K;
+	int num_edge_y = M*K;
 	//读每个block的unpred_count
 	std::vector<size_t> unpredictable_count(num_threads);
 	for (int i = 0; i < num_threads; i++){
@@ -262,15 +274,14 @@ omp_sz_decompress_cp_preserve_2d_online(const unsigned char * compressed, size_t
 	// 	printf("decomp thread %d unpredictable data size = %ld, maxval = %f \n", i, unpred_data_each_thread[i].size(), *std::max_element(unpred_data_each_thread[i].begin(), unpred_data_each_thread[i].end()));
 	// }
 
-	int t = std::sqrt(num_threads);
 	//读每个row的unpred_count
-	std::vector<size_t> unpredictable_count_row((t-1)*t);
-	for (int i = 0; i < (t-1)*t ; i++){
+	std::vector<size_t> unpredictable_count_row(num_edge_x);
+	for (int i = 0; i < num_edge_x ; i++){
 		read_variable_from_src(compressed_pos, unpredictable_count_row[i]);
 	}
 	//读每个row的unpred_data
-	std::vector<std::vector<T>> unpred_data_row((t-1)*t);
-	for (int i = 0; i < (t-1)*t ; i++){
+	std::vector<std::vector<T>> unpred_data_row(num_edge_x);
+	for (int i = 0; i < num_edge_x ; i++){
 		T* raw_data = read_array_from_src<T>(compressed_pos,unpredictable_count_row[i]);
 		unpred_data_row[i] = std::vector<T>(raw_data, raw_data + unpredictable_count_row[i]);
 	}
@@ -282,13 +293,13 @@ omp_sz_decompress_cp_preserve_2d_online(const unsigned char * compressed, size_t
 
 
 	//读每个col的unpred_count
-	std::vector<size_t> unpredictable_count_col((t-1)*t);
-	for (int i = 0; i < (t-1)*t ; i++){
+	std::vector<size_t> unpredictable_count_col(num_edge_y);
+	for (int i = 0; i < num_edge_y ; i++){
 		read_variable_from_src(compressed_pos, unpredictable_count_col[i]);
 	}
 	//读每个col的unpred_data
-	std::vector<std::vector<T>> unpred_data_col((t-1)*t);
-	for (int i = 0; i < (t-1)*t ; i++){
+	std::vector<std::vector<T>> unpred_data_col(num_edge_y);
+	for (int i = 0; i < num_edge_y ; i++){
 		T* raw_data = read_array_from_src<T>(compressed_pos,unpredictable_count_col[i]);
 		unpred_data_col[i] = std::vector<T>(raw_data, raw_data + unpredictable_count_col[i]);
 	}
@@ -416,19 +427,21 @@ omp_sz_decompress_cp_preserve_2d_online(const unsigned char * compressed, size_t
 	int n = r1, m = r2;
 	// int t = sqrt(num_threads);
     // 计算每个块的大小
-    int block_height = n / t;
-    int block_width = m / t;
+    int block_height = n / M;
+    int block_width = m / K;
 
     // 处理余数情况（如果 n 或 m 不能被 t 整除）
-    int remaining_rows = n % t;
-    int remaining_cols = m % t;
+    int remaining_rows = n % M;
+    int remaining_cols = m % K;
 	// 存储划分线的位置
     std::vector<int> dividing_rows;
     std::vector<int> dividing_cols;
-    for (int i = 1; i < t; ++i) {
-        dividing_rows.push_back(i * block_height);
-        dividing_cols.push_back(i * block_width);
-    }
+    for (int i = 1; i < M; ++i) {
+    	dividing_rows.push_back(i * block_height);
+	}
+	for (int j = 1; j < K; ++j) {
+		dividing_cols.push_back(j * block_width);
+	}
 	// 创建一个一维标记数组，标记哪些数据点位于划分线上
 	std::vector<bool> is_dividing_line(n * m, false);
 	// 标记划分线上的数据点
@@ -446,24 +459,24 @@ omp_sz_decompress_cp_preserve_2d_online(const unsigned char * compressed, size_t
             }
         }
     }
-	int total_blocks = num_threads;
+	int total_blocks = M*K;
 	omp_set_num_threads(num_threads);
 	size_t total_processed = 0;	
 	// printf("use %d threads for block processing\n", num_threads);
 	#pragma omp parallel for
 	for (int block_id = 0; block_id < total_blocks; ++block_id){
-		int block_row = block_id / t;
-		int block_col = block_id % t;
+		int block_row = block_id / K;
+		int block_col = block_id % K;
 
 		// 计算块的起始和结束行列索引
 		int start_row = block_row * block_height;
 		int end_row = (block_row + 1) * block_height;
-		if (block_row == t - 1) {
+		if (block_row == K - 1) {
 			end_row += remaining_rows;
 		}
 		int start_col = block_col * block_width;
 		int end_col = (block_col + 1) * block_width;
-		if (block_col == t - 1) {
+		if (block_col == K - 1) {
 			end_col += remaining_cols;
 		}
 		//printf("dec-threadID = %d, block_id = %d, start_row = %d, end_row = %d, start_col = %d, end_col = %d\n", omp_get_thread_num(), block_id, start_row, end_row, start_col, end_col);
@@ -527,7 +540,7 @@ omp_sz_decompress_cp_preserve_2d_online(const unsigned char * compressed, size_t
 	//目前已经处理完了每个块的数据，现在要特殊处理划分线上的数据
 	//优化：并行处理
 	//先处理横着的线（行）
-	omp_set_num_threads((t-1)*t);
+	omp_set_num_threads(num_edge_x);
 	// printf("use %d threads for row processing\n", (t-1)*t);
 	#pragma omp parallel for collapse(2)
 	for (int i : dividing_rows){
@@ -565,7 +578,7 @@ omp_sz_decompress_cp_preserve_2d_online(const unsigned char * compressed, size_t
 	}
 
 	//再处理竖着的线（列）
-	omp_set_num_threads((t-1)*t);
+	omp_set_num_threads(num_edge_y);
 	// printf("use %d threads for col processing\n", (t-1)*t);
 	#pragma omp parallel for collapse(2) 
 	for (int j : dividing_cols){

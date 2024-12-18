@@ -2011,10 +2011,27 @@ omp_sz_compress_cp_preserve_2d_record_vertex(const T * U, const T * V, size_t r1
 	auto prepare_comp_start = std::chrono::high_resolution_clock::now();
 	//确定线程数是不是平方数
 	int num_threads = n_threads;
-	if (sqrt(num_threads) != (int)sqrt(num_threads)){
-		printf("The number of threads must be a square number!\n");
+	// if (sqrt(num_threads) != (int)sqrt(num_threads)){
+	// 	printf("The number of threads must be a square number!\n");
+	// 	exit(0);
+	// }
+	int M = (int)floor(sqrt(num_threads));
+	int K;
+
+	// 从 M 往下找，直到找到一个能整除 n 的因子
+	while (M > 0 && num_threads % M != 0) {
+		M--;
+	}
+
+	// 找到因子后，K = n / M
+	K = num_threads / M;
+	if (K == 1 || M == 1) {
+		printf("bad num_threads, prime\n");
 		exit(0);
 	}
+	int num_edges_x = M * K;
+	int num_edges_y = M * K;
+
 	T * decompressed_U = (T *) malloc(num_elements*sizeof(T));
 	memcpy(decompressed_U, U, num_elements*sizeof(T));
 	T * decompressed_V = (T *) malloc(num_elements*sizeof(T));
@@ -2082,22 +2099,32 @@ omp_sz_compress_cp_preserve_2d_record_vertex(const T * U, const T * V, size_t r1
 
 
 
-	int t = sqrt(num_threads);
+	// int t = sqrt(num_threads);
     // 计算每个块的大小
-    int block_height = n / t;
-    int block_width = m / t;
+    int block_height = n / M;
+    int block_width = m / K;
 
     // 处理余数情况（如果 n 或 m 不能被 t 整除）
-    int remaining_rows = n % t;
-    int remaining_cols = m % t;
+    int remaining_rows = n % M;
+    int remaining_cols = m % K;
 
     // 存储划分线的位置
     std::vector<int> dividing_rows;
     std::vector<int> dividing_cols;
-    for (int i = 1; i < t; ++i) {
-        dividing_rows.push_back(i * block_height);
-        dividing_cols.push_back(i * block_width);
-    }
+    for (int i = 1; i < M; ++i) {
+    	dividing_rows.push_back(i * block_height);
+	}
+	for (int j = 1; j < K; ++j) {
+		dividing_cols.push_back(j * block_width);
+	}
+	//print out dividing_rows and dividing_cols, and M and K
+	printf("M = %d, K = %d\n", M, K);
+	for (int i = 0; i < dividing_rows.size(); ++i) {
+		printf("dividing_rows[%d] = %d\n", i, dividing_rows[i]);
+	}
+	for (int i = 0; i < dividing_cols.size(); ++i) {
+		printf("dividing_cols[%d] = %d\n", i, dividing_cols[i]);
+	}
 
 	std::vector<bool> is_dividing_row(n, false);
 	std::vector<bool> is_dividing_col(m, false);
@@ -2109,7 +2136,7 @@ omp_sz_compress_cp_preserve_2d_record_vertex(const T * U, const T * V, size_t r1
 	}
 
 	//总数据块数
-	int total_blocks = num_threads;
+	int total_blocks = M * K;
 
 	/*
 	//统计总在划分线上的数据点数
@@ -2171,21 +2198,21 @@ omp_sz_compress_cp_preserve_2d_record_vertex(const T * U, const T * V, size_t r1
 	printf("prepare_comp_time = %f\n", prepare_comp_time.count());
 	auto comp_start = std::chrono::high_resolution_clock::now();
 	// 并行处理区域，不包括划分线上的数据点
-	omp_set_num_threads(num_threads);
+	omp_set_num_threads(total_blocks);
 	#pragma omp parallel for //reduction(+:processed_block_count)
 	for (int block_id = 0; block_id < total_blocks; ++block_id){
-		int block_row = block_id / t;
-		int block_col = block_id % t;
+		int block_row = block_id / K;
+		int block_col = block_id % K;
 
 		// 计算块的起始和结束行列索引
 		int start_row = block_row * block_height;
 		int end_row = (block_row + 1) * block_height;
-		if (block_row == t - 1) {
+		if (block_row == K - 1) {
 			end_row += remaining_rows;
 		}
 		int start_col = block_col * block_width;
 		int end_col = (block_col + 1) * block_width;
-		if (block_col == t - 1) {
+		if (block_col == K - 1) {
 			end_col += remaining_cols;
 		}
 		
@@ -2455,8 +2482,8 @@ omp_sz_compress_cp_preserve_2d_record_vertex(const T * U, const T * V, size_t r1
 	//优化处理线和点
 	//先处理横着的线（行）
 
-	std::vector<std::vector<T>> unpred_data_row((t-1)*t);
-	omp_set_num_threads((t-1)*t);
+	std::vector<std::vector<T>> unpred_data_row(num_edges_x);
+	omp_set_num_threads(num_edges_x);
 	#pragma omp parallel for collapse(2) //reduction(+:processed_edge_row_count)
 	for(int i : dividing_rows){
 		for (int j = -1; j < (int)dividing_cols.size();j++){
@@ -2587,8 +2614,8 @@ omp_sz_compress_cp_preserve_2d_record_vertex(const T * U, const T * V, size_t r1
 	}
 
 	//处理竖着的线（列）
-	std::vector<std::vector<T>> unpred_data_col((t-1)*t);
-	omp_set_num_threads((t-1)*t);
+	std::vector<std::vector<T>> unpred_data_col(num_edges_y);
+	omp_set_num_threads(num_edges_y);
 	#pragma omp parallel for collapse(2) //reduction(+:processed_edge_col_count)
 	for(int j : dividing_cols){
 		for (int i = -1; i < (int)dividing_rows.size();i++){
@@ -2925,22 +2952,22 @@ omp_sz_compress_cp_preserve_2d_record_vertex(const T * U, const T * V, size_t r1
 	}
 
 	//写每个row的unpred_data size
-	for (auto threadID = 0; threadID < (t-1)*t; threadID++){
+	for (auto threadID = 0; threadID < num_edges_x; threadID++){
 		write_variable_to_dst(compressed_pos, unpred_data_row[threadID].size());
 		//printf("thread %d, unpred_row size = %ld,maxvalue = %f\n", threadID, unpred_data_row[threadID].size(), (unpred_data_row[threadID].size() == 0)? 0:*std::max_element(unpred_data_row[threadID].begin(), unpred_data_row[threadID].end()) );
 	}
 	//写每个row的unpred_data
-	for (auto threadID = 0; threadID < (t-1)*t; threadID++){
+	for (auto threadID = 0; threadID < num_edges_x; threadID++){
 		write_array_to_dst(compressed_pos, (T *)&unpred_data_row[threadID][0], unpred_data_row[threadID].size());
 	}
 
 	//写每个col的unpred_data size
-	for (auto threadID = 0; threadID < (t-1)*t; threadID++){
+	for (auto threadID = 0; threadID < num_edges_y; threadID++){
 		write_variable_to_dst(compressed_pos, unpred_data_col[threadID].size());
 	}
 
 	//写每个col的unpred_data
-	for (auto threadID = 0; threadID < (t-1)*t; threadID++){
+	for (auto threadID = 0; threadID < num_edges_y; threadID++){
 		write_array_to_dst(compressed_pos, (T *)&unpred_data_col[threadID][0], unpred_data_col[threadID].size());
 	}
 

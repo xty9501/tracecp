@@ -57,7 +57,7 @@
 #define TRANSTER_TEST_FLAG 0
 #define SPEED_TEST_FLAG 1
 #define RECORD_INTERMEDIATE_TRAJECTORY 0
-#define SAVE_OUTPUT_FILE 1
+#define SAVE_OUTPUT_FILE 0
 using namespace std;
 
 template <class T>
@@ -288,9 +288,10 @@ void verify(Type * ori_data, Type * data, size_t num_elements, double &nrmse){
     double mean2 = sum2/num_elements;
 
     double sum3 = 0, sum4 = 0;
-    double sum = 0, prodSum = 0, relerr = 0;
+    double sum = 0, prodSum = 0, relerr = 0, abserr = 0;
 
     double maxpw_relerr = 0; 
+    double maxpw_abserr = 0;
     for (i = 0; i < num_elements; i++){
         if (Max < ori_data[i]) Max = ori_data[i];
         if (Min > ori_data[i]) Min = ori_data[i];
@@ -299,9 +300,16 @@ void verify(Type * ori_data, Type * data, size_t num_elements, double &nrmse){
         if(ori_data[i]!=0 && fabs(ori_data[i])>1)
         {
             relerr = err/fabs(ori_data[i]);
-            if(maxpw_relerr<relerr)
-                maxpw_relerr = relerr;
+            
+            if(maxpw_relerr<relerr){
+              maxpw_relerr = relerr;
+            }
+            if (maxpw_abserr < err){
+              maxpw_abserr = err;
+            }
         }
+
+            
 
         if (diffMax < err)
             diffMax = err;
@@ -324,6 +332,7 @@ void verify(Type * ori_data, Type * data, size_t num_elements, double &nrmse){
     printf ("Max absolute error = %.10f\n", diffMax);
     printf ("Max relative error = %f\n", diffMax/(Max-Min));
     printf ("Max pw relative error = %f\n", maxpw_relerr);
+    printf ("Max pw absolute error = %f\n", maxpw_abserr);
     printf ("PSNR = %f, NRMSE= %.20G\n", psnr,nrmse);
     printf ("acEff=%f\n", acEff);   
 }
@@ -1106,6 +1115,20 @@ std::vector<std::array<double, 3>> trajectory_3d(double *X_original, const std::
   }
 
 void final_check(float *U, float *V, float *W, int r1, int r2, int r3, double eb, int obj,traj_config t_config,int num_thread,int total_num_thread, std::set<size_t> vertex_need_to_lossless, thresholds th,result_struct results,std::string eb_type, std::string file_out_dir=""){
+  // 统计lossless占比
+  std::vector<float> lossless_data;
+  for (auto o:vertex_need_to_lossless){
+    lossless_data.push_back(U[o]);
+    lossless_data.push_back(V[o]);
+    lossless_data.push_back(W[o]);
+  }
+  printf("lossless_data size: %ld\n", lossless_data.size());
+  size_t lossless_value_size = vertex_need_to_lossless.size() * 3 * sizeof(float);
+  unsigned char * lossless_value = NULL;
+  size_t lossless_value_size_after_zstd = sz_lossless_compress(ZSTD_COMPRESSOR, 3, (unsigned char *)lossless_data.data(), lossless_value_size, &lossless_value);
+  printf("lossless_value using zstd size: %zu\n", lossless_value_size_after_zstd);
+  free(lossless_value);
+
   unsigned char * final_result = NULL;
   size_t final_result_size = 0;
   auto tpsz_comp_start = std::chrono::high_resolution_clock::now();
@@ -1201,6 +1224,7 @@ void final_check(float *U, float *V, float *W, int r1, int r2, int r3, double eb
   printf("BEGIN Compression ratio = %f\n", results.begin_cr_);
   printf("PSNR_overall_cpsz = %f\n", results.psnr_cpsz_overall_);
   printf("FINAL Compression ratio = %f\n", (3*r1*r2*r3*sizeof(float)) * 1.0/result_after_zstd_size);
+  printf("percentage of lossless data size: %f\n", lossless_value_size_after_zstd * 1.0 / result_after_zstd_size);
   printf("PSNR_overall = %f\n", psnr_cpsz_overall);
   printf("comp time = %f\n", results.cpsz_comp_time_);
   printf("decomp time = %f\n", results.cpsz_decomp_time_);
@@ -1531,20 +1555,23 @@ int main(int argc, char ** argv){
     int readout_flag = 0;
     int writeout_flag = 1;
 
-    if(SPEED_TEST_FLAG == 1){
-      if (total_thread >=125){
-        thread_num_compression = 125;
-        thread_num_fix = total_thread;
-      }
-      else if (total_thread >= 64){
-        thread_num_compression = 64;
-        thread_num_fix = total_thread;
-      }
-      else if (total_thread >= 27){
-        thread_num_compression = 27;
-        thread_num_fix = total_thread;
-      }
-    }
+    // if(SPEED_TEST_FLAG == 1){
+    //   if (total_thread >=125){
+    //     thread_num_compression = 125;
+    //     thread_num_fix = total_thread;
+    //   }
+    //   else if (total_thread >= 64){
+    //     thread_num_compression = 64;
+    //     thread_num_fix = total_thread;
+    //   }
+    //   else if (total_thread >= 27){
+    //     thread_num_compression = 27;
+    //     thread_num_fix = total_thread;
+    //   }
+    // }
+
+    thread_num_compression = total_thread;
+    thread_num_fix = total_thread;
     
     std::chrono::duration<double> cpsz_comp_duration;
     std::chrono::duration<double> cpsz_decomp_duration;
@@ -1616,6 +1643,11 @@ int main(int argc, char ** argv){
           float * dec_W_inplace = NULL;
           std::vector<bool> cp_exist = {};
           result = omp_sz_compress_cp_preserve_3d_online_abs_record_vertex(U,V,W, r1, r2, r3, result_size, max_eb,empty_set, thread_num_compression, dec_U_inplace, dec_V_inplace, dec_W_inplace,cp_exist);
+          double a,b,c;
+          verify(U, dec_U_inplace, r1*r2*r3, a);
+          verify(V, dec_V_inplace, r1*r2*r3, b);
+          verify(W, dec_W_inplace, r1*r2*r3, c);
+          printf("####check inplace above\n");
           free(dec_U_inplace);
           free(dec_V_inplace);
           free(dec_W_inplace);

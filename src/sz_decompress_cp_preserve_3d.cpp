@@ -5,6 +5,28 @@
 #include <unordered_set>
 #include <algorithm>
 #include <chrono>
+
+inline void factor2D(int n, int &A, int &B) {
+    int start = (int)floor(sqrt(n));
+    while (start > 0 && n % start != 0) {
+        start--;
+    }
+    A = start;
+    B = n / A;
+}
+
+inline void factor3D(int n, int &M, int &K, int &L) {
+    // 先从立方根附近寻找因子M
+    int start = (int)floor(cbrt(n));
+    while (start > 0 && n % start != 0) {
+        start--;
+    }
+    M = start;
+    int remain = n / M;
+
+    // 对remain进行2D因子分解
+    factor2D(remain, K, L);
+}
 template<typename T>
 void
 sz_decompress_cp_preserve_3d_online_log(const unsigned char * compressed, size_t r1, size_t r2, size_t r3, T *& U, T *& V, T *& W){
@@ -534,13 +556,35 @@ omp_sz_decompress_cp_preserve_3d_online_abs_record_vertex(const unsigned char * 
 
 	int num_threads = 0;
 	read_variable_from_src(compressed_pos, num_threads);
+	printf("dec num_threads = %d\n", num_threads);
+
+	int M,K,L;
+	factor3D(num_threads, M, K, L);
+	printf("decomp M = %d, K = %d, L = %d\n", M, K, L);
+	// int num_faces_x = (M-1)*K*L;
+	// int num_faces_y = M*(K-1)*L;
+	// int num_faces_z = M*K*(L-1);
+	// int num_edges_x = (M-1)*(K-1)*L;
+	// int num_edges_y = K * (M-1)*(L-1);
+	// int num_edges_z = M * (K - 1) * (L - 1);
+	int num_faces_x = M*K*L;
+	int num_faces_y = M*K*L;
+	int num_faces_z = M*K*L;
+	int num_edges_x = M*K*L;
+	int num_edges_y = M*K*L;
+	int num_edges_z = M*K*L;
 
 	auto read_variables_time_start = std::chrono::high_resolution_clock::now();
+
+	int sum_unpred_size = 0;
 	// 读每一个block的unpred_data size
 	std::vector<size_t> unpred_data_count(num_threads);
 	for (int i = 0; i < num_threads; i++){
 		read_variable_from_src(compressed_pos, unpred_data_count[i]);
+		sum_unpred_size += unpred_data_count[i];
 	}
+	printf("dec sum_unpred_size = %d\n", sum_unpred_size);
+	
 	//读每个block的unpred_data
 	std::vector<std::vector<T>> unpred_data_each_thread(num_threads);
 	for (int i = 0; i < num_threads; i++){
@@ -551,77 +595,89 @@ omp_sz_decompress_cp_preserve_3d_online_abs_record_vertex(const unsigned char * 
 		//read_array_from_src_to_stdarray<T>(compressed_pos, unpred_data_each_thread[i], unpred_data_count[i]);
 	}
 
-	int t = std::round(std::cbrt(num_threads));
-	int num_faces = (t-1) * t * t;
-	int num_edges = t*(t-1)*(t-1);
+	// int t = std::round(std::cbrt(num_threads));
+	// int num_faces = (t-1) * t * t;
+	// int num_edges = t*(t-1)*(t-1);
 	//读每个face_x的unpred_data size
-	std::vector<size_t> face_x_data_count(num_threads);
-	for (int i = 0; i < num_faces; i++){
+	std::vector<size_t> face_x_data_count(num_faces_x);
+	for (int i = 0; i < num_faces_x; i++){
 		read_variable_from_src(compressed_pos, face_x_data_count[i]);
 	}
 	//读每个face_x的unpred_data
-	std::vector<std::vector<T>> face_x_data_each_thread(num_threads);
-	for (int i = 0; i < num_faces; i++){
+	std::vector<std::vector<T>> face_x_data_each_thread(num_faces_x);
+	for (int i = 0; i < num_faces_x; i++){
 		T * raw_data = read_array_from_src<T>(compressed_pos, face_x_data_count[i]);
 		face_x_data_each_thread[i] = std::vector<T>(raw_data, raw_data + face_x_data_count[i]);
 		free(raw_data);
 	}
 	//读每个face_y的unpred_data size
-	std::vector<size_t> face_y_data_count(num_threads);
-	for (int i = 0; i < num_faces; i++){
+	std::vector<size_t> face_y_data_count(num_faces_y);
+	for (int i = 0; i < num_faces_y; i++){
 		read_variable_from_src(compressed_pos, face_y_data_count[i]);
 	}
 	//读每个face_y的unpred_data
-	std::vector<std::vector<T>> face_y_data_each_thread(num_threads);
-	for (int i = 0; i < num_faces; i++){
+	std::vector<std::vector<T>> face_y_data_each_thread(num_faces_y);
+	for (int i = 0; i < num_faces_y; i++){
 		T * raw_data = read_array_from_src<T>(compressed_pos, face_y_data_count[i]);
 		face_y_data_each_thread[i] = std::vector<T>(raw_data, raw_data + face_y_data_count[i]);
 		free(raw_data);
 	}
 	//读每个face_z的unpred_data size
-	std::vector<size_t> face_z_data_count(num_threads);
-	for (int i = 0; i < num_faces; i++){
+	std::vector<size_t> face_z_data_count(num_faces_z);
+	for (int i = 0; i < num_faces_z; i++){
 		read_variable_from_src(compressed_pos, face_z_data_count[i]);
 	}
 	//读每个face_z的unpred_data
-	std::vector<std::vector<T>> face_z_data_each_thread(num_threads);
-	for (int i = 0; i < num_faces; i++){
+	std::vector<std::vector<T>> face_z_data_each_thread(num_faces_z);
+	for (int i = 0; i < num_faces_z; i++){
 		T * raw_data = read_array_from_src<T>(compressed_pos, face_z_data_count[i]);
 		face_z_data_each_thread[i] = std::vector<T>(raw_data, raw_data + face_z_data_count[i]);
 		free(raw_data);
 	}
 	//读每个edge_x的unpred_data size
-	std::vector<size_t> edge_x_data_count(num_threads);
-	for (int i = 0; i < num_edges; i++){
+	std::vector<size_t> edge_x_data_count(num_edges_x);
+	for (int i = 0; i < num_edges_x; i++){
 		read_variable_from_src(compressed_pos, edge_x_data_count[i]);
 	}
 	//读每个edge_x的unpred_data
-	std::vector<std::vector<T>> edge_x_data_each_thread(num_threads);
-	for (int i = 0; i < num_edges; i++){
+	std::vector<std::vector<T>> edge_x_data_each_thread(num_edges_x);
+	for (int i = 0; i < num_edges_x; i++){
 		T * raw_data = read_array_from_src<T>(compressed_pos, edge_x_data_count[i]);
 		edge_x_data_each_thread[i] = std::vector<T>(raw_data, raw_data + edge_x_data_count[i]);
 		free(raw_data);
 	}
+	int sum_unpred_data_edge_y = 0;
+	double total_sum= 0;
 	//读每个edge_y的unpred_data size
-	std::vector<size_t> edge_y_data_count(num_threads);
-	for (int i = 0; i < num_edges; i++){
+	std::vector<size_t> edge_y_data_count(num_edges_y);
+	for (int i = 0; i < num_edges_y; i++){
 		read_variable_from_src(compressed_pos, edge_y_data_count[i]);
+		sum_unpred_data_edge_y += edge_y_data_count[i];
 	}
 	//读每个edge_y的unpred_data
-	std::vector<std::vector<T>> edge_y_data_each_thread(num_threads);
-	for (int i = 0; i < num_edges; i++){
+	std::vector<std::vector<T>> edge_y_data_each_thread(num_edges_y);
+	for (int i = 0; i < num_edges_y; i++){
 		T * raw_data = read_array_from_src<T>(compressed_pos, edge_y_data_count[i]);
 		edge_y_data_each_thread[i] = std::vector<T>(raw_data, raw_data + edge_y_data_count[i]);
 		free(raw_data);
+		for (int j = 0; j < edge_y_data_count[i]; j++){
+			total_sum += edge_y_data_each_thread[i][j];
+		}
 	}
+	printf("decomp: sum_unpred_data_edges_y = %d\n", sum_unpred_data_edge_y);
+	printf("decomp: total_sum = %f\n", total_sum);
+	for (int i = 0; i < edge_y_data_each_thread[1].size(); i++){
+		printf("decomp: edge_y_data_each_thread[1][%d] = %f\n", i, edge_y_data_each_thread[1][i]);
+	}
+	printf("====================================\n");
 	//读每个edge_z的unpred_data size
-	std::vector<size_t> edge_z_data_count(num_threads);
-	for (int i = 0; i < num_edges; i++){
+	std::vector<size_t> edge_z_data_count(num_edges_z);
+	for (int i = 0; i < num_edges_z; i++){
 		read_variable_from_src(compressed_pos, edge_z_data_count[i]);
 	}
 	//读每个edge_z的unpred_data
-	std::vector<std::vector<T>> edge_z_data_each_thread(num_threads);
-	for (int i = 0; i < num_edges; i++){
+	std::vector<std::vector<T>> edge_z_data_each_thread(num_edges_z);
+	for (int i = 0; i < num_edges_z; i++){
 		T * raw_data = read_array_from_src<T>(compressed_pos, edge_z_data_count[i]);
 		edge_z_data_each_thread[i] = std::vector<T>(raw_data, raw_data + edge_z_data_count[i]);
 		free(raw_data);
@@ -631,7 +687,13 @@ omp_sz_decompress_cp_preserve_3d_online_abs_record_vertex(const unsigned char * 
 	read_variable_from_src(compressed_pos, dot_data_count);
 	// 读dot的unpred_data
 	T * dot_data = read_array_from_src<T>(compressed_pos, dot_data_count);
-
+	//print sum of dot_data
+	double sum_dot_data = 0;
+	for (int i = 0; i < dot_data_count; i++){
+		sum_dot_data += dot_data[i];
+	}
+	printf("sum of dot_data = %f\n", sum_dot_data);
+	printf("count of dot_data = %ld\n", dot_data_count);
 	auto read_variables_time_end = std::chrono::high_resolution_clock::now();
 	printf("time for get other variables in second: %f\n", std::chrono::duration<double>(read_variables_time_end - read_variables_time_start).count());
 	
@@ -703,6 +765,7 @@ omp_sz_decompress_cp_preserve_3d_online_abs_record_vertex(const unsigned char * 
 		//total_time_copy += std::chrono::duration<double>(copy_end - copy_start).count();
 	}
 	auto readAndDecode_DataQuant_end = std::chrono::high_resolution_clock::now();
+	printf("abs mode\n");
 	printf("time for read and decode eb_quant_index in second: %f\n", std::chrono::duration<double>(readAndDecode_EbQuant_end - readAndDecode_EbQuant_start).count());
 	printf("time for read and decode data_quant_index in second: %f(readonly: %f)\n", std::chrono::duration<double>(readAndDecode_DataQuant_end - readAndDecode_DataQuant_start).count(), std::chrono::duration<double>(readOnly_DataQuant_end - readOnly_DataQuant_start).count());
 	printf("decomp pos after huffmans = %ld\n", compressed_pos - compressed);
@@ -723,23 +786,47 @@ omp_sz_decompress_cp_preserve_3d_online_abs_record_vertex(const unsigned char * 
 
 
 	// 计算每个块的大小
-	int block_r1 = r1 / t;
-	int block_r2 = r2 / t;
-	int block_r3 = r3 / t;
+	// int block_r1 = r1 / t;
+	// int block_r2 = r2 / t;
+	// int block_r3 = r3 / t;
+	int block_r1 = r1 / M;
+	int block_r2 = r2 / K;
+	int block_r3 = r3 / L;
 
 	//处理余数的情况
-	int remaining_r1 = r1 % t;
-	int remaining_r2 = r2 % t;
-	int remaining_r3 = r3 % t;
+	// int remaining_r1 = r1 % t;
+	// int remaining_r2 = r2 % t;
+	// int remaining_r3 = r3 % t;
+	int remaining_r1 = r1 % M;
+	int remaining_r2 = r2 % K;
+	int remaining_r3 = r3 % L;
 	//储存划分平面的位置
 	std::vector<int> dividing_r1;
     std::vector<int> dividing_r2;
     std::vector<int> dividing_r3;
-    for (int i = 1; i < t; ++i) {
-        dividing_r1.push_back(i * block_r1);
-        dividing_r2.push_back(i * block_r2);
-        dividing_r3.push_back(i * block_r3);
-    }
+    // for (int i = 1; i < t; ++i) {
+    //     dividing_r1.push_back(i * block_r1);
+    //     dividing_r2.push_back(i * block_r2);
+    //     dividing_r3.push_back(i * block_r3);
+    // }
+	for (int i = 1; i < M; ++i) {
+		dividing_r1.push_back(i * block_r1);
+	}
+	for (int i = 1; i < K; ++i) {
+		dividing_r2.push_back(i * block_r2);
+	}
+	for (int i = 1; i < L; ++i) {
+		dividing_r3.push_back(i * block_r3);
+	}
+	for (int i = 0; i < dividing_r1.size(); i++) {
+		printf("decomp dividing_r1[%d] = %d\n", i, dividing_r1[i]);
+	}
+	for (int i = 0; i < dividing_r2.size(); i++) {
+		printf("decomp dividing_r2[%d] = %d\n", i, dividing_r2[i]);
+	}
+	for (int i = 0; i < dividing_r3.size(); i++) {
+		printf("decomp dividing_r3[%d] = %d\n", i, dividing_r3[i]);
+	}
 	// for (int i = 0; i < dividing_r1.size(); i++) {
 	// 	printf("decomp dividing_r1[%d] = %d\n", i, dividing_r1[i]);
 	// }
@@ -785,14 +872,17 @@ omp_sz_decompress_cp_preserve_3d_online_abs_record_vertex(const unsigned char * 
 	
 	size_t processed_data_dec_count = 0;
 	// 处理块
-	int total_block = t * t * t;
+	int total_block = M * K * L;
 	omp_set_num_threads(total_block);
 	//omp_set_proc_bind(omp_proc_bind_true);
 	#pragma omp parallel for num_threads(num_threads) 
 	for (int block_id = 0; block_id < total_block; ++block_id){
-		int block_i = block_id / (t * t);
-		int block_j = (block_id % (t * t)) / t;
-		int block_k = block_id % t;
+		// int block_i = block_id / (t * t);
+		// int block_j = (block_id % (t * t)) / t;
+		// int block_k = block_id % t;
+		int block_i = block_id / (K * L);
+		int block_j = (block_id % (K * L)) / L;
+		int block_k = block_id % L;
 		// 计算块的起始位置
 		int start_i = block_i * block_r1;
 		int start_j = block_j * block_r2;
@@ -801,13 +891,13 @@ omp_sz_decompress_cp_preserve_3d_online_abs_record_vertex(const unsigned char * 
 		int end_i = start_i + block_r1;
 		int end_j = start_j + block_r2;
 		int end_k = start_k + block_r3;
-		if (block_i == t - 1) {
+		if (block_i == M - 1) {
 			end_i += remaining_r1;
 		}
-		if (block_j == t - 1) {
+		if (block_j == K - 1) {
 			end_j += remaining_r2;
 		}
-		if (block_k == t - 1) {
+		if (block_k == L - 1) {
 			end_k += remaining_r3;
 		}
 		//printf("Thread %d process block %d, start_i = %d, end_i = %d, start_j = %d, end_j = %d, start_k = %d, end_k = %d\n", omp_get_thread_num(), block_id, start_i, end_i, start_j, end_j, start_k, end_k);
@@ -866,41 +956,7 @@ omp_sz_decompress_cp_preserve_3d_online_abs_record_vertex(const unsigned char * 
 	}
 
 
-	//串行
-	/*
-	//现在特殊处理划分线上的数据
-	T *unpred_data_dividing_pos = &unpred_data_dividing[0];
-	for (int i = 0; i < r1; ++i) {
-		for (int j = 0; j < r2; ++j) {
-			for (int k = 0; k < r3; ++k) {
-				if (on_dividing_line[i * r2 * r3 + j * r3 + k]) {
-					//开始处理数据
-					size_t position_idx = i * r2 * r3 + j * r3 + k;
-					if (eb_quant_index[position_idx] == 0){
-						U[position_idx] = *(unpred_data_dividing_pos++);
-						V[position_idx] = *(unpred_data_dividing_pos++);
-						W[position_idx] = *(unpred_data_dividing_pos++);
-					}
-					else{
-						double eb = pow(base, eb_quant_index[position_idx]) * threshold;
-						for (int p = 0; p < 3; ++p){
-							T *cur_data_field = (p == 0) ? U : (p == 1) ? V : W;
-							T d0 = (i && j && k) ? cur_data_field[position_idx - r2 * r3 - r3 - 1] : 0;
-							T d1 = (i && j) ? cur_data_field[position_idx - r2 * r3 - r3] : 0;
-							T d2 = (i && k) ? cur_data_field[position_idx - r2 * r3 - 1] : 0;
-							T d3 = (i) ? cur_data_field[position_idx - r2 * r3] : 0;
-							T d4 = (j && k) ? cur_data_field[position_idx - r3 - 1] : 0;
-							T d5 = (j) ? cur_data_field[position_idx - r3] : 0;
-							T d6 = (k) ? cur_data_field[position_idx - 1] : 0;
-							T pred = d0 + d3 + d5 + d6 - d1 - d2 - d4;
-							cur_data_field[position_idx] = pred + 2 * (data_quant_index[3 * position_idx + p] - intv_radius) * eb;
-						}
-					}
-				}
-			}
-		}
-	}
-	*/
+
 
 	//优化: 并行解压TODO
 	ptrdiff_t dim0_offset = r2 * r3;
@@ -909,189 +965,28 @@ omp_sz_decompress_cp_preserve_3d_online_abs_record_vertex(const unsigned char * 
 	ptrdiff_t cell_dim1_offset = r3-1;
 
 
-	#pragma omp parallel
-	{
-		//并行处理face_x
-		//omp_set_num_threads(num_faces);
-		// Process faces perpendicular to the X-axis(jk-plane)
-		
-		// #pragma omp for collapse(3) nowait
-		#pragma omp for collapse(3) 
-		for (int i : dividing_r1){
-			for (int j = -1; j < (int)dividing_r2.size(); j++){
-				for (int k = -1; k < (int)dividing_r3.size(); k++){
-					int thread_id = omp_get_thread_num();
-					int x_layer = i;
-					int start_j = (j == -1) ? 0 : dividing_r2[j];
-					int end_j = (j == (int)dividing_r2.size() - 1) ? r2 : dividing_r2[j + 1];
-					int start_k = (k == -1) ? 0 : dividing_r3[k];
-					int end_k = (k == (int)dividing_r3.size() - 1) ? r3 : dividing_r3[k + 1];
-					T *unpred_data_pos = &face_x_data_each_thread[thread_id][0];
-					for (int jj = start_j; jj < end_j; ++jj){
-						// if (std::find(dividing_r2.begin(), dividing_r2.end(), j) != dividing_r2.end()){
-						// 	continue;
-						// }
-						if (is_dividing_r2[jj]){
-							continue;
-						}
-						for (int kk = start_k; kk < end_k; ++kk){
-							// if (std::find(dividing_r3.begin(), dividing_r3.end(), k) != dividing_r3.end()){
-							// 	continue;
-							// }
-							if (is_dividing_r3[kk]){
-								continue;
-							}
-							//开始处理数据
-							size_t position_idx = i * r2 * r3 + jj * r3 + kk;
-							//processed_data_dec_count++;
-							if (eb_quant_index[position_idx] == 0){
-								U[position_idx] = *(unpred_data_pos++);
-								V[position_idx] = *(unpred_data_pos++);
-								W[position_idx] = *(unpred_data_pos++);
-							}
-							else{
-								double eb = pow(base, eb_quant_index[position_idx]) * threshold;
-								for (int p = 0; p < 3; ++p){
-									//degrade to 2D
-									T *cur_data_field = (p == 0) ? U : (p == 1) ? V : W;
-									T d0 = ((jj && kk) && (jj - start_j != 1 && kk - start_k != 1)) ? cur_data_field[position_idx - r2 - 1] : 0;
-									T d1 = (jj && (jj - start_j != 1)) ? cur_data_field[position_idx - r2] : 0;
-									T d2 = (kk && (kk - start_k != 1)) ? cur_data_field[position_idx - 1] : 0;
-									T pred = d1 + d2 - d0;
-									cur_data_field[position_idx] = pred + 2 * (data_quant_index[3 * position_idx + p] - intv_radius) * eb;
-								}
-							}
-						}
+
+	//并行处理face_x
+	omp_set_num_threads(num_faces_x);
+	// Process faces perpendicular to the X-axis(jk-plane)
+	#pragma omp parallel for collapse(3) 
+	for (int i : dividing_r1){
+		for (int j = -1; j < (int)dividing_r2.size(); j++){
+			for (int k = -1; k < (int)dividing_r3.size(); k++){
+				int thread_id = omp_get_thread_num();
+				int x_layer = i;
+				int start_j = (j == -1) ? 0 : dividing_r2[j];
+				int end_j = (j == (int)dividing_r2.size() - 1) ? r2 : dividing_r2[j + 1];
+				int start_k = (k == -1) ? 0 : dividing_r3[k];
+				int end_k = (k == (int)dividing_r3.size() - 1) ? r3 : dividing_r3[k + 1];
+				T *unpred_data_pos = &face_x_data_each_thread[thread_id][0];
+				for (int jj = start_j; jj < end_j; ++jj){
+					// if (std::find(dividing_r2.begin(), dividing_r2.end(), j) != dividing_r2.end()){
+					// 	continue;
+					// }
+					if (is_dividing_r2[jj]){
+						continue;
 					}
-				}
-			}
-		}
-
-		//并行处理face_y
-		//omp_set_num_threads(num_faces);
-		// #pragma omp for collapse(3) nowait
-		#pragma omp for collapse(3)
-		for (int j : dividing_r2){
-			for (int i = -1; i < (int)dividing_r1.size(); i++){
-				for (int k = -1; k < (int)dividing_r3.size(); k++){
-					int thread_id = omp_get_thread_num();
-					int y_layer = j;
-					int start_i = (i == -1) ? 0 : dividing_r1[i];
-					int end_i = (i == (int)dividing_r1.size() - 1) ? r1 : dividing_r1[i + 1];
-					int start_k = (k == -1) ? 0 : dividing_r3[k];
-					int end_k = (k == (int)dividing_r3.size() - 1) ? r3 : dividing_r3[k + 1];
-					T *unpred_data_pos = &face_y_data_each_thread[thread_id][0];
-					for (int ii = start_i; ii < end_i; ++ii){
-						// if (std::find(dividing_r1.begin(), dividing_r1.end(), i) != dividing_r1.end()){
-						// 	continue;
-						// }
-						if (is_dividing_r1[ii]){
-							continue;
-						}
-						for (int kk = start_k; kk < end_k; ++kk){
-							// if (std::find(dividing_r3.begin(), dividing_r3.end(), k) != dividing_r3.end()){
-							// 	continue;
-							// }
-							if (is_dividing_r3[kk]){
-								continue;
-							}
-							//开始处理数据
-							size_t position_idx = ii * r2 * r3 + j * r3 + kk;
-							//processed_data_dec_count++;
-							if (eb_quant_index[position_idx] == 0){
-								U[position_idx] = *(unpred_data_pos++);
-								V[position_idx] = *(unpred_data_pos++);
-								W[position_idx] = *(unpred_data_pos++);
-							}
-							else{
-								double eb = pow(base, eb_quant_index[position_idx]) * threshold;
-								for (int p = 0; p < 3; ++p){
-									//degrade to 2D
-									T *cur_data_field = (p == 0) ? U : (p == 1) ? V : W;
-										T d0 = ((ii && kk) && (ii - start_i != 1 && kk - start_k != 1)) ? cur_data_field[position_idx - r2*r3 - 1] : 0;
-										T d1 = (ii && (ii - start_i != 1)) ? cur_data_field[position_idx - r2*r3] : 0;
-										T d2 = (kk && (kk - start_k != 1)) ? cur_data_field[position_idx - 1] : 0;
-										T pred = d1 + d2 - d0;
-										cur_data_field[position_idx] = pred + 2 * (data_quant_index[3 * position_idx + p] - intv_radius) * eb;
-								}
-							}
-						}
-					}
-				}
-			}
-		}
-
-		//并行处理face_z
-		//omp_set_num_threads(num_faces);
-		// #pragma omp for collapse(3) nowait
-		#pragma omp for collapse(3)
-		for (int k : dividing_r3){
-			for (int i = -1; i < (int)dividing_r1.size(); i++){
-				for (int j = -1; j < (int)dividing_r2.size(); j++){
-					int thread_id = omp_get_thread_num();
-					int z_layer = k;
-					int start_i = (i == -1) ? 0 : dividing_r1[i];
-					int end_i = (i == (int)dividing_r1.size() - 1) ? r1 : dividing_r1[i + 1];
-					int start_j = (j == -1) ? 0 : dividing_r2[j];
-					int end_j = (j == (int)dividing_r2.size() - 1) ? r2 : dividing_r2[j + 1];
-					T *unpred_data_pos = &face_z_data_each_thread[thread_id][0];
-					for (int ii = start_i; ii < end_i; ++ii){
-						// if (std::find(dividing_r1.begin(), dividing_r1.end(), i) != dividing_r1.end()){
-						// 	continue;
-						// }
-						if (is_dividing_r1[ii]){
-							continue;
-						}
-						for (int jj = start_j; jj < end_j; ++jj){
-							// if (std::find(dividing_r2.begin(), dividing_r2.end(), j) != dividing_r2.end()){
-							// 	continue;
-							// }
-							if (is_dividing_r2[jj]){
-								continue;
-							}
-							//开始处理数据
-							size_t position_idx = ii * r2 * r3 + jj * r3 + k;
-							//processed_data_dec_count++;
-							if (eb_quant_index[position_idx] == 0){
-								U[position_idx] = *(unpred_data_pos++);
-								V[position_idx] = *(unpred_data_pos++);
-								W[position_idx] = *(unpred_data_pos++);
-							}
-							else{
-								double eb = pow(base, eb_quant_index[position_idx]) * threshold;
-								for (int p = 0; p < 3; ++p){
-									//degrade to 2D
-									T *cur_data_field = (p == 0) ? U : (p == 1) ? V : W;
-									T d0 = ((ii && jj) && (ii - start_i != 1 && jj - start_j != 1)) ? cur_data_field[position_idx - r2*r3 - r3] : 0;
-									T d1 = (ii && (ii - start_i != 1)) ? cur_data_field[position_idx - r2*r3] : 0;
-									T d2 = (jj && (jj - start_j != 1)) ? cur_data_field[position_idx - r3] : 0;
-									T pred = d1 + d2 - d0;
-									cur_data_field[position_idx] = pred + 2 * (data_quant_index[3 * position_idx + p] - intv_radius) * eb;
-								}
-							}
-						}
-					}
-				}
-			}
-		}
-
-	}
-
-	#pragma omp parallel
-	{
-		//并行处理edge_x
-		//omp_set_num_threads(num_edges);
-		// #pragma omp for collapse(3) nowait
-		#pragma omp for collapse(3) 
-		for (int i : dividing_r1){
-			for (int j :dividing_r2){
-				for (int k = -1; k < (int)dividing_r3.size(); k++){
-					int thread_id = omp_get_thread_num();
-					int x_layer = i;
-					int y_layer = j;
-					int start_k = (k == -1) ? 0 : dividing_r3[k];
-					int end_k = (k == (int)dividing_r3.size() - 1) ? r3 : dividing_r3[k + 1];
-					T *unpred_data_pos = &edge_x_data_each_thread[thread_id][0];
 					for (int kk = start_k; kk < end_k; ++kk){
 						// if (std::find(dividing_r3.begin(), dividing_r3.end(), k) != dividing_r3.end()){
 						// 	continue;
@@ -1100,7 +995,7 @@ omp_sz_decompress_cp_preserve_3d_online_abs_record_vertex(const unsigned char * 
 							continue;
 						}
 						//开始处理数据
-						size_t position_idx = i * r2 * r3 + j * r3 + kk;
+						size_t position_idx = i * r2 * r3 + jj * r3 + kk;
 						//processed_data_dec_count++;
 						if (eb_quant_index[position_idx] == 0){
 							U[position_idx] = *(unpred_data_pos++);
@@ -1110,10 +1005,12 @@ omp_sz_decompress_cp_preserve_3d_online_abs_record_vertex(const unsigned char * 
 						else{
 							double eb = pow(base, eb_quant_index[position_idx]) * threshold;
 							for (int p = 0; p < 3; ++p){
-								//degrade to 1D
+								//degrade to 2D
 								T *cur_data_field = (p == 0) ? U : (p == 1) ? V : W;
-								T d0 = (kk && (kk - start_k != 1)) ? cur_data_field[position_idx - 1] : 0;
-								T pred = d0;
+								T d0 = ((jj && kk) && (jj - start_j != 1 && kk - start_k != 1)) ? cur_data_field[position_idx - r2 - 1] : 0;
+								T d1 = (jj && (jj - start_j != 1)) ? cur_data_field[position_idx - r2] : 0;
+								T d2 = (kk && (kk - start_k != 1)) ? cur_data_field[position_idx - 1] : 0;
+								T pred = d1 + d2 - d0;
 								cur_data_field[position_idx] = pred + 2 * (data_quant_index[3 * position_idx + p] - intv_radius) * eb;
 							}
 						}
@@ -1121,29 +1018,37 @@ omp_sz_decompress_cp_preserve_3d_online_abs_record_vertex(const unsigned char * 
 				}
 			}
 		}
+	}
 
-		//并行处理edge_y
-		//omp_set_num_threads(num_edges);
-		// #pragma omp for collapse(3) nowait
-		#pragma omp for collapse(3) 
-		for (int j : dividing_r2){
-			for (int k : dividing_r3){
-				for (int i = -1; i < (int)dividing_r1.size(); i++){
-					int thread_id = omp_get_thread_num();
-					int y_layer = j;
-					int z_layer = k;
-					int start_i = (i == -1) ? 0 : dividing_r1[i];
-					int end_i = (i == (int)dividing_r1.size() - 1) ? r1 : dividing_r1[i + 1];
-					T *unpred_data_pos = &edge_y_data_each_thread[thread_id][0];
-					for (int ii = start_i; ii < end_i; ++ii){
-						// if (std::find(dividing_r1.begin(), dividing_r1.end(), i) != dividing_r1.end()){
+	//并行处理face_y
+	omp_set_num_threads(num_faces_y);
+	#pragma omp parallel for collapse(3) 
+	for (int j : dividing_r2){
+		for (int i = -1; i < (int)dividing_r1.size(); i++){
+			for (int k = -1; k < (int)dividing_r3.size(); k++){
+				int thread_id = omp_get_thread_num();
+				int y_layer = j;
+				int start_i = (i == -1) ? 0 : dividing_r1[i];
+				int end_i = (i == (int)dividing_r1.size() - 1) ? r1 : dividing_r1[i + 1];
+				int start_k = (k == -1) ? 0 : dividing_r3[k];
+				int end_k = (k == (int)dividing_r3.size() - 1) ? r3 : dividing_r3[k + 1];
+				T *unpred_data_pos = &face_y_data_each_thread[thread_id][0];
+				for (int ii = start_i; ii < end_i; ++ii){
+					// if (std::find(dividing_r1.begin(), dividing_r1.end(), i) != dividing_r1.end()){
+					// 	continue;
+					// }
+					if (is_dividing_r1[ii]){
+						continue;
+					}
+					for (int kk = start_k; kk < end_k; ++kk){
+						// if (std::find(dividing_r3.begin(), dividing_r3.end(), k) != dividing_r3.end()){
 						// 	continue;
 						// }
-						if (is_dividing_r1[ii]){
+						if (is_dividing_r3[kk]){
 							continue;
 						}
 						//开始处理数据
-						size_t position_idx = ii * r2 * r3 + j * r3 + k;
+						size_t position_idx = ii * r2 * r3 + j * r3 + kk;
 						//processed_data_dec_count++;
 						if (eb_quant_index[position_idx] == 0){
 							U[position_idx] = *(unpred_data_pos++);
@@ -1153,32 +1058,41 @@ omp_sz_decompress_cp_preserve_3d_online_abs_record_vertex(const unsigned char * 
 						else{
 							double eb = pow(base, eb_quant_index[position_idx]) * threshold;
 							for (int p = 0; p < 3; ++p){
-								//degrade to 1D
+								//degrade to 2D
 								T *cur_data_field = (p == 0) ? U : (p == 1) ? V : W;
-								//degrade to 1D
-								T d0 = (ii && (ii - start_i != 1)) ? cur_data_field[position_idx - r2*r3] : 0;
-								T pred = d0;
-								cur_data_field[position_idx] = pred + 2 * (data_quant_index[3 * position_idx + p] - intv_radius) * eb;
+									T d0 = ((ii && kk) && (ii - start_i != 1 && kk - start_k != 1)) ? cur_data_field[position_idx - r2*r3 - 1] : 0;
+									T d1 = (ii && (ii - start_i != 1)) ? cur_data_field[position_idx - r2*r3] : 0;
+									T d2 = (kk && (kk - start_k != 1)) ? cur_data_field[position_idx - 1] : 0;
+									T pred = d1 + d2 - d0;
+									cur_data_field[position_idx] = pred + 2 * (data_quant_index[3 * position_idx + p] - intv_radius) * eb;
 							}
 						}
 					}
 				}
 			}
 		}
+	}
 
-		//并行处理edge_z
-		//omp_set_num_threads(num_edges);
-		// #pragma omp for collapse(3) nowait
-		#pragma omp for collapse(3) 
-		for (int k : dividing_r3){
-			for (int i : dividing_r1){
-				for (int j = -1; j < (int)dividing_r2.size(); j++){
-					int thread_id = omp_get_thread_num();
-					int z_layer = k;
-					int x_layer = i;
-					int start_j = (j == -1) ? 0 : dividing_r2[j];
-					int end_j = (j == (int)dividing_r2.size() - 1) ? r2 : dividing_r2[j + 1];
-					T *unpred_data_pos = &edge_z_data_each_thread[thread_id][0];
+	//并行处理face_z
+	omp_set_num_threads(num_faces_z);
+	#pragma omp parallel for collapse(3) 
+	for (int k : dividing_r3){
+		for (int i = -1; i < (int)dividing_r1.size(); i++){
+			for (int j = -1; j < (int)dividing_r2.size(); j++){
+				int thread_id = omp_get_thread_num();
+				int z_layer = k;
+				int start_i = (i == -1) ? 0 : dividing_r1[i];
+				int end_i = (i == (int)dividing_r1.size() - 1) ? r1 : dividing_r1[i + 1];
+				int start_j = (j == -1) ? 0 : dividing_r2[j];
+				int end_j = (j == (int)dividing_r2.size() - 1) ? r2 : dividing_r2[j + 1];
+				T *unpred_data_pos = &face_z_data_each_thread[thread_id][0];
+				for (int ii = start_i; ii < end_i; ++ii){
+					// if (std::find(dividing_r1.begin(), dividing_r1.end(), i) != dividing_r1.end()){
+					// 	continue;
+					// }
+					if (is_dividing_r1[ii]){
+						continue;
+					}
 					for (int jj = start_j; jj < end_j; ++jj){
 						// if (std::find(dividing_r2.begin(), dividing_r2.end(), j) != dividing_r2.end()){
 						// 	continue;
@@ -1186,8 +1100,9 @@ omp_sz_decompress_cp_preserve_3d_online_abs_record_vertex(const unsigned char * 
 						if (is_dividing_r2[jj]){
 							continue;
 						}
+						//开始处理数据
+						size_t position_idx = ii * r2 * r3 + jj * r3 + k;
 						//processed_data_dec_count++;
-						size_t position_idx = i * r2 * r3 + jj * r3 + k;
 						if (eb_quant_index[position_idx] == 0){
 							U[position_idx] = *(unpred_data_pos++);
 							V[position_idx] = *(unpred_data_pos++);
@@ -1196,10 +1111,12 @@ omp_sz_decompress_cp_preserve_3d_online_abs_record_vertex(const unsigned char * 
 						else{
 							double eb = pow(base, eb_quant_index[position_idx]) * threshold;
 							for (int p = 0; p < 3; ++p){
-								//degrade to 1D
+								//degrade to 2D
 								T *cur_data_field = (p == 0) ? U : (p == 1) ? V : W;
-								T d0 = (jj && (jj - start_j != 1)) ? cur_data_field[position_idx - r3] : 0;
-								T pred = d0;
+								T d0 = ((ii && jj) && (ii - start_i != 1 && jj - start_j != 1)) ? cur_data_field[position_idx - r2*r3 - r3] : 0;
+								T d1 = (ii && (ii - start_i != 1)) ? cur_data_field[position_idx - r2*r3] : 0;
+								T d2 = (jj && (jj - start_j != 1)) ? cur_data_field[position_idx - r3] : 0;
+								T pred = d1 + d2 - d0;
 								cur_data_field[position_idx] = pred + 2 * (data_quant_index[3 * position_idx + p] - intv_radius) * eb;
 							}
 						}
@@ -1207,8 +1124,140 @@ omp_sz_decompress_cp_preserve_3d_online_abs_record_vertex(const unsigned char * 
 				}
 			}
 		}
-	
 	}
+	printf("done face...\n");
+
+
+	//并行处理edge_x
+	omp_set_num_threads(num_edges_x);
+	#pragma omp parallel for collapse(3) 
+	for (int i : dividing_r1){
+		for (int j :dividing_r2){
+			for (int k = -1; k < (int)dividing_r3.size(); k++){
+				int thread_id = omp_get_thread_num();
+				int x_layer = i;
+				int y_layer = j;
+				int start_k = (k == -1) ? 0 : dividing_r3[k];
+				int end_k = (k == (int)dividing_r3.size() - 1) ? r3 : dividing_r3[k + 1];
+				T *unpred_data_pos = &edge_x_data_each_thread[thread_id][0];
+				for (int kk = start_k; kk < end_k; ++kk){
+					// if (std::find(dividing_r3.begin(), dividing_r3.end(), k) != dividing_r3.end()){
+					// 	continue;
+					// }
+					if (is_dividing_r3[kk]){
+						continue;
+					}
+					//开始处理数据
+					size_t position_idx = i * r2 * r3 + j * r3 + kk;
+					//processed_data_dec_count++;
+					if (eb_quant_index[position_idx] == 0){
+						U[position_idx] = *(unpred_data_pos++);
+						V[position_idx] = *(unpred_data_pos++);
+						W[position_idx] = *(unpred_data_pos++);
+					}
+					else{
+						double eb = pow(base, eb_quant_index[position_idx]) * threshold;
+						for (int p = 0; p < 3; ++p){
+							//degrade to 1D
+							T *cur_data_field = (p == 0) ? U : (p == 1) ? V : W;
+							T d0 = (kk && (kk - start_k != 1)) ? cur_data_field[position_idx - 1] : 0;
+							T pred = d0;
+							cur_data_field[position_idx] = pred + 2 * (data_quant_index[3 * position_idx + p] - intv_radius) * eb;
+						}
+					}
+				}
+			}
+		}
+	}
+	printf("done edge_x...\n");
+
+	//并行处理edge_y
+	omp_set_num_threads(num_edges_y);
+	#pragma omp parallel for collapse(3) 
+	for (int j : dividing_r2){
+		for (int k : dividing_r3){
+			for (int i = -1; i < (int)dividing_r1.size(); i++){
+				int thread_id = omp_get_thread_num();
+				int y_layer = j;
+				int z_layer = k;
+				int start_i = (i == -1) ? 0 : dividing_r1[i];
+				int end_i = (i == (int)dividing_r1.size() - 1) ? r1 : dividing_r1[i + 1];
+				T *unpred_data_pos = &edge_y_data_each_thread[thread_id][0];
+				for (int ii = start_i; ii < end_i; ++ii){
+					// if (std::find(dividing_r1.begin(), dividing_r1.end(), i) != dividing_r1.end()){
+					// 	continue;
+					// }
+					if (is_dividing_r1[ii]){
+						continue;
+					}
+					//开始处理数据
+					size_t position_idx = ii * r2 * r3 + j * r3 + k;
+					//processed_data_dec_count++;
+					if (eb_quant_index[position_idx] == 0){
+						U[position_idx] = *(unpred_data_pos++);
+						V[position_idx] = *(unpred_data_pos++);
+						W[position_idx] = *(unpred_data_pos++);
+					}
+					else{
+						double eb = pow(base, eb_quant_index[position_idx]) * threshold;
+						for (int p = 0; p < 3; ++p){
+							//degrade to 1D
+							T *cur_data_field = (p == 0) ? U : (p == 1) ? V : W;
+							//degrade to 1D
+							T d0 = (ii && (ii - start_i != 1)) ? cur_data_field[position_idx - r2*r3] : 0;
+							T pred = d0;
+							cur_data_field[position_idx] = pred + 2 * (data_quant_index[3 * position_idx + p] - intv_radius) * eb;
+						}
+					}
+				}
+			}
+		}
+	}
+	printf("done edge_y...\n");
+
+	//并行处理edge_z
+	omp_set_num_threads(num_edges_z);
+	#pragma omp parallel for collapse(3) 
+	for (int k : dividing_r3){
+		for (int i : dividing_r1){
+			for (int j = -1; j < (int)dividing_r2.size(); j++){
+				int thread_id = omp_get_thread_num();
+				int z_layer = k;
+				int x_layer = i;
+				int start_j = (j == -1) ? 0 : dividing_r2[j];
+				int end_j = (j == (int)dividing_r2.size() - 1) ? r2 : dividing_r2[j + 1];
+				T *unpred_data_pos = &edge_z_data_each_thread[thread_id][0];
+				for (int jj = start_j; jj < end_j; ++jj){
+					// if (std::find(dividing_r2.begin(), dividing_r2.end(), j) != dividing_r2.end()){
+					// 	continue;
+					// }
+					if (is_dividing_r2[jj]){
+						continue;
+					}
+					//processed_data_dec_count++;
+					size_t position_idx = i * r2 * r3 + jj * r3 + k;
+					if (eb_quant_index[position_idx] == 0){
+						U[position_idx] = *(unpred_data_pos++);
+						V[position_idx] = *(unpred_data_pos++);
+						W[position_idx] = *(unpred_data_pos++);
+					}
+					else{
+						double eb = pow(base, eb_quant_index[position_idx]) * threshold;
+						for (int p = 0; p < 3; ++p){
+							//degrade to 1D
+							T *cur_data_field = (p == 0) ? U : (p == 1) ? V : W;
+							T d0 = (jj && (jj - start_j != 1)) ? cur_data_field[position_idx - r3] : 0;
+							T pred = d0;
+							cur_data_field[position_idx] = pred + 2 * (data_quant_index[3 * position_idx + p] - intv_radius) * eb;
+						}
+					}
+				}
+			}
+		}
+	}
+	printf("done edge...\n");
+
+
 
 	auto pred_dot_time_start = std::chrono::high_resolution_clock::now();
 	//处理dot, 串行
@@ -1370,6 +1419,16 @@ omp_sz_decompress_cp_preserve_3d_record_vertex(const unsigned char * compressed,
 	int num_threads = 0;
 	read_variable_from_src(compressed_pos, num_threads);
 	printf("decomp num_threads = %d\n", num_threads);
+	int M,K,L;
+	factor3D(num_threads, M, K, L);
+	printf("decomp M = %d, K = %d, L = %d\n", M, K, L);
+
+	int num_faces_x = M*K*L;
+	int num_faces_y = M*K*L;
+	int num_faces_z = M*K*L;
+	int num_edges_x = M*K*L;
+	int num_edges_y = M*K*L;
+	int num_edges_z = M*K*L;
 
 	auto read_variables_time_start = std::chrono::high_resolution_clock::now();
 	// 读每一个block的unpred_data size
@@ -1389,80 +1448,80 @@ omp_sz_decompress_cp_preserve_3d_record_vertex(const unsigned char * compressed,
 	}
 	printf("decomp: compressed_pos after block = %ld\n",compressed_pos - compressed);
 
-	int t = std::round(std::cbrt(num_threads));
-	printf("t = %d\n", t);
-	int num_faces = (t-1) * t * t;
-	int num_edges = t*(t-1)*(t-1);
+	// int t = std::round(std::cbrt(num_threads));
+	// printf("t = %d\n", t);
+	// int num_faces = (t-1) * t * t;
+	// int num_edges = t*(t-1)*(t-1);
 	//读每个face_x的unpred_data size
-	std::vector<size_t> face_x_data_count(num_faces);
-	for (int i = 0; i < num_faces; i++){
+	std::vector<size_t> face_x_data_count(num_faces_x);
+	for (int i = 0; i < num_faces_x; i++){
 		read_variable_from_src(compressed_pos, face_x_data_count[i]);
 	}
 	//读每个face_x的unpred_data
-	std::vector<std::vector<T>> face_x_data_each_thread(num_faces);
-	for (int i = 0; i < num_faces; i++){
+	std::vector<std::vector<T>> face_x_data_each_thread(num_faces_x);
+	for (int i = 0; i < num_faces_x; i++){
 		T * raw_data = read_array_from_src<T>(compressed_pos, face_x_data_count[i]);
 		face_x_data_each_thread[i] = std::vector<T>(raw_data, raw_data + face_x_data_count[i]);
 		free(raw_data);
 	}
 	//读每个face_y的unpred_data size
-	std::vector<size_t> face_y_data_count(num_faces);
-	for (int i = 0; i < num_faces; i++){
+	std::vector<size_t> face_y_data_count(num_faces_y);
+	for (int i = 0; i < num_faces_y; i++){
 		read_variable_from_src(compressed_pos, face_y_data_count[i]);
 	}
 	//读每个face_y的unpred_data
-	std::vector<std::vector<T>> face_y_data_each_thread(num_faces);
-	for (int i = 0; i < num_faces; i++){
+	std::vector<std::vector<T>> face_y_data_each_thread(num_faces_y);
+	for (int i = 0; i < num_faces_y; i++){
 		T * raw_data = read_array_from_src<T>(compressed_pos, face_y_data_count[i]);
 		face_y_data_each_thread[i] = std::vector<T>(raw_data, raw_data + face_y_data_count[i]);
 		free(raw_data);
 	}
 	//读每个face_z的unpred_data size
-	std::vector<size_t> face_z_data_count(num_faces);
-	for (int i = 0; i < num_faces; i++){
+	std::vector<size_t> face_z_data_count(num_faces_z);
+	for (int i = 0; i < num_faces_z; i++){
 		read_variable_from_src(compressed_pos, face_z_data_count[i]);
 	}
 	//读每个face_z的unpred_data
-	std::vector<std::vector<T>> face_z_data_each_thread(num_faces);
-	for (int i = 0; i < num_faces; i++){
+	std::vector<std::vector<T>> face_z_data_each_thread(num_faces_z);
+	for (int i = 0; i < num_faces_z; i++){
 		T * raw_data = read_array_from_src<T>(compressed_pos, face_z_data_count[i]);
 		face_z_data_each_thread[i] = std::vector<T>(raw_data, raw_data + face_z_data_count[i]);
 		free(raw_data);
 	}
-	printf("decomp last face_z size: %ld\n", face_z_data_count[num_faces-1]);
+	//printf("decomp last face_z size: %ld\n", face_z_data_count[num_faces-1]);
 
 	//读每个edge_x的unpred_data size
-	std::vector<size_t> edge_x_data_count(num_edges);
-	for (int i = 0; i < num_edges; i++){
+	std::vector<size_t> edge_x_data_count(num_edges_x);
+	for (int i = 0; i < num_edges_x; i++){
 		read_variable_from_src(compressed_pos, edge_x_data_count[i]);
 	}
 	//读每个edge_x的unpred_data
-	std::vector<std::vector<T>> edge_x_data_each_thread(num_edges);
-	for (int i = 0; i < num_edges; i++){
+	std::vector<std::vector<T>> edge_x_data_each_thread(num_edges_x);
+	for (int i = 0; i < num_edges_x; i++){
 		T * raw_data = read_array_from_src<T>(compressed_pos, edge_x_data_count[i]);
 		edge_x_data_each_thread[i] = std::vector<T>(raw_data, raw_data + edge_x_data_count[i]);
 		free(raw_data);
 	}
 	//读每个edge_y的unpred_data size
-	std::vector<size_t> edge_y_data_count(num_edges);
-	for (int i = 0; i < num_edges; i++){
+	std::vector<size_t> edge_y_data_count(num_edges_y);
+	for (int i = 0; i < num_edges_y; i++){
 		read_variable_from_src(compressed_pos, edge_y_data_count[i]);
 	}
 	//读每个edge_y的unpred_data
-	std::vector<std::vector<T>> edge_y_data_each_thread(num_edges);
-	for (int i = 0; i < num_edges; i++){
+	std::vector<std::vector<T>> edge_y_data_each_thread(num_edges_y);
+	for (int i = 0; i < num_edges_y; i++){
 		T * raw_data = read_array_from_src<T>(compressed_pos, edge_y_data_count[i]);
 		edge_y_data_each_thread[i] = std::vector<T>(raw_data, raw_data + edge_y_data_count[i]);
 		free(raw_data);
 	}
 	//读每个edge_z的unpred_data size
-	std::vector<size_t> edge_z_data_count(num_edges);
-	for (int i = 0; i < num_edges; i++){
+	std::vector<size_t> edge_z_data_count(num_edges_z);
+	for (int i = 0; i < num_edges_z; i++){
 		read_variable_from_src(compressed_pos, edge_z_data_count[i]);
 	}
 	//读每个edge_z的unpred_data
-	std::vector<std::vector<T>> edge_z_data_each_thread(num_edges);
-	for (int i = 0; i < num_edges; i++){
+	std::vector<std::vector<T>> edge_z_data_each_thread(num_edges_z);
+	for (int i = 0; i < num_edges_z; i++){
 		T * raw_data = read_array_from_src<T>(compressed_pos, edge_z_data_count[i]);
 		edge_z_data_each_thread[i] = std::vector<T>(raw_data, raw_data + edge_z_data_count[i]);
 		free(raw_data);
@@ -1542,6 +1601,7 @@ omp_sz_decompress_cp_preserve_3d_record_vertex(const unsigned char * compressed,
 		//total_time_copy += std::chrono::duration<double>(copy_end - copy_start).count();
 	}
 	auto readAndDecode_DataQuant_end = std::chrono::high_resolution_clock::now();
+	printf("rel mode\n");
 	printf("time for read and decode eb_quant_index in second: %f\n", std::chrono::duration<double>(readAndDecode_EbQuant_end - readAndDecode_EbQuant_start).count());
 	printf("time for read and decode data_quant_index in second: %f(readonly: %f)\n", std::chrono::duration<double>(readAndDecode_DataQuant_end - readAndDecode_DataQuant_start).count(), std::chrono::duration<double>(readOnly_DataQuant_end - readOnly_DataQuant_start).count());
 	printf("decomp pos after huffmans = %ld\n", compressed_pos - compressed);
@@ -1562,23 +1622,48 @@ omp_sz_decompress_cp_preserve_3d_record_vertex(const unsigned char * compressed,
 
 
 	// 计算每个块的大小
-	int block_r1 = r1 / t;
-	int block_r2 = r2 / t;
-	int block_r3 = r3 / t;
+	// int block_r1 = r1 / t;
+	// int block_r2 = r2 / t;
+	// int block_r3 = r3 / t;
+	int block_r1 = r1 / M;
+	int block_r2 = r2 / K;
+	int block_r3 = r3 / L;
 
 	//处理余数的情况
-	int remaining_r1 = r1 % t;
-	int remaining_r2 = r2 % t;
-	int remaining_r3 = r3 % t;
+	// int remaining_r1 = r1 % t;
+	// int remaining_r2 = r2 % t;
+	// int remaining_r3 = r3 % t;
+	int remaining_r1 = r1 % M;
+	int remaining_r2 = r2 % K;
+	int remaining_r3 = r3 % L;
+
 	//储存划分平面的位置
 	std::vector<int> dividing_r1;
     std::vector<int> dividing_r2;
     std::vector<int> dividing_r3;
-    for (int i = 1; i < t; ++i) {
-        dividing_r1.push_back(i * block_r1);
-        dividing_r2.push_back(i * block_r2);
-        dividing_r3.push_back(i * block_r3);
-    }
+    // for (int i = 1; i < t; ++i) {
+    //     dividing_r1.push_back(i * block_r1);
+    //     dividing_r2.push_back(i * block_r2);
+    //     dividing_r3.push_back(i * block_r3);
+    // }
+	for (int i = 1; i < M; ++i) {
+		dividing_r1.push_back(i * block_r1);
+	}
+	for (int i = 1; i < K; ++i) {
+		dividing_r2.push_back(i * block_r2);
+	}
+	for (int i = 1; i < L; ++i) {
+		dividing_r3.push_back(i * block_r3);
+	}
+	for (int i = 0; i < dividing_r1.size(); i++) {
+		printf("decomp dividing_r1[%d] = %d\n", i, dividing_r1[i]);
+	}
+	for (int i = 0; i < dividing_r2.size(); i++) {
+		printf("decomp dividing_r2[%d] = %d\n", i, dividing_r2[i]);
+	}
+	for (int i = 0; i < dividing_r3.size(); i++) {
+		printf("decomp dividing_r3[%d] = %d\n", i, dividing_r3[i]);
+	}
 	// for (int i = 0; i < dividing_r1.size(); i++) {
 	// 	printf("decomp dividing_r1[%d] = %d\n", i, dividing_r1[i]);
 	// }
@@ -1625,14 +1710,17 @@ omp_sz_decompress_cp_preserve_3d_record_vertex(const unsigned char * compressed,
 	size_t processed_data_dec_count = 0;
 	std::vector<std::unordered_set<int>> unpred_data_indices(num_threads);
 	// 处理块
-	int total_block = t * t * t;
+	int total_block = M * K * L;
 	omp_set_num_threads(total_block);
 	//omp_set_proc_bind(omp_proc_bind_true);
 	#pragma omp parallel for num_threads(num_threads) 
 	for (int block_id = 0; block_id < total_block; ++block_id){
-		int block_i = block_id / (t * t);
-		int block_j = (block_id % (t * t)) / t;
-		int block_k = block_id % t;
+		// int block_i = block_id / (t * t);
+		// int block_j = (block_id % (t * t)) / t;
+		// int block_k = block_id % t;
+		int block_i = block_id / (K * L);
+		int block_j = (block_id % (K * L)) / L;
+		int block_k = block_id % L;
 		// 计算块的起始位置
 		int start_i = block_i * block_r1;
 		int start_j = block_j * block_r2;
@@ -1641,13 +1729,13 @@ omp_sz_decompress_cp_preserve_3d_record_vertex(const unsigned char * compressed,
 		int end_i = start_i + block_r1;
 		int end_j = start_j + block_r2;
 		int end_k = start_k + block_r3;
-		if (block_i == t - 1) {
+		if (block_i == M - 1) {
 			end_i += remaining_r1;
 		}
-		if (block_j == t - 1) {
+		if (block_j == K - 1) {
 			end_j += remaining_r2;
 		}
-		if (block_k == t - 1) {
+		if (block_k == L - 1) {
 			end_k += remaining_r3;
 		}
 		//printf("Thread %d process block %d, start_i = %d, end_i = %d, start_j = %d, end_j = %d, start_k = %d, end_k = %d\n", omp_get_thread_num(), block_id, start_i, end_i, start_j, end_j, start_k, end_k);
@@ -1754,6 +1842,7 @@ omp_sz_decompress_cp_preserve_3d_record_vertex(const unsigned char * compressed,
 			}
 		}
 	}
+	printf("done block...\n");
 
 
 	//优化: 并行解压TODO
@@ -1762,78 +1851,227 @@ omp_sz_decompress_cp_preserve_3d_record_vertex(const unsigned char * compressed,
 	ptrdiff_t cell_dim0_offset = (r2-1) * (r3-1);
 	ptrdiff_t cell_dim1_offset = r3-1;
 
-	std::vector<std::unordered_set<int>> face_x_unpred_data_indices(num_faces);
-	std::vector<std::unordered_set<int>> face_y_unpred_data_indices(num_faces);
-	std::vector<std::unordered_set<int>> face_z_unpred_data_indices(num_faces);
-	std::vector<std::unordered_set<int>> edge_x_unpred_data_indices(num_edges);
-	std::vector<std::unordered_set<int>> edge_y_unpred_data_indices(num_edges);
-	std::vector<std::unordered_set<int>> edge_z_unpred_data_indices(num_edges);
+	std::vector<std::unordered_set<int>> face_x_unpred_data_indices(num_faces_x);
+	std::vector<std::unordered_set<int>> face_y_unpred_data_indices(num_faces_y);
+	std::vector<std::unordered_set<int>> face_z_unpred_data_indices(num_faces_z);
+	std::vector<std::unordered_set<int>> edge_x_unpred_data_indices(num_edges_x);
+	std::vector<std::unordered_set<int>> edge_y_unpred_data_indices(num_edges_y);
+	std::vector<std::unordered_set<int>> edge_z_unpred_data_indices(num_edges_z);
 
 
-	#pragma omp parallel
-	{
-		//并行处理face_x
-		//omp_set_num_threads(num_faces);
-		// Process faces perpendicular to the X-axis(jk-plane)
-		#pragma omp for collapse(3) 
-		for (int i : dividing_r1){
-			for (int j = -1; j < (int)dividing_r2.size(); j++){
-				for (int k = -1; k < (int)dividing_r3.size(); k++){
-					int thread_id = omp_get_thread_num();
-					int x_layer = i;
-					int start_j = (j == -1) ? 0 : dividing_r2[j];
-					int end_j = (j == (int)dividing_r2.size() - 1) ? r2 : dividing_r2[j + 1];
-					int start_k = (k == -1) ? 0 : dividing_r3[k];
-					int end_k = (k == (int)dividing_r3.size() - 1) ? r3 : dividing_r3[k + 1];
-					T *unpred_data_pos = &face_x_data_each_thread[thread_id][0];
-					for (int jj = start_j; jj < end_j; ++jj){
-						// if (std::find(dividing_r2.begin(), dividing_r2.end(), j) != dividing_r2.end()){
+
+	//并行处理face_x
+	omp_set_num_threads(num_faces_x);
+	// Process faces perpendicular to the X-axis(jk-plane)
+	#pragma omp parallel for collapse(3) 
+	for (int i : dividing_r1){
+		for (int j = -1; j < (int)dividing_r2.size(); j++){
+			for (int k = -1; k < (int)dividing_r3.size(); k++){
+				int thread_id = omp_get_thread_num();
+				int x_layer = i;
+				int start_j = (j == -1) ? 0 : dividing_r2[j];
+				int end_j = (j == (int)dividing_r2.size() - 1) ? r2 : dividing_r2[j + 1];
+				int start_k = (k == -1) ? 0 : dividing_r3[k];
+				int end_k = (k == (int)dividing_r3.size() - 1) ? r3 : dividing_r3[k + 1];
+				T *unpred_data_pos = &face_x_data_each_thread[thread_id][0];
+				for (int jj = start_j; jj < end_j; ++jj){
+					// if (std::find(dividing_r2.begin(), dividing_r2.end(), j) != dividing_r2.end()){
+					// 	continue;
+					// }
+					if (is_dividing_r2[jj]){
+						continue;
+					}
+					for (int kk = start_k; kk < end_k; ++kk){
+						// if (std::find(dividing_r3.begin(), dividing_r3.end(), k) != dividing_r3.end()){
 						// 	continue;
 						// }
-						if (is_dividing_r2[jj]){
+						if (is_dividing_r3[kk]){
 							continue;
 						}
-						for (int kk = start_k; kk < end_k; ++kk){
-							// if (std::find(dividing_r3.begin(), dividing_r3.end(), k) != dividing_r3.end()){
-							// 	continue;
-							// }
-							if (is_dividing_r3[kk]){
-								continue;
+						//开始处理数据
+						size_t position_idx = i * r2 * r3 + jj * r3 + kk;
+						// if (std::count(check_list.begin(), check_list.end(), position_idx)){
+						// 	printf("id %ld in face_x %d\n", position_idx,thread_id);
+						// }
+						//processed_data_dec_count++;
+						if (eb_quant_index[position_idx] == 0 || eb_quant_index[position_idx] == eb_quant_index_max){
+							face_x_unpred_data_indices[thread_id].insert(position_idx);
+							for (int p = 0; p < 3; ++p){
+								T *cur_data_field = (p == 0) ? U : (p == 1) ? V : W;
+								T cur_data = *(unpred_data_pos++);
+								cur_data_field[position_idx] = (cur_data == 0) ? -100 : log2f(fabs(cur_data));
 							}
-							//开始处理数据
-							size_t position_idx = i * r2 * r3 + jj * r3 + kk;
-							// if (std::count(check_list.begin(), check_list.end(), position_idx)){
-							// 	printf("id %ld in face_x %d\n", position_idx,thread_id);
-							// }
-							//processed_data_dec_count++;
-							if (eb_quant_index[position_idx] == 0 || eb_quant_index[position_idx] == eb_quant_index_max){
-								face_x_unpred_data_indices[thread_id].insert(position_idx);
-								for (int p = 0; p < 3; ++p){
-									T *cur_data_field = (p == 0) ? U : (p == 1) ? V : W;
-									T cur_data = *(unpred_data_pos++);
-									cur_data_field[position_idx] = (cur_data == 0) ? -100 : log2f(fabs(cur_data));
-								}
-								// U[position_idx] = *(unpred_data_pos++);
-								// V[position_idx] = *(unpred_data_pos++);
-								// W[position_idx] = *(unpred_data_pos++);
+							// U[position_idx] = *(unpred_data_pos++);
+							// V[position_idx] = *(unpred_data_pos++);
+							// W[position_idx] = *(unpred_data_pos++);
+						}
+						else{
+							double eb = (eb_quant_index[position_idx] == 0) ? 0 : pow(base, eb_quant_index[position_idx]) * threshold;
+							for (int p = 0; p < 3; ++p){
+								//degrade to 2D
+								T *cur_data_field = (p == 0) ? U : (p == 1) ? V : W;
+								T d0 = ((jj && kk) && (jj - start_j != 1 && kk - start_k != 1)) ? cur_data_field[position_idx - r2 - 1] : 0;
+								T d1 = (jj && (jj - start_j != 1)) ? cur_data_field[position_idx - r2] : 0;
+								T d2 = (kk && (kk - start_k != 1)) ? cur_data_field[position_idx - 1] : 0;
+								T pred = d1 + d2 - d0;
+								cur_data_field[position_idx] = pred + 2 * (data_quant_index[3 * position_idx + p] - intv_radius) * eb;
 							}
-							else{
-								double eb = (eb_quant_index[position_idx] == 0) ? 0 : pow(base, eb_quant_index[position_idx]) * threshold;
-								for (int p = 0; p < 3; ++p){
-									//degrade to 2D
-									T *cur_data_field = (p == 0) ? U : (p == 1) ? V : W;
-									T d0 = ((jj && kk) && (jj - start_j != 1 && kk - start_k != 1)) ? cur_data_field[position_idx - r2 - 1] : 0;
-									T d1 = (jj && (jj - start_j != 1)) ? cur_data_field[position_idx - r2] : 0;
+						}
+					}
+				}
+			
+				// recover data done
+				unpred_data_pos = &face_x_data_each_thread[thread_id][0];
+				for (int jj = start_j; jj < end_j; ++jj){
+					// if (std::find(dividing_r2.begin(), dividing_r2.end(), j) != dividing_r2.end()){
+					// 	continue;
+					// }
+					if (is_dividing_r2[jj]){
+						continue;
+					}
+					for (int kk = start_k; kk < end_k; ++kk){
+						// if (std::find(dividing_r3.begin(), dividing_r3.end(), k) != dividing_r3.end()){
+						// 	continue;
+						// }
+						if (is_dividing_r3[kk]){
+							continue;
+						}
+						size_t position_idx = i * r2 * r3 + jj * r3 + kk;
+						if (face_x_unpred_data_indices[thread_id].count(position_idx)){
+							U[position_idx] = *(unpred_data_pos++);
+							V[position_idx] = *(unpred_data_pos++);
+							W[position_idx] = *(unpred_data_pos++);
+						}
+						else{
+							if (U[position_idx] < -99) U[i] = 0;
+							else U[position_idx] = sign_map_u[position_idx] ? exp2(U[position_idx]) : -exp2(U[position_idx]);
+							if (V[position_idx] < -99) V[i] = 0;
+							else V[position_idx] = sign_map_v[position_idx] ? exp2(V[position_idx]) : -exp2(V[position_idx]);
+							if (W[position_idx] < -99) W[i] = 0;
+							else W[position_idx] = sign_map_w[position_idx] ? exp2(W[position_idx]) : -exp2(W[position_idx]);
+						}
+					}
+				}
+			}
+		}
+	}
+
+
+	//并行处理face_y
+	omp_set_num_threads(num_faces_y);
+	#pragma omp parallel for collapse(3) 
+	for (int j : dividing_r2){
+		for (int i = -1; i < (int)dividing_r1.size(); i++){
+			for (int k = -1; k < (int)dividing_r3.size(); k++){
+				int thread_id = omp_get_thread_num();
+				int y_layer = j;
+				int start_i = (i == -1) ? 0 : dividing_r1[i];
+				int end_i = (i == (int)dividing_r1.size() - 1) ? r1 : dividing_r1[i + 1];
+				int start_k = (k == -1) ? 0 : dividing_r3[k];
+				int end_k = (k == (int)dividing_r3.size() - 1) ? r3 : dividing_r3[k + 1];
+				T *unpred_data_pos = &face_y_data_each_thread[thread_id][0];
+				for (int ii = start_i; ii < end_i; ++ii){
+					// if (std::find(dividing_r1.begin(), dividing_r1.end(), i) != dividing_r1.end()){
+					// 	continue;
+					// }
+					if (is_dividing_r1[ii]){
+						continue;
+					}
+					for (int kk = start_k; kk < end_k; ++kk){
+						// if (std::find(dividing_r3.begin(), dividing_r3.end(), k) != dividing_r3.end()){
+						// 	continue;
+						// }
+						if (is_dividing_r3[kk]){
+							continue;
+						}
+						//开始处理数据
+						size_t position_idx = ii * r2 * r3 + j * r3 + kk;
+						// if (std::count(check_list.begin(), check_list.end(), position_idx)){
+						// 	printf("id %ld in face_y %d\n",position_idx,thread_id);
+						// }
+						//processed_data_dec_count++;
+						if (eb_quant_index[position_idx] == 0 || eb_quant_index[position_idx] == eb_quant_index_max){
+							face_y_unpred_data_indices[thread_id].insert(position_idx);
+							for (int p = 0; p < 3; ++p){
+								T *cur_data_field = (p == 0) ? U : (p == 1) ? V : W;
+								T cur_data = *(unpred_data_pos++);
+								cur_data_field[position_idx] = (cur_data == 0) ? -100 : log2f(fabs(cur_data));
+							}
+							// U[position_idx] = *(unpred_data_pos++);
+							// V[position_idx] = *(unpred_data_pos++);
+							// W[position_idx] = *(unpred_data_pos++);
+						}
+						else{
+							double eb = (eb_quant_index[position_idx] == 0) ? 0 : pow(base, eb_quant_index[position_idx]) * threshold;
+							for (int p = 0; p < 3; ++p){
+								//degrade to 2D
+								T *cur_data_field = (p == 0) ? U : (p == 1) ? V : W;
+									T d0 = ((ii && kk) && (ii - start_i != 1 && kk - start_k != 1)) ? cur_data_field[position_idx - r2*r3 - 1] : 0;
+									T d1 = (ii && (ii - start_i != 1)) ? cur_data_field[position_idx - r2*r3] : 0;
 									T d2 = (kk && (kk - start_k != 1)) ? cur_data_field[position_idx - 1] : 0;
 									T pred = d1 + d2 - d0;
 									cur_data_field[position_idx] = pred + 2 * (data_quant_index[3 * position_idx + p] - intv_radius) * eb;
-								}
 							}
 						}
 					}
-				
-					// recover data done
-					unpred_data_pos = &face_x_data_each_thread[thread_id][0];
+				}
+
+				// recover data done
+				unpred_data_pos = &face_y_data_each_thread[thread_id][0];
+				for (int ii = start_i; ii < end_i; ++ii){
+					// if (std::find(dividing_r1.begin(), dividing_r1.end(), i) != dividing_r1.end()){
+					// 	continue;
+					// }
+					if (is_dividing_r1[ii]){
+						continue;
+					}
+					for (int kk = start_k; kk < end_k; ++kk){
+						// if (std::find(dividing_r3.begin(), dividing_r3.end(), k) != dividing_r3.end()){
+						// 	continue;
+						// }
+						if (is_dividing_r3[kk]){
+							continue;
+						}
+						size_t position_idx = ii * r2 * r3 + j * r3 + kk;
+						if (face_y_unpred_data_indices[thread_id].count(position_idx)){
+							U[position_idx] = *(unpred_data_pos++);
+							V[position_idx] = *(unpred_data_pos++);
+							W[position_idx] = *(unpred_data_pos++);
+						}
+						else{
+							if (U[position_idx] < -99) U[i] = 0;
+							else U[position_idx] = sign_map_u[position_idx] ? exp2(U[position_idx]) : -exp2(U[position_idx]);
+							if (V[position_idx] < -99) V[i] = 0;
+							else V[position_idx] = sign_map_v[position_idx] ? exp2(V[position_idx]) : -exp2(V[position_idx]);
+							if (W[position_idx] < -99) W[i] = 0;
+							else W[position_idx] = sign_map_w[position_idx] ? exp2(W[position_idx]) : -exp2(W[position_idx]);
+						}
+					}
+				}
+			}
+		}
+	}
+
+	//并行处理face_z
+	omp_set_num_threads(num_faces_z);
+	#pragma omp parallel for collapse(3) 
+	for (int k : dividing_r3){
+		for (int i = -1; i < (int)dividing_r1.size(); i++){
+			for (int j = -1; j < (int)dividing_r2.size(); j++){
+				int thread_id = omp_get_thread_num();
+				int z_layer = k;
+				int start_i = (i == -1) ? 0 : dividing_r1[i];
+				int end_i = (i == (int)dividing_r1.size() - 1) ? r1 : dividing_r1[i + 1];
+				int start_j = (j == -1) ? 0 : dividing_r2[j];
+				int end_j = (j == (int)dividing_r2.size() - 1) ? r2 : dividing_r2[j + 1];
+				T *unpred_data_pos = &face_z_data_each_thread[thread_id][0];
+				for (int ii = start_i; ii < end_i; ++ii){
+					// if (std::find(dividing_r1.begin(), dividing_r1.end(), i) != dividing_r1.end()){
+					// 	continue;
+					// }
+					if (is_dividing_r1[ii]){
+						continue;
+					}
 					for (int jj = start_j; jj < end_j; ++jj){
 						// if (std::find(dividing_r2.begin(), dividing_r2.end(), j) != dividing_r2.end()){
 						// 	continue;
@@ -1841,458 +2079,309 @@ omp_sz_decompress_cp_preserve_3d_record_vertex(const unsigned char * compressed,
 						if (is_dividing_r2[jj]){
 							continue;
 						}
-						for (int kk = start_k; kk < end_k; ++kk){
-							// if (std::find(dividing_r3.begin(), dividing_r3.end(), k) != dividing_r3.end()){
-							// 	continue;
-							// }
-							if (is_dividing_r3[kk]){
-								continue;
+						//开始处理数据
+						size_t position_idx = ii * r2 * r3 + jj * r3 + k;
+						// if (std::count(check_list.begin(), check_list.end(), position_idx)){
+						// 	printf("id %ld in face_z %d\n", position_idx, thread_id);
+						// }
+						//processed_data_dec_count++;
+						if (eb_quant_index[position_idx] == 0 || eb_quant_index[position_idx] == eb_quant_index_max){
+							face_z_unpred_data_indices[thread_id].insert(position_idx);
+							for (int p = 0; p < 3; ++p){
+								T *cur_data_field = (p == 0) ? U : (p == 1) ? V : W;
+								T cur_data = *(unpred_data_pos++);
+								cur_data_field[position_idx] = (cur_data == 0) ? -100 : log2f(fabs(cur_data));
 							}
-							size_t position_idx = i * r2 * r3 + jj * r3 + kk;
-							if (face_x_unpred_data_indices[thread_id].count(position_idx)){
-								U[position_idx] = *(unpred_data_pos++);
-								V[position_idx] = *(unpred_data_pos++);
-								W[position_idx] = *(unpred_data_pos++);
+							// U[position_idx] = *(unpred_data_pos++);
+							// V[position_idx] = *(unpred_data_pos++);
+							// W[position_idx] = *(unpred_data_pos++);
+						}
+						else{
+							double eb = (eb_quant_index[position_idx] == 0) ? 0 : pow(base, eb_quant_index[position_idx]) * threshold;
+							for (int p = 0; p < 3; ++p){
+								//degrade to 2D
+								T *cur_data_field = (p == 0) ? U : (p == 1) ? V : W;
+								T d0 = ((ii && jj) && (ii - start_i != 1 && jj - start_j != 1)) ? cur_data_field[position_idx - r2*r3 - r3] : 0;
+								T d1 = (ii && (ii - start_i != 1)) ? cur_data_field[position_idx - r2*r3] : 0;
+								T d2 = (jj && (jj - start_j != 1)) ? cur_data_field[position_idx - r3] : 0;
+								T pred = d1 + d2 - d0;
+								cur_data_field[position_idx] = pred + 2 * (data_quant_index[3 * position_idx + p] - intv_radius) * eb;
 							}
-							else{
-								if (U[position_idx] < -99) U[i] = 0;
-								else U[position_idx] = sign_map_u[position_idx] ? exp2(U[position_idx]) : -exp2(U[position_idx]);
-								if (V[position_idx] < -99) V[i] = 0;
-								else V[position_idx] = sign_map_v[position_idx] ? exp2(V[position_idx]) : -exp2(V[position_idx]);
-								if (W[position_idx] < -99) W[i] = 0;
-								else W[position_idx] = sign_map_w[position_idx] ? exp2(W[position_idx]) : -exp2(W[position_idx]);
-							}
+						}
+					}
+				}
+			
+				// recover data done
+				unpred_data_pos = &face_z_data_each_thread[thread_id][0];
+				for (int ii = start_i; ii < end_i; ++ii){
+					// if (std::find(dividing_r1.begin(), dividing_r1.end(), i) != dividing_r1.end()){
+					// 	continue;
+					// }
+					if (is_dividing_r1[ii]){
+						continue;
+					}
+					for (int jj = start_j; jj < end_j; ++jj){
+						// if (std::find(dividing_r2.begin(), dividing_r2.end(), j) != dividing_r2.end()){
+						// 	continue;
+						// }
+						if (is_dividing_r2[jj]){
+							continue;
+						}
+						size_t position_idx = ii * r2 * r3 + jj * r3 + k;
+						if (face_z_unpred_data_indices[thread_id].count(position_idx)){
+							U[position_idx] = *(unpred_data_pos++);
+							V[position_idx] = *(unpred_data_pos++);
+							W[position_idx] = *(unpred_data_pos++);
+						}
+						else{
+							if (U[position_idx] < -99) U[i] = 0;
+							else U[position_idx] = sign_map_u[position_idx] ? exp2(U[position_idx]) : -exp2(U[position_idx]);
+							if (V[position_idx] < -99) V[i] = 0;
+							else V[position_idx] = sign_map_v[position_idx] ? exp2(V[position_idx]) : -exp2(V[position_idx]);
+							if (W[position_idx] < -99) W[i] = 0;
+							else W[position_idx] = sign_map_w[position_idx] ? exp2(W[position_idx]) : -exp2(W[position_idx]);
 						}
 					}
 				}
 			}
 		}
-
-
-		//并行处理face_y
-		//omp_set_num_threads(num_faces);
-		#pragma omp for collapse(3) 
-		for (int j : dividing_r2){
-			for (int i = -1; i < (int)dividing_r1.size(); i++){
-				for (int k = -1; k < (int)dividing_r3.size(); k++){
-					int thread_id = omp_get_thread_num();
-					int y_layer = j;
-					int start_i = (i == -1) ? 0 : dividing_r1[i];
-					int end_i = (i == (int)dividing_r1.size() - 1) ? r1 : dividing_r1[i + 1];
-					int start_k = (k == -1) ? 0 : dividing_r3[k];
-					int end_k = (k == (int)dividing_r3.size() - 1) ? r3 : dividing_r3[k + 1];
-					T *unpred_data_pos = &face_y_data_each_thread[thread_id][0];
-					for (int ii = start_i; ii < end_i; ++ii){
-						// if (std::find(dividing_r1.begin(), dividing_r1.end(), i) != dividing_r1.end()){
-						// 	continue;
-						// }
-						if (is_dividing_r1[ii]){
-							continue;
-						}
-						for (int kk = start_k; kk < end_k; ++kk){
-							// if (std::find(dividing_r3.begin(), dividing_r3.end(), k) != dividing_r3.end()){
-							// 	continue;
-							// }
-							if (is_dividing_r3[kk]){
-								continue;
-							}
-							//开始处理数据
-							size_t position_idx = ii * r2 * r3 + j * r3 + kk;
-							// if (std::count(check_list.begin(), check_list.end(), position_idx)){
-							// 	printf("id %ld in face_y %d\n",position_idx,thread_id);
-							// }
-							//processed_data_dec_count++;
-							if (eb_quant_index[position_idx] == 0 || eb_quant_index[position_idx] == eb_quant_index_max){
-								face_y_unpred_data_indices[thread_id].insert(position_idx);
-								for (int p = 0; p < 3; ++p){
-									T *cur_data_field = (p == 0) ? U : (p == 1) ? V : W;
-									T cur_data = *(unpred_data_pos++);
-									cur_data_field[position_idx] = (cur_data == 0) ? -100 : log2f(fabs(cur_data));
-								}
-								// U[position_idx] = *(unpred_data_pos++);
-								// V[position_idx] = *(unpred_data_pos++);
-								// W[position_idx] = *(unpred_data_pos++);
-							}
-							else{
-								double eb = (eb_quant_index[position_idx] == 0) ? 0 : pow(base, eb_quant_index[position_idx]) * threshold;
-								for (int p = 0; p < 3; ++p){
-									//degrade to 2D
-									T *cur_data_field = (p == 0) ? U : (p == 1) ? V : W;
-										T d0 = ((ii && kk) && (ii - start_i != 1 && kk - start_k != 1)) ? cur_data_field[position_idx - r2*r3 - 1] : 0;
-										T d1 = (ii && (ii - start_i != 1)) ? cur_data_field[position_idx - r2*r3] : 0;
-										T d2 = (kk && (kk - start_k != 1)) ? cur_data_field[position_idx - 1] : 0;
-										T pred = d1 + d2 - d0;
-										cur_data_field[position_idx] = pred + 2 * (data_quant_index[3 * position_idx + p] - intv_radius) * eb;
-								}
-							}
-						}
-					}
-
-					// recover data done
-					unpred_data_pos = &face_y_data_each_thread[thread_id][0];
-					for (int ii = start_i; ii < end_i; ++ii){
-						// if (std::find(dividing_r1.begin(), dividing_r1.end(), i) != dividing_r1.end()){
-						// 	continue;
-						// }
-						if (is_dividing_r1[ii]){
-							continue;
-						}
-						for (int kk = start_k; kk < end_k; ++kk){
-							// if (std::find(dividing_r3.begin(), dividing_r3.end(), k) != dividing_r3.end()){
-							// 	continue;
-							// }
-							if (is_dividing_r3[kk]){
-								continue;
-							}
-							size_t position_idx = ii * r2 * r3 + j * r3 + kk;
-							if (face_y_unpred_data_indices[thread_id].count(position_idx)){
-								U[position_idx] = *(unpred_data_pos++);
-								V[position_idx] = *(unpred_data_pos++);
-								W[position_idx] = *(unpred_data_pos++);
-							}
-							else{
-								if (U[position_idx] < -99) U[i] = 0;
-								else U[position_idx] = sign_map_u[position_idx] ? exp2(U[position_idx]) : -exp2(U[position_idx]);
-								if (V[position_idx] < -99) V[i] = 0;
-								else V[position_idx] = sign_map_v[position_idx] ? exp2(V[position_idx]) : -exp2(V[position_idx]);
-								if (W[position_idx] < -99) W[i] = 0;
-								else W[position_idx] = sign_map_w[position_idx] ? exp2(W[position_idx]) : -exp2(W[position_idx]);
-							}
-						}
-					}
-				}
-			}
-		}
-
-		//并行处理face_z
-		//omp_set_num_threads(num_faces);
-		#pragma omp for collapse(3) 
-		for (int k : dividing_r3){
-			for (int i = -1; i < (int)dividing_r1.size(); i++){
-				for (int j = -1; j < (int)dividing_r2.size(); j++){
-					int thread_id = omp_get_thread_num();
-					int z_layer = k;
-					int start_i = (i == -1) ? 0 : dividing_r1[i];
-					int end_i = (i == (int)dividing_r1.size() - 1) ? r1 : dividing_r1[i + 1];
-					int start_j = (j == -1) ? 0 : dividing_r2[j];
-					int end_j = (j == (int)dividing_r2.size() - 1) ? r2 : dividing_r2[j + 1];
-					T *unpred_data_pos = &face_z_data_each_thread[thread_id][0];
-					for (int ii = start_i; ii < end_i; ++ii){
-						// if (std::find(dividing_r1.begin(), dividing_r1.end(), i) != dividing_r1.end()){
-						// 	continue;
-						// }
-						if (is_dividing_r1[ii]){
-							continue;
-						}
-						for (int jj = start_j; jj < end_j; ++jj){
-							// if (std::find(dividing_r2.begin(), dividing_r2.end(), j) != dividing_r2.end()){
-							// 	continue;
-							// }
-							if (is_dividing_r2[jj]){
-								continue;
-							}
-							//开始处理数据
-							size_t position_idx = ii * r2 * r3 + jj * r3 + k;
-							// if (std::count(check_list.begin(), check_list.end(), position_idx)){
-							// 	printf("id %ld in face_z %d\n", position_idx, thread_id);
-							// }
-							//processed_data_dec_count++;
-							if (eb_quant_index[position_idx] == 0 || eb_quant_index[position_idx] == eb_quant_index_max){
-								face_z_unpred_data_indices[thread_id].insert(position_idx);
-								for (int p = 0; p < 3; ++p){
-									T *cur_data_field = (p == 0) ? U : (p == 1) ? V : W;
-									T cur_data = *(unpred_data_pos++);
-									cur_data_field[position_idx] = (cur_data == 0) ? -100 : log2f(fabs(cur_data));
-								}
-								// U[position_idx] = *(unpred_data_pos++);
-								// V[position_idx] = *(unpred_data_pos++);
-								// W[position_idx] = *(unpred_data_pos++);
-							}
-							else{
-								double eb = (eb_quant_index[position_idx] == 0) ? 0 : pow(base, eb_quant_index[position_idx]) * threshold;
-								for (int p = 0; p < 3; ++p){
-									//degrade to 2D
-									T *cur_data_field = (p == 0) ? U : (p == 1) ? V : W;
-									T d0 = ((ii && jj) && (ii - start_i != 1 && jj - start_j != 1)) ? cur_data_field[position_idx - r2*r3 - r3] : 0;
-									T d1 = (ii && (ii - start_i != 1)) ? cur_data_field[position_idx - r2*r3] : 0;
-									T d2 = (jj && (jj - start_j != 1)) ? cur_data_field[position_idx - r3] : 0;
-									T pred = d1 + d2 - d0;
-									cur_data_field[position_idx] = pred + 2 * (data_quant_index[3 * position_idx + p] - intv_radius) * eb;
-								}
-							}
-						}
-					}
-				
-					// recover data done
-					unpred_data_pos = &face_z_data_each_thread[thread_id][0];
-					for (int ii = start_i; ii < end_i; ++ii){
-						// if (std::find(dividing_r1.begin(), dividing_r1.end(), i) != dividing_r1.end()){
-						// 	continue;
-						// }
-						if (is_dividing_r1[ii]){
-							continue;
-						}
-						for (int jj = start_j; jj < end_j; ++jj){
-							// if (std::find(dividing_r2.begin(), dividing_r2.end(), j) != dividing_r2.end()){
-							// 	continue;
-							// }
-							if (is_dividing_r2[jj]){
-								continue;
-							}
-							size_t position_idx = ii * r2 * r3 + jj * r3 + k;
-							if (face_z_unpred_data_indices[thread_id].count(position_idx)){
-								U[position_idx] = *(unpred_data_pos++);
-								V[position_idx] = *(unpred_data_pos++);
-								W[position_idx] = *(unpred_data_pos++);
-							}
-							else{
-								if (U[position_idx] < -99) U[i] = 0;
-								else U[position_idx] = sign_map_u[position_idx] ? exp2(U[position_idx]) : -exp2(U[position_idx]);
-								if (V[position_idx] < -99) V[i] = 0;
-								else V[position_idx] = sign_map_v[position_idx] ? exp2(V[position_idx]) : -exp2(V[position_idx]);
-								if (W[position_idx] < -99) W[i] = 0;
-								else W[position_idx] = sign_map_w[position_idx] ? exp2(W[position_idx]) : -exp2(W[position_idx]);
-							}
-						}
-					}
-				}
-			}
-		}
-
 	}
 
-	#pragma omp parallel
-	{
-		//并行处理edge_x
-		//omp_set_num_threads(num_edges);
-		#pragma omp for collapse(3)
+	printf("done face...\n");
+
+	//并行处理edge_x
+	omp_set_num_threads(num_edges_x);
+	#pragma omp parallel for collapse(3) 
+	for (int i : dividing_r1){
+		for (int j :dividing_r2){
+			for (int k = -1; k < (int)dividing_r3.size(); k++){
+				int thread_id = omp_get_thread_num();
+				int x_layer = i;
+				int y_layer = j;
+				int start_k = (k == -1) ? 0 : dividing_r3[k];
+				int end_k = (k == (int)dividing_r3.size() - 1) ? r3 : dividing_r3[k + 1];
+				T *unpred_data_pos = &edge_x_data_each_thread[thread_id][0];
+				for (int kk = start_k; kk < end_k; ++kk){
+					// if (std::find(dividing_r3.begin(), dividing_r3.end(), k) != dividing_r3.end()){
+					// 	continue;
+					// }
+					if (is_dividing_r3[kk]){
+						continue;
+					}
+					//开始处理数据
+					size_t position_idx = i * r2 * r3 + j * r3 + kk;
+					// if (std::count(check_list.begin(), check_list.end(), position_idx)){
+					// 	printf("id %ld in edge_x %d\n", position_idx, thread_id);
+					// }
+					//processed_data_dec_count++;
+					if (eb_quant_index[position_idx] == 0 || eb_quant_index[position_idx] == eb_quant_index_max){
+						edge_x_unpred_data_indices[thread_id].insert(position_idx);
+						for (int p = 0; p < 3; ++p){
+							T *cur_data_field = (p == 0) ? U : (p == 1) ? V : W;
+							T cur_data = *(unpred_data_pos++);
+							cur_data_field[position_idx] = (cur_data == 0) ? -100 : log2f(fabs(cur_data));
+						}
+						// U[position_idx] = *(unpred_data_pos++);
+						// V[position_idx] = *(unpred_data_pos++);
+						// W[position_idx] = *(unpred_data_pos++);
+					}
+					else{
+						double eb = (eb_quant_index[position_idx] == 0) ? 0 : pow(base, eb_quant_index[position_idx]) * threshold;
+						for (int p = 0; p < 3; ++p){
+							//degrade to 1D
+							T *cur_data_field = (p == 0) ? U : (p == 1) ? V : W;
+							T d0 = (kk && (kk - start_k != 1)) ? cur_data_field[position_idx - 1] : 0;
+							T pred = d0;
+							cur_data_field[position_idx] = pred + 2 * (data_quant_index[3 * position_idx + p] - intv_radius) * eb;
+						}
+					}
+				}
+			
+				// recover data done
+				unpred_data_pos = &edge_x_data_each_thread[thread_id][0];
+				for (int kk = start_k; kk < end_k; ++kk){
+					// if (std::find(dividing_r3.begin(), dividing_r3.end(), k) != dividing_r3.end()){
+					// 	continue;
+					// }
+					if (is_dividing_r3[kk]){
+						continue;
+					}
+					size_t position_idx = i * r2 * r3 + j * r3 + kk;
+					if (edge_x_unpred_data_indices[thread_id].count(position_idx)){
+						U[position_idx] = *(unpred_data_pos++);
+						V[position_idx] = *(unpred_data_pos++);
+						W[position_idx] = *(unpred_data_pos++);
+					}
+					else{
+						if (U[position_idx] < -99) U[i] = 0;
+						else U[position_idx] = sign_map_u[position_idx] ? exp2(U[position_idx]) : -exp2(U[position_idx]);
+						if (V[position_idx] < -99) V[i] = 0;
+						else V[position_idx] = sign_map_v[position_idx] ? exp2(V[position_idx]) : -exp2(V[position_idx]);
+						if (W[position_idx] < -99) W[i] = 0;
+						else W[position_idx] = sign_map_w[position_idx] ? exp2(W[position_idx]) : -exp2(W[position_idx]);
+					}
+				}
+			}
+		}
+	}
+	printf("done edge_x...\n");
+
+	//并行处理edge_y
+	omp_set_num_threads(num_edges_y);
+	#pragma omp parallel for collapse(3) 
+	for (int j : dividing_r2){
+		for (int k : dividing_r3){
+			for (int i = -1; i < (int)dividing_r1.size(); i++){
+				int thread_id = omp_get_thread_num();
+				int y_layer = j;
+				int z_layer = k;
+				int start_i = (i == -1) ? 0 : dividing_r1[i];
+				int end_i = (i == (int)dividing_r1.size() - 1) ? r1 : dividing_r1[i + 1];
+				T *unpred_data_pos = &edge_y_data_each_thread[thread_id][0];
+				for (int ii = start_i; ii < end_i; ++ii){
+					// if (std::find(dividing_r1.begin(), dividing_r1.end(), i) != dividing_r1.end()){
+					// 	continue;
+					// }
+					if (is_dividing_r1[ii]){
+						continue;
+					}
+					//开始处理数据
+					size_t position_idx = ii * r2 * r3 + j * r3 + k;
+					// if (std::count(check_list.begin(), check_list.end(), position_idx)){
+					// 	printf("id %ld in edge_y %d\n", position_idx, thread_id);
+					// }
+					//processed_data_dec_count++;
+					if (eb_quant_index[position_idx] == 0 || eb_quant_index[position_idx] == eb_quant_index_max){
+						edge_y_unpred_data_indices[thread_id].insert(position_idx);
+						for (int p = 0; p < 3; ++p){
+							T *cur_data_field = (p == 0) ? U : (p == 1) ? V : W;
+							T cur_data = *(unpred_data_pos++);
+							cur_data_field[position_idx] = (cur_data == 0) ? -100 : log2f(fabs(cur_data));
+						}
+						// U[position_idx] = *(unpred_data_pos++);
+						// V[position_idx] = *(unpred_data_pos++);
+						// W[position_idx] = *(unpred_data_pos++);
+					}
+					else{
+						double eb = (eb_quant_index[position_idx] == 0) ? 0 : pow(base, eb_quant_index[position_idx]) * threshold;
+						for (int p = 0; p < 3; ++p){
+							//degrade to 1D
+							T *cur_data_field = (p == 0) ? U : (p == 1) ? V : W;
+							//degrade to 1D
+							T d0 = (ii && (ii - start_i != 1)) ? cur_data_field[position_idx - r2*r3] : 0;
+							T pred = d0;
+							cur_data_field[position_idx] = pred + 2 * (data_quant_index[3 * position_idx + p] - intv_radius) * eb;
+						}
+					}
+				}
+			
+				// recover data done
+				unpred_data_pos = &edge_y_data_each_thread[thread_id][0];
+				for (int ii = start_i; ii < end_i; ++ii){
+					// if (std::find(dividing_r1.begin(), dividing_r1.end(), i) != dividing_r1.end()){
+					// 	continue;
+					// }
+					if (is_dividing_r1[ii]){
+						continue;
+					}
+					size_t position_idx = ii * r2 * r3 + j * r3 + k;
+					if (edge_y_unpred_data_indices[thread_id].count(position_idx)){
+						U[position_idx] = *(unpred_data_pos++);
+						V[position_idx] = *(unpred_data_pos++);
+						W[position_idx] = *(unpred_data_pos++);
+					}
+					else{
+						if (U[position_idx] < -99) U[i] = 0;
+						else U[position_idx] = sign_map_u[position_idx] ? exp2(U[position_idx]) : -exp2(U[position_idx]);
+						if (V[position_idx] < -99) V[i] = 0;
+						else V[position_idx] = sign_map_v[position_idx] ? exp2(V[position_idx]) : -exp2(V[position_idx]);
+						if (W[position_idx] < -99) W[i] = 0;
+						else W[position_idx] = sign_map_w[position_idx] ? exp2(W[position_idx]) : -exp2(W[position_idx]);
+					}
+				}
+			}
+		}
+	}
+	printf("done edge_y...\n");
+
+	//并行处理edge_z
+	omp_set_num_threads(num_edges_z);
+	#pragma omp parallel for collapse(3) 
+	for (int k : dividing_r3){
 		for (int i : dividing_r1){
-			for (int j :dividing_r2){
-				for (int k = -1; k < (int)dividing_r3.size(); k++){
-					int thread_id = omp_get_thread_num();
-					int x_layer = i;
-					int y_layer = j;
-					int start_k = (k == -1) ? 0 : dividing_r3[k];
-					int end_k = (k == (int)dividing_r3.size() - 1) ? r3 : dividing_r3[k + 1];
-					T *unpred_data_pos = &edge_x_data_each_thread[thread_id][0];
-					for (int kk = start_k; kk < end_k; ++kk){
-						// if (std::find(dividing_r3.begin(), dividing_r3.end(), k) != dividing_r3.end()){
-						// 	continue;
-						// }
-						if (is_dividing_r3[kk]){
-							continue;
+			for (int j = -1; j < (int)dividing_r2.size(); j++){
+				int thread_id = omp_get_thread_num();
+				int z_layer = k;
+				int x_layer = i;
+				int start_j = (j == -1) ? 0 : dividing_r2[j];
+				int end_j = (j == (int)dividing_r2.size() - 1) ? r2 : dividing_r2[j + 1];
+				T *unpred_data_pos = &edge_z_data_each_thread[thread_id][0];
+				for (int jj = start_j; jj < end_j; ++jj){
+					// if (std::find(dividing_r2.begin(), dividing_r2.end(), j) != dividing_r2.end()){
+					// 	continue;
+					// }
+					if (is_dividing_r2[jj]){
+						continue;
+					}
+					//processed_data_dec_count++;
+					size_t position_idx = i * r2 * r3 + jj * r3 + k;
+					// if (std::count(check_list.begin(), check_list.end(), position_idx)){
+					// 	printf("id %ld in edge_z %d\n", position_idx, thread_id);
+					// }
+					if (eb_quant_index[position_idx] == 0 || eb_quant_index[position_idx] == eb_quant_index_max){
+						edge_z_unpred_data_indices[thread_id].insert(position_idx);
+						for (int p = 0; p < 3; ++p){
+							T *cur_data_field = (p == 0) ? U : (p == 1) ? V : W;
+							T cur_data = *(unpred_data_pos++);
+							cur_data_field[position_idx] = (cur_data == 0) ? -100 : log2f(fabs(cur_data));
 						}
-						//开始处理数据
-						size_t position_idx = i * r2 * r3 + j * r3 + kk;
-						// if (std::count(check_list.begin(), check_list.end(), position_idx)){
-						// 	printf("id %ld in edge_x %d\n", position_idx, thread_id);
-						// }
-						//processed_data_dec_count++;
-						if (eb_quant_index[position_idx] == 0 || eb_quant_index[position_idx] == eb_quant_index_max){
-							edge_x_unpred_data_indices[thread_id].insert(position_idx);
-							for (int p = 0; p < 3; ++p){
-								T *cur_data_field = (p == 0) ? U : (p == 1) ? V : W;
-								T cur_data = *(unpred_data_pos++);
-								cur_data_field[position_idx] = (cur_data == 0) ? -100 : log2f(fabs(cur_data));
-							}
-							// U[position_idx] = *(unpred_data_pos++);
-							// V[position_idx] = *(unpred_data_pos++);
-							// W[position_idx] = *(unpred_data_pos++);
-						}
-						else{
-							double eb = (eb_quant_index[position_idx] == 0) ? 0 : pow(base, eb_quant_index[position_idx]) * threshold;
-							for (int p = 0; p < 3; ++p){
-								//degrade to 1D
-								T *cur_data_field = (p == 0) ? U : (p == 1) ? V : W;
-								T d0 = (kk && (kk - start_k != 1)) ? cur_data_field[position_idx - 1] : 0;
-								T pred = d0;
-								cur_data_field[position_idx] = pred + 2 * (data_quant_index[3 * position_idx + p] - intv_radius) * eb;
-							}
+						// U[position_idx] = *(unpred_data_pos++);
+						// V[position_idx] = *(unpred_data_pos++);
+						// W[position_idx] = *(unpred_data_pos++);
+					}
+					else{
+						double eb = (eb_quant_index[position_idx] == 0) ? 0 : pow(base, eb_quant_index[position_idx]) * threshold;
+						for (int p = 0; p < 3; ++p){
+							//degrade to 1D
+							T *cur_data_field = (p == 0) ? U : (p == 1) ? V : W;
+							T d0 = (jj && (jj - start_j != 1)) ? cur_data_field[position_idx - r3] : 0;
+							T pred = d0;
+							cur_data_field[position_idx] = pred + 2 * (data_quant_index[3 * position_idx + p] - intv_radius) * eb;
 						}
 					}
-				
-					// recover data done
-					unpred_data_pos = &edge_x_data_each_thread[thread_id][0];
-					for (int kk = start_k; kk < end_k; ++kk){
-						// if (std::find(dividing_r3.begin(), dividing_r3.end(), k) != dividing_r3.end()){
-						// 	continue;
-						// }
-						if (is_dividing_r3[kk]){
-							continue;
-						}
-						size_t position_idx = i * r2 * r3 + j * r3 + kk;
-						if (edge_x_unpred_data_indices[thread_id].count(position_idx)){
-							U[position_idx] = *(unpred_data_pos++);
-							V[position_idx] = *(unpred_data_pos++);
-							W[position_idx] = *(unpred_data_pos++);
-						}
-						else{
-							if (U[position_idx] < -99) U[i] = 0;
-							else U[position_idx] = sign_map_u[position_idx] ? exp2(U[position_idx]) : -exp2(U[position_idx]);
-							if (V[position_idx] < -99) V[i] = 0;
-							else V[position_idx] = sign_map_v[position_idx] ? exp2(V[position_idx]) : -exp2(V[position_idx]);
-							if (W[position_idx] < -99) W[i] = 0;
-							else W[position_idx] = sign_map_w[position_idx] ? exp2(W[position_idx]) : -exp2(W[position_idx]);
-						}
+				}
+			
+
+				// recover data done
+				unpred_data_pos = &edge_z_data_each_thread[thread_id][0];
+				for (int jj = start_j; jj < end_j; ++jj){
+					// if (std::find(dividing_r2.begin(), dividing_r2.end(), j) != dividing_r2.end()){
+					// 	continue;
+					// }
+					if (is_dividing_r2[jj]){
+						continue;
+					}
+					size_t position_idx = i * r2 * r3 + jj * r3 + k;
+					if (edge_z_unpred_data_indices[thread_id].count(position_idx)){
+						U[position_idx] = *(unpred_data_pos++);
+						V[position_idx] = *(unpred_data_pos++);
+						W[position_idx] = *(unpred_data_pos++);
+					}
+					else{
+						if (U[position_idx] < -99) U[i] = 0;
+						else U[position_idx] = sign_map_u[position_idx] ? exp2(U[position_idx]) : -exp2(U[position_idx]);
+						if (V[position_idx] < -99) V[i] = 0;
+						else V[position_idx] = sign_map_v[position_idx] ? exp2(V[position_idx]) : -exp2(V[position_idx]);
+						if (W[position_idx] < -99) W[i] = 0;
+						else W[position_idx] = sign_map_w[position_idx] ? exp2(W[position_idx]) : -exp2(W[position_idx]);
 					}
 				}
 			}
 		}
-
-		//并行处理edge_y
-		//omp_set_num_threads(num_edges);
-		#pragma omp for collapse(3)
-		for (int j : dividing_r2){
-			for (int k : dividing_r3){
-				for (int i = -1; i < (int)dividing_r1.size(); i++){
-					int thread_id = omp_get_thread_num();
-					int y_layer = j;
-					int z_layer = k;
-					int start_i = (i == -1) ? 0 : dividing_r1[i];
-					int end_i = (i == (int)dividing_r1.size() - 1) ? r1 : dividing_r1[i + 1];
-					T *unpred_data_pos = &edge_y_data_each_thread[thread_id][0];
-					for (int ii = start_i; ii < end_i; ++ii){
-						// if (std::find(dividing_r1.begin(), dividing_r1.end(), i) != dividing_r1.end()){
-						// 	continue;
-						// }
-						if (is_dividing_r1[ii]){
-							continue;
-						}
-						//开始处理数据
-						size_t position_idx = ii * r2 * r3 + j * r3 + k;
-						// if (std::count(check_list.begin(), check_list.end(), position_idx)){
-						// 	printf("id %ld in edge_y %d\n", position_idx, thread_id);
-						// }
-						//processed_data_dec_count++;
-						if (eb_quant_index[position_idx] == 0 || eb_quant_index[position_idx] == eb_quant_index_max){
-							edge_y_unpred_data_indices[thread_id].insert(position_idx);
-							for (int p = 0; p < 3; ++p){
-								T *cur_data_field = (p == 0) ? U : (p == 1) ? V : W;
-								T cur_data = *(unpred_data_pos++);
-								cur_data_field[position_idx] = (cur_data == 0) ? -100 : log2f(fabs(cur_data));
-							}
-							// U[position_idx] = *(unpred_data_pos++);
-							// V[position_idx] = *(unpred_data_pos++);
-							// W[position_idx] = *(unpred_data_pos++);
-						}
-						else{
-							double eb = (eb_quant_index[position_idx] == 0) ? 0 : pow(base, eb_quant_index[position_idx]) * threshold;
-							for (int p = 0; p < 3; ++p){
-								//degrade to 1D
-								T *cur_data_field = (p == 0) ? U : (p == 1) ? V : W;
-								//degrade to 1D
-								T d0 = (ii && (ii - start_i != 1)) ? cur_data_field[position_idx - r2*r3] : 0;
-								T pred = d0;
-								cur_data_field[position_idx] = pred + 2 * (data_quant_index[3 * position_idx + p] - intv_radius) * eb;
-							}
-						}
-					}
-				
-					// recover data done
-					unpred_data_pos = &edge_y_data_each_thread[thread_id][0];
-					for (int ii = start_i; ii < end_i; ++ii){
-						// if (std::find(dividing_r1.begin(), dividing_r1.end(), i) != dividing_r1.end()){
-						// 	continue;
-						// }
-						if (is_dividing_r1[ii]){
-							continue;
-						}
-						size_t position_idx = ii * r2 * r3 + j * r3 + k;
-						if (edge_y_unpred_data_indices[thread_id].count(position_idx)){
-							U[position_idx] = *(unpred_data_pos++);
-							V[position_idx] = *(unpred_data_pos++);
-							W[position_idx] = *(unpred_data_pos++);
-						}
-						else{
-							if (U[position_idx] < -99) U[i] = 0;
-							else U[position_idx] = sign_map_u[position_idx] ? exp2(U[position_idx]) : -exp2(U[position_idx]);
-							if (V[position_idx] < -99) V[i] = 0;
-							else V[position_idx] = sign_map_v[position_idx] ? exp2(V[position_idx]) : -exp2(V[position_idx]);
-							if (W[position_idx] < -99) W[i] = 0;
-							else W[position_idx] = sign_map_w[position_idx] ? exp2(W[position_idx]) : -exp2(W[position_idx]);
-						}
-					}
-				}
-			}
-		}
-
-		//并行处理edge_z
-		//omp_set_num_threads(num_edges);
-		#pragma omp for collapse(3)
-		for (int k : dividing_r3){
-			for (int i : dividing_r1){
-				for (int j = -1; j < (int)dividing_r2.size(); j++){
-					int thread_id = omp_get_thread_num();
-					int z_layer = k;
-					int x_layer = i;
-					int start_j = (j == -1) ? 0 : dividing_r2[j];
-					int end_j = (j == (int)dividing_r2.size() - 1) ? r2 : dividing_r2[j + 1];
-					T *unpred_data_pos = &edge_z_data_each_thread[thread_id][0];
-					for (int jj = start_j; jj < end_j; ++jj){
-						// if (std::find(dividing_r2.begin(), dividing_r2.end(), j) != dividing_r2.end()){
-						// 	continue;
-						// }
-						if (is_dividing_r2[jj]){
-							continue;
-						}
-						//processed_data_dec_count++;
-						size_t position_idx = i * r2 * r3 + jj * r3 + k;
-						// if (std::count(check_list.begin(), check_list.end(), position_idx)){
-						// 	printf("id %ld in edge_z %d\n", position_idx, thread_id);
-						// }
-						if (eb_quant_index[position_idx] == 0 || eb_quant_index[position_idx] == eb_quant_index_max){
-							edge_z_unpred_data_indices[thread_id].insert(position_idx);
-							for (int p = 0; p < 3; ++p){
-								T *cur_data_field = (p == 0) ? U : (p == 1) ? V : W;
-								T cur_data = *(unpred_data_pos++);
-								cur_data_field[position_idx] = (cur_data == 0) ? -100 : log2f(fabs(cur_data));
-							}
-							// U[position_idx] = *(unpred_data_pos++);
-							// V[position_idx] = *(unpred_data_pos++);
-							// W[position_idx] = *(unpred_data_pos++);
-						}
-						else{
-							double eb = (eb_quant_index[position_idx] == 0) ? 0 : pow(base, eb_quant_index[position_idx]) * threshold;
-							for (int p = 0; p < 3; ++p){
-								//degrade to 1D
-								T *cur_data_field = (p == 0) ? U : (p == 1) ? V : W;
-								T d0 = (jj && (jj - start_j != 1)) ? cur_data_field[position_idx - r3] : 0;
-								T pred = d0;
-								cur_data_field[position_idx] = pred + 2 * (data_quant_index[3 * position_idx + p] - intv_radius) * eb;
-							}
-						}
-					}
-				
-
-					// recover data done
-					unpred_data_pos = &edge_z_data_each_thread[thread_id][0];
-					for (int jj = start_j; jj < end_j; ++jj){
-						// if (std::find(dividing_r2.begin(), dividing_r2.end(), j) != dividing_r2.end()){
-						// 	continue;
-						// }
-						if (is_dividing_r2[jj]){
-							continue;
-						}
-						size_t position_idx = i * r2 * r3 + jj * r3 + k;
-						if (edge_z_unpred_data_indices[thread_id].count(position_idx)){
-							U[position_idx] = *(unpred_data_pos++);
-							V[position_idx] = *(unpred_data_pos++);
-							W[position_idx] = *(unpred_data_pos++);
-						}
-						else{
-							if (U[position_idx] < -99) U[i] = 0;
-							else U[position_idx] = sign_map_u[position_idx] ? exp2(U[position_idx]) : -exp2(U[position_idx]);
-							if (V[position_idx] < -99) V[i] = 0;
-							else V[position_idx] = sign_map_v[position_idx] ? exp2(V[position_idx]) : -exp2(V[position_idx]);
-							if (W[position_idx] < -99) W[i] = 0;
-							else W[position_idx] = sign_map_w[position_idx] ? exp2(W[position_idx]) : -exp2(W[position_idx]);
-						}
-					}
-				}
-			}
-		}
-	
 	}
+	printf("done edge_z...\n");
+
+	printf("done edge...\n");
 
 	auto pred_dot_time_start = std::chrono::high_resolution_clock::now();
 	//处理dot, 串行

@@ -23,7 +23,11 @@
 #include <chrono>
 #include "advect.hpp"
 #include <math.h>
-
+#include "fpzip.h"
+#include <climits>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 
 // #include <hypermesh/ndarray.hh>
 // #include <hypermesh/regular_simplex_mesh.hh>
@@ -49,7 +53,7 @@
 #include <algorithm>
 #include<omp.h>
 
-#define CPSZ_OMP_FLAG 0
+#define CPSZ_OMP_FLAG 1
 
 std::array<double, 2> findLastNonNegativeOne(const std::vector<std::array<double, 2>>& vec) {
     for (auto it = vec.rbegin(); it != vec.rend(); ++it) {
@@ -935,7 +939,7 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
   printf("median: %f\n", medianVal_cpsz);
   printf("mean: %f\n", meanVal_cpsz);
   printf("stdev: %f\n", stdevVal_cpsz);
-  printf("max index: %d,second index: %d, third index: %d\n", max_index_cpsz);
+  printf("max index: %d\n", max_index_cpsz);
   printf("Statistics data cpsz frechet distance===============\n");
 
 
@@ -1555,6 +1559,96 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
   //so far, all trajectories should be fixed
   printf("all_vertex_for_all_diff_traj size: %ld\n", all_vertex_for_all_diff_traj.size());
 
+  // print compressed size for all_vertex_for_all_diff_traj
+  // 看lossless data的大小
+  std::vector<float> lossless_data;
+  for (auto o:all_vertex_for_all_diff_traj){
+    lossless_data.push_back(U[o]);
+  }
+  for (auto o:all_vertex_for_all_diff_traj){
+    lossless_data.push_back(V[o]);
+  }
+  //write out lossless data
+  writefile("lossless_data.bin", lossless_data.data(), lossless_data.size());
+  printf("lossless_data size: %ld\n", lossless_data.size());
+  size_t lossless_value_size = all_vertex_for_all_diff_traj.size() * 2 * sizeof(float);
+  unsigned char * lossless_value = NULL;
+  size_t lossless_value_size_after_zstd = sz_lossless_compress(ZSTD_COMPRESSOR, 3, (unsigned char *)lossless_data.data(), lossless_value_size, &lossless_value);
+  printf("lossless_value using zstd size: %zu\n", lossless_value_size_after_zstd);
+  free(lossless_value);
+  // 使用fpzip压缩，看大小
+  int type = FPZIP_TYPE_FLOAT;
+  int prec = 0;
+  int nx = all_vertex_for_all_diff_traj.size();
+  int ny = 2; //u and v
+  int nz = 1;
+  int nf = 1;
+  size_t count = (size_t)nx * ny * nz * nf;
+  size_t size = (type == FPZIP_TYPE_FLOAT ? sizeof(float) : sizeof(double));
+  void * data;
+  data = (type == FPZIP_TYPE_FLOAT ? static_cast<void*>(new float[count]) : static_cast<void*>(new double[count]));
+  data = (void*)lossless_data.data();
+  if (prec == 0)
+    prec = (int)(CHAR_BIT * size);
+  char * buff = (char*)malloc(size * nx * ny * nz * nf);
+  FPZ* fpz = fpzip_write_to_buffer(buff,size * nx * ny * nz * nf);
+  fpz->type = FPZIP_TYPE_FLOAT;
+  fpz->prec = prec;
+  fpz->nx = nx;
+  fpz->ny = ny;
+  fpz->nz = nz;
+  fpz->nf = nf;
+  if (!fpzip_write_header(fpz)) {
+      fprintf(stderr, "cannot write header: %s\n", fpzip_errstr[fpzip_errno]);
+      exit(0);
+  }
+  size_t outbytes = fpzip_write(fpz, data);
+  fprintf(stderr, "outbytes=%lu ratio=%.2f\n", (unsigned long)outbytes, double(nx) * ny * nz * nf * size / outbytes);
+  fpzip_write_close(fpz);
+
+  //now decompress
+  FPZ* fpz_dec = fpzip_read_from_buffer(buff);
+  //read header
+  if(!fpzip_read_header(fpz_dec)){
+    fprintf(stderr, "cannot read header: %s\n", fpzip_errstr[fpzip_errno]);
+    exit(0);
+  }
+  type = fpz_dec->type;
+  prec = fpz_dec->prec;
+  nx = fpz_dec->nx;
+  ny = fpz_dec->ny;
+  nz = fpz_dec->nz;
+  nf = fpz_dec->nf;
+  printf("dec: type: %d, prec: %d, nx: %d, ny: %d, nz: %d, nf: %d\n", type, prec, nx, ny, nz, nf);
+  void * data_dec;
+  data_dec = (type == FPZIP_TYPE_FLOAT ? static_cast<void*>(new float[count]) : static_cast<void*>(new double[count]));
+  size_t outbytes_dec = fpzip_read(fpz_dec, data_dec);
+  printf("outbytes_dec: %zu\n", outbytes_dec);
+  //check decompressed data
+  for (size_t i = 0; i < nx; ++i){
+    for (size_t j = 0; j < ny; ++j){
+      if (type == FPZIP_TYPE_FLOAT){
+        float * data_dec_f = (float *)data_dec;
+        float * data_f = (float *)data;
+        if (data_dec_f[i * ny + j] != data_f[i * ny + j]){
+          printf("error: decompressed data is not equal to original data\n");
+          break;
+        }
+      }
+      else{
+        double * data_dec_d = (double *)data_dec;
+        double * data_d = (double *)data;
+        if (data_dec_d[i * ny + j] != data_d[i * ny + j]){
+          printf("error: decompressed data is not equal to original data\n");
+          break;
+        }
+      }
+    }
+  }
+  free(data_dec);
+  free(data);
+
+  // exit(0);
   //check compression ratio
   auto tpsz_comp_time_start = std::chrono::high_resolution_clock::now();
   unsigned char * final_result = NULL;
@@ -1626,6 +1720,7 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
   printf("BEGIN Compression ratio = %f\n", cr_ori);
   printf("psnr_overall_cpsz: %f\n",psnr_cpsz_overall);
   printf("FINAL Compressed ratio = %f\n",(2*r1*r2*sizeof(float)) * 1.0/result_after_zstd_size);
+  printf("percentage of lossless data size: %f\n", lossless_value_size_after_zstd * 1.0 / result_after_zstd_size);
   printf("psnr_overall: %f\n", psnr_overall);
 
   printf("comp time cpsz: %f\n", cpsz_comp_duration.count());
@@ -1791,7 +1886,6 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
     }
     else if (t1.size() == t_config.max_length){
       //ori reach max, dec should satisfy distance
-      //change: 没走到的话，不判断末尾距离，而是判断ESfrechet distance
       if(euclideanDistance(t1.back(),t2.back()) > threshold_max_iter){
       //if (ESfrechetDistance(t1, t2) >= threshold){
         printf("some trajectories not fixed(case0-1)\n");
