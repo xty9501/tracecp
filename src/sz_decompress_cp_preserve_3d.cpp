@@ -5,6 +5,11 @@
 #include <unordered_set>
 #include <algorithm>
 #include <chrono>
+#include "../external/fpzip/include/fpzip.h"
+#include <climits>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 
 inline void factor2D(int n, int &A, int &B) {
     int start = (int)floor(sqrt(n));
@@ -535,6 +540,8 @@ omp_sz_decompress_cp_preserve_3d_online_abs_record_vertex(const unsigned char * 
 	read_variable_from_src(compressed_pos, index_need_to_fix_size);
 	printf("decomp: index_need_to_fix_size = %ld\n", index_need_to_fix_size);
 	//if not 0, then read bitmap and lossless data
+	void * data_dec;
+	char * buff;
 	if (index_need_to_fix_size != 0){
 		// allocate memory for bitmap
 		bitmap = (unsigned char *) malloc(num_elements * sizeof(unsigned char));
@@ -543,15 +550,39 @@ omp_sz_decompress_cp_preserve_3d_online_abs_record_vertex(const unsigned char * 
 		convertByteArray2IntArray_fast_1b_sz(num_elements, compressed_pos, num_bytes, bitmap);
 		//再搞出来需要无损的大小
 		size_t lossless_count = index_need_to_fix_size;
-		// read_variable_from_src(compressed_pos, lossless_count);
-		// printf("lossless_count = %ld\n", lossless_count);
-		// allocate memory for lossless data
-		lossless_data_U = read_array_from_src<T>(compressed_pos,lossless_count);
-		lossless_data_V = read_array_from_src<T>(compressed_pos,lossless_count);
-		lossless_data_W = read_array_from_src<T>(compressed_pos,lossless_count);
+		//read outbytes for fpzip
+		size_t fpzip_outbytes = 0;
+		read_variable_from_src(compressed_pos, fpzip_outbytes);
+		//decompress using fpzip
+		buff = (char *) malloc(fpzip_outbytes);
+		memcpy(buff, compressed_pos, fpzip_outbytes);
+		compressed_pos += fpzip_outbytes;
+		FPZ* fpz_dec = fpzip_read_from_buffer(buff);
+		fpz_dec->type = FPZIP_TYPE_FLOAT;
+		fpz_dec->prec = 0;
+		fpz_dec->nx = index_need_to_fix_size;
+		fpz_dec->ny = 3;
+		fpz_dec->nz = 1;
+		fpz_dec->nf = 1;
+		size_t count = (size_t) fpz_dec->nx * fpz_dec->ny * fpz_dec->nz * fpz_dec->nf;
+		data_dec = (fpz_dec->type == FPZIP_TYPE_FLOAT ? static_cast<void*>(new float[count]) : static_cast<void*>(new double[count]));
+		size_t outbytes_dec = fpzip_read(fpz_dec, data_dec);
+		lossless_data_U = (T *) data_dec;
+		lossless_data_V = (T *) data_dec + index_need_to_fix_size;
+		lossless_data_W = (T *) data_dec + index_need_to_fix_size * 2;
 		lossless_data_U_pos = lossless_data_U;
 		lossless_data_V_pos = lossless_data_V;
 		lossless_data_W_pos = lossless_data_W;
+		free(buff);
+		// read_variable_from_src(compressed_pos, lossless_count);
+		// printf("lossless_count = %ld\n", lossless_count);
+		// allocate memory for lossless data
+		// lossless_data_U = read_array_from_src<T>(compressed_pos,lossless_count);
+		// lossless_data_V = read_array_from_src<T>(compressed_pos,lossless_count);
+		// lossless_data_W = read_array_from_src<T>(compressed_pos,lossless_count);
+		// lossless_data_U_pos = lossless_data_U;
+		// lossless_data_V_pos = lossless_data_V;
+		// lossless_data_W_pos = lossless_data_W;
 	}
 
 	int num_threads = 0;
@@ -1343,10 +1374,11 @@ omp_sz_decompress_cp_preserve_3d_online_abs_record_vertex(const unsigned char * 
 			V[idx] = lossless_data_V[i];
 			W[idx] = lossless_data_W[i];
 		}
-	free(lossless_data_U);
-	free(lossless_data_V);
-	free(lossless_data_W);
+	// free(lossless_data_U);
+	// free(lossless_data_V);
+	// free(lossless_data_W);
 	free(bitmap);
+	delete[] static_cast<float*>(data_dec);
 	}
 	free(eb_quant_index);
 	free(data_quant_index);
@@ -1386,7 +1418,10 @@ omp_sz_decompress_cp_preserve_3d_record_vertex(const unsigned char * compressed,
 	//first read index_need_to_fix_size
 	size_t index_need_to_fix_size = 0;
 	read_variable_from_src(compressed_pos, index_need_to_fix_size);
+	printf("decomp index_need_to_fix_size = %ld\n", index_need_to_fix_size);
 	//if not 0, then read bitmap and lossless data
+	void * data_dec;
+	char * buff;
 	if (index_need_to_fix_size != 0){
 		// allocate memory for bitmap
 		bitmap = (unsigned char *) malloc(num_elements * sizeof(unsigned char));
@@ -1395,13 +1430,57 @@ omp_sz_decompress_cp_preserve_3d_record_vertex(const unsigned char * compressed,
 		convertByteArray2IntArray_fast_1b_sz(num_elements, compressed_pos, num_bytes, bitmap);
 		//再搞出来需要无损的大小
 		size_t lossless_count = index_need_to_fix_size;
-		// allocate memory for lossless data
-		lossless_data_U = read_array_from_src<T>(compressed_pos,lossless_count);
-		lossless_data_V = read_array_from_src<T>(compressed_pos,lossless_count);
-		lossless_data_W = read_array_from_src<T>(compressed_pos,lossless_count);
+		//read outbytes for fpzip
+		size_t fpzip_outbytes = 0;
+		read_variable_from_src(compressed_pos, fpzip_outbytes);
+		//decompress using fpzip
+		auto fpzip_start = std::chrono::high_resolution_clock::now();
+		buff = (char *) malloc(fpzip_outbytes);
+		memcpy(buff, compressed_pos, fpzip_outbytes);
+		compressed_pos += fpzip_outbytes;
+		FPZ* fpz_dec = fpzip_read_from_buffer(buff);
+		fpz_dec->type = FPZIP_TYPE_FLOAT;
+		fpz_dec->prec = 0;
+		fpz_dec->nx = index_need_to_fix_size;
+		fpz_dec->ny = 3;
+		fpz_dec->nz = 1;
+		fpz_dec->nf = 1;
+		size_t count = (size_t) fpz_dec->nx * fpz_dec->ny * fpz_dec->nz * fpz_dec->nf;
+		data_dec = (fpz_dec->type == FPZIP_TYPE_FLOAT ? static_cast<void*>(new float[count]) : static_cast<void*>(new double[count]));
+		auto fpzip_read_start = std::chrono::high_resolution_clock::now();
+		size_t outbytes_dec = fpzip_read(fpz_dec, data_dec);
+		auto fpzip_read_end = std::chrono::high_resolution_clock::now();
+		printf("time for fpzip_read in second: %f\n", std::chrono::duration<double>(fpzip_read_end - fpzip_read_start).count());
+		lossless_data_U = (T *) data_dec;
+		lossless_data_V = (T *) data_dec + index_need_to_fix_size;
+		lossless_data_W = (T *) data_dec + index_need_to_fix_size * 2;
 		lossless_data_U_pos = lossless_data_U;
 		lossless_data_V_pos = lossless_data_V;
 		lossless_data_W_pos = lossless_data_W;
+		auto fpzip_end = std::chrono::high_resolution_clock::now();
+		printf("time for fpzip in second: %f\n", std::chrono::duration<double>(fpzip_end - fpzip_start).count());
+		// //print first U value
+		// printf("lossless_data_U[100] = %f\n", lossless_data_U[100]);
+		// //print first V value
+		// printf("lossless_data_V[100] = %f\n", lossless_data_V[100]);
+		// //print first W value
+		// printf("lossless_data_W[100] = %f\n", lossless_data_W[100]);
+		// //print sum of data_dec
+		// double sum = 0;
+		// for (size_t i = 0; i < index_need_to_fix_size; i++){
+		// 	sum += lossless_data_U[i];
+		// 	sum += lossless_data_V[i];
+		// 	sum += lossless_data_W[i];
+		// }
+		// printf("decomp sum data = %f\n", sum);
+
+		// // allocate memory for lossless data
+		// lossless_data_U = read_array_from_src<T>(compressed_pos,lossless_count);
+		// lossless_data_V = read_array_from_src<T>(compressed_pos,lossless_count);
+		// lossless_data_W = read_array_from_src<T>(compressed_pos,lossless_count);
+		// lossless_data_U_pos = lossless_data_U;
+		// lossless_data_V_pos = lossless_data_V;
+		// lossless_data_W_pos = lossless_data_W;
 	}
 
 	int base = 0;
@@ -2501,10 +2580,11 @@ omp_sz_decompress_cp_preserve_3d_record_vertex(const unsigned char * compressed,
 		V[idx] = lossless_data_V[i];
 		W[idx] = lossless_data_W[i];
 	}
-	free(lossless_data_U);
-	free(lossless_data_V);
-	free(lossless_data_W);
+	// free(lossless_data_U);
+	// free(lossless_data_V);
+	// free(lossless_data_W);
 	free(bitmap);
+	delete[] static_cast<float*>(data_dec);
 	}
 	free(eb_quant_index);
 	free(data_quant_index);

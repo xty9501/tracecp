@@ -7,6 +7,11 @@
 #include <cassert>
 #include <ftk/numeric/inverse_linear_interpolation_solver.hh>
 #include <chrono>
+#include "../external/fpzip/include/fpzip.h"
+#include <climits>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 
 inline void factor2D(int n, int &A, int &B) {
     int start = (int)floor(sqrt(n));
@@ -2885,19 +2890,70 @@ omp_sz_compress_cp_preserve_3d_record_vertex(
 	unsigned char * compressed_pos = compressed;
 	//开始写入
 	write_variable_to_dst(compressed_pos, index_need_to_lossless.size());
+	printf("index_need_to_lossless size = %ld\n", index_need_to_lossless.size());
 	if (index_need_to_lossless.size()!= 0){
 		//先写bitmap
 		convertIntArray2ByteArray_fast_1b_to_result_sz(bitmap, num_elements, compressed_pos);
-		//再写入lossless数据
-		for (auto it = index_need_to_lossless.begin(); it != index_need_to_lossless.end(); it++){
-			write_variable_to_dst(compressed_pos, U[*it]);
+		// use fpzip to compress
+		int type = FPZIP_TYPE_FLOAT;
+		int prec = 0;
+		int nx = index_need_to_lossless.size();
+		int ny = 3;
+		int nz = 1;
+		int nf = 1;
+		size_t count =(size_t) nx * ny * nz * nf;
+		size_t size = (type == FPZIP_TYPE_FLOAT ? sizeof(float) : sizeof(double));
+		void * data;
+		data = (type == FPZIP_TYPE_FLOAT ? static_cast<void*>(new float[count]) : static_cast<void*>(new double[count]));
+		//write all u then all v
+		std::vector<size_t> indices(index_need_to_lossless.begin(), index_need_to_lossless.end()); // 将 set 转为 vector
+		for (size_t i = 0; i < indices.size(); ++i) {
+			((float *)data)[i] = U[indices[i]];
+			((float *)data)[i + nx] = V[indices[i]];
+			((float *)data)[i + nx*2] = W[indices[i]];
 		}
-		for (auto it = index_need_to_lossless.begin(); it != index_need_to_lossless.end(); it++){
-			write_variable_to_dst(compressed_pos, V[*it]);
-		}
-		for (auto it = index_need_to_lossless.begin(); it != index_need_to_lossless.end(); it++){
-			write_variable_to_dst(compressed_pos, W[*it]);
-		}
+		// //calculate sum of data to check
+		// double sum = 0;
+		// for (size_t i = 0; i < count; i++){
+		// 	sum += ((float *)data)[i];
+		// }
+		// printf("comp data sum = %f\n", sum);
+
+		if (prec == 0)
+    		prec = (int)(CHAR_BIT * size);
+		char * buff = (char *) malloc(nx * ny * nz * nf * size);
+		FPZ* fpz = fpzip_write_to_buffer(buff,size*nx*ny*nz*nf);
+		fpz->type = FPZIP_TYPE_FLOAT;
+		fpz->prec = prec;
+		fpz->nx = nx;
+		fpz->ny = ny;
+		fpz->nz = nz;
+		fpz->nf = nf;
+		size_t outbytes = fpzip_write(fpz, data);
+		// //print first u value
+		// printf("U[100] = %f\n", U[indices[100]]);
+		// //print first v value
+		// printf("V[100] = %f\n", V[indices[100]]);
+		// //print first w value
+		// printf("W[100] = %f\n", W[indices[100]]);
+		//write outbytes first
+		write_variable_to_dst(compressed_pos, outbytes);
+		printf("outbytes = %ld\n", outbytes);
+		//write compressed data to compressed_pos
+		memcpy(compressed_pos, buff, outbytes);
+		compressed_pos += outbytes;
+		fpzip_read_close(fpz);
+		delete[] static_cast<float*>(data);
+		// //再写入lossless数据
+		// for (auto it = index_need_to_lossless.begin(); it != index_need_to_lossless.end(); it++){
+		// 	write_variable_to_dst(compressed_pos, U[*it]);
+		// }
+		// for (auto it = index_need_to_lossless.begin(); it != index_need_to_lossless.end(); it++){
+		// 	write_variable_to_dst(compressed_pos, V[*it]);
+		// }
+		// for (auto it = index_need_to_lossless.begin(); it != index_need_to_lossless.end(); it++){
+		// 	write_variable_to_dst(compressed_pos, W[*it]);
+		// }
 	}
 
 
@@ -5287,17 +5343,67 @@ unsigned char * omp_sz_compress_cp_preserve_3d_online_abs_record_vertex(
 		//write bitmap
 		convertIntArray2ByteArray_fast_1b_to_result_sz(bitmap, num_elements, compressed_pos);
 		printf("bitmap pos = %ld\n", compressed_pos - compressed);
-		//再写index_need_to_lossless对应U,V,W的数据
-		for (auto it = index_need_to_lossless.begin(); it != index_need_to_lossless.end(); it++){
-			write_variable_to_dst(compressed_pos, U[*it]); //T, index_need_to_lossless对应的U的值
+		// use fpzip to compress
+		int type = FPZIP_TYPE_FLOAT;
+		int prec = 0;
+		int nx = index_need_to_lossless.size();
+		int ny = 3;
+		int nz = 1;
+		int nf = 1;
+		size_t count =(size_t) nx * ny * nz * nf;
+		size_t size = (type == FPZIP_TYPE_FLOAT ? sizeof(float) : sizeof(double));
+		void * data;
+		data = (type == FPZIP_TYPE_FLOAT ? static_cast<void*>(new float[count]) : static_cast<void*>(new double[count]));
+		//write all u then all v
+		std::vector<size_t> indices(index_need_to_lossless.begin(), index_need_to_lossless.end()); // 将 set 转为 vector
+		for (size_t i = 0; i < indices.size(); ++i) {
+			((float *)data)[i] = U[indices[i]];
+			((float *)data)[i + nx] = V[indices[i]];
+			((float *)data)[i + nx*2] = W[indices[i]];
 		}
-		for (auto it = index_need_to_lossless.begin(); it != index_need_to_lossless.end(); it++){
-			write_variable_to_dst(compressed_pos, V[*it]); //T, index_need_to_lossless对应的V的值
-		}
-		for (auto it = index_need_to_lossless.begin(); it != index_need_to_lossless.end(); it++){
-			write_variable_to_dst(compressed_pos, W[*it]); //T, index_need_to_lossless对应的W的值
-		}
-		printf("index_need_to_lossless data pos = %ld\n", compressed_pos - compressed);
+		// //calculate sum of data to check
+		// double sum = 0;
+		// for (size_t i = 0; i < count; i++){
+		// 	sum += ((float *)data)[i];
+		// }
+		// printf("comp data sum = %f\n", sum);
+
+		if (prec == 0)
+    		prec = (int)(CHAR_BIT * size);
+		char * buff = (char *) malloc(nx * ny * nz * nf * size);
+		FPZ* fpz = fpzip_write_to_buffer(buff,size*nx*ny*nz*nf);
+		fpz->type = FPZIP_TYPE_FLOAT;
+		fpz->prec = prec;
+		fpz->nx = nx;
+		fpz->ny = ny;
+		fpz->nz = nz;
+		fpz->nf = nf;
+		size_t outbytes = fpzip_write(fpz, data);
+		// //print first u value
+		// printf("U[100] = %f\n", U[indices[100]]);
+		// //print first v value
+		// printf("V[100] = %f\n", V[indices[100]]);
+		// //print first w value
+		// printf("W[100] = %f\n", W[indices[100]]);
+		//write outbytes first
+		write_variable_to_dst(compressed_pos, outbytes);
+		printf("outbytes = %ld\n", outbytes);
+		//write compressed data to compressed_pos
+		memcpy(compressed_pos, buff, outbytes);
+		compressed_pos += outbytes;
+		fpzip_read_close(fpz);
+		delete[] static_cast<float*>(data);
+		// //再写index_need_to_lossless对应U,V,W的数据
+		// for (auto it = index_need_to_lossless.begin(); it != index_need_to_lossless.end(); it++){
+		// 	write_variable_to_dst(compressed_pos, U[*it]); //T, index_need_to_lossless对应的U的值
+		// }
+		// for (auto it = index_need_to_lossless.begin(); it != index_need_to_lossless.end(); it++){
+		// 	write_variable_to_dst(compressed_pos, V[*it]); //T, index_need_to_lossless对应的V的值
+		// }
+		// for (auto it = index_need_to_lossless.begin(); it != index_need_to_lossless.end(); it++){
+		// 	write_variable_to_dst(compressed_pos, W[*it]); //T, index_need_to_lossless对应的W的值
+		// }
+		// printf("index_need_to_lossless data pos = %ld\n", compressed_pos - compressed);
 	}
 	// write number of threads
 	write_variable_to_dst(compressed_pos, num_threads);

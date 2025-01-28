@@ -4,7 +4,11 @@
 #include <cstddef>
 #include <unordered_map>
 #include <set>
+#include <vector>
 #include "cp.hpp"
+
+#define FPZIP_FLAG 0
+
 
 // #define DEFAULT_EB 0.1
 
@@ -51,4 +55,12 @@ sz_compress_cp_preserve_2d_online_abs_record_vertex(const T * U, const T * V, si
 template<typename T>
 unsigned char *
 omp_sz_compress_cp_preserve_2d_record_vertex(const T * U, const T * V, size_t r1, size_t r2, size_t& compressed_size, bool transpose=false, double max_pwr_eb = 0.01,const std::set<size_t> &index_need_to_fix = {}, int threads = 64, T *&decompressed_U= NULL, T *&decompressed_V=NULL,std::string eb_type = "rel");
+
+template<typename T>
+unsigned char *
+sz3_compress_cp_preserve_2d_online_record_vertex(const T * U, const T * V, size_t r1, size_t r2, size_t& compressed_size, bool transpose, double max_pwr_eb,std::set<size_t>& index_need_to_fix,std::string eb_type);
+
+template<typename T>
+unsigned char *
+omp_sz3_compress_cp_preserve_2d_record_vertex(const T * U, const T * V, size_t r1, size_t r2, size_t& compressed_size, bool transpose=false, double max_pwr_eb = 0.01,const std::set<size_t> &index_need_to_fix = {}, int threads = 64, T *&decompressed_U= NULL, T *&decompressed_V=NULL,std::string eb_type = "rel");
 #endif

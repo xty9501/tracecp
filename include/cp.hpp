@@ -20,6 +20,11 @@
 #include "ftk/ndarray.hh"
 #include "ftk/numeric/critical_point_type.hh"
 #include "ftk/numeric/critical_point_test.hh"
+#include "../external/fpzip/include/fpzip.h"
+#include <climits>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 
 typedef struct record_t{
   double sid_start;
@@ -100,8 +105,17 @@ template<typename T>
 static void 
 check_simplex_seq_saddle(const T v[3][2], const double X[3][2], const int indices[3], int i, int j, int simplex_id, std::unordered_map<size_t, critical_point_t>& critical_points);
 
+template<typename T_fp>
+static void 
+check_simplex_seq_saddle(const T_fp vf[3][2],const double v[3][2], const double X[3][2], const int indices[3], int i, int j, int simplex_id, std::unordered_map<size_t, critical_point_t>& critical_points);
+
+
 template<typename T>
 std::unordered_map<size_t, critical_point_t>
 compute_critical_points(const T * U, const T * V, int r1, int r2);
+
+template<typename T>
+std::unordered_map<size_t, critical_point_t>
+sos_compute_critical_points(const T * U, const T * V, int r1, int r2,uint64_t vector_field_scaling_factor);
 
 int check_cp(double v[3][2]);

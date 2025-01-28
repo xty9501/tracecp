@@ -41,6 +41,18 @@ void updateOffsets(const Type* p, const int DW, const int DH, std::vector<std::s
 }
 
 template<typename Type>
+void updateOffsets_unorderset(const Type* p, const int DW, const int DH, std::vector<std::unordered_set<size_t>>& thread_unorderset, std::vector<std::vector<size_t>>& thread_lossless_index, int thread_id) {
+    auto coords = get_three_offsets(p, DW, DH);
+    // thread_lossless_index[thread_id].insert(coords.begin(), coords.end());
+    for (auto offset : coords) {
+        if (thread_unorderset[thread_id].find(offset) == thread_unorderset[thread_id].end()) {
+            thread_unorderset[thread_id].insert(offset);
+            thread_lossless_index[thread_id].push_back(offset);
+        }
+    }
+}
+
+template<typename Type>
 std::array<Type, 2> newRK4(const Type * x, const Type * v, ftk::ndarray<float> &data,  Type h, const int DH, const int DW,std::set<size_t>& lossless_index) {
   // x and y are positions, and h is the step size
   double rk1[2] = {0};
@@ -114,9 +126,6 @@ std::array<Type, 2> newRK4(const Type * x, const Type * v, ftk::ndarray<float> &
   return result;
 }
 
-//TODO: need overload newRK4 function, no tracking lossless index, modify from newRK4
-
-
 
 template<typename Type>
 std::array<Type, 2> newRK4_parallel(const Type* x, const Type* v, const ftk::ndarray<float>& data, Type h, const int DH, const int DW, std::vector<std::set<size_t>>& thread_lossless_index,int thread_id) {
@@ -167,7 +176,6 @@ std::array<Type, 2> newRK4_parallel(const Type* x, const Type* v, const ftk::nda
     updateOffsets(result.data(), DW, DH,thread_lossless_index, thread_id);
     return result;
 }
-
 
 
 template<typename Type>
@@ -342,8 +350,6 @@ std::vector<std::array<double, 2>> trajectory_parallel(double *X_original,const 
 }
 
 
-
-
 std::vector<std::array<double, 2>> trajectory(double *X_original,const std::array<double, 2>& initial_x, const double time_step, const int max_length, const int DH,const int DW, const std::unordered_map<size_t, critical_point_t>& critical_points, ftk::ndarray<float>& data,std::set<size_t>& lossless_index){
   std::vector<std::array<double, 2>> result;
   result.reserve(max_length);
@@ -392,6 +398,306 @@ std::vector<std::array<double, 2>> trajectory(double *X_original,const std::arra
                 result.push_back({cp.x[0], cp.x[1]}); // Add true critical point
                 auto final_offset_rk = get_three_offsets(RK4result, DW, DH);
                 lossless_index.insert(final_offset_rk.begin(), final_offset_rk.end());
+                return result;
+            }
+        }
+    }
+    current_x = RK4result;
+    result.push_back(current_x);
+  }
+
+  return result;
+}
+
+
+// MODIFIED, using unorderset + vector to store lossless index
+template<typename Type>
+std::array<Type, 2> newRK4(const Type * x, const Type * v, ftk::ndarray<float> &data,  Type h, const int DH, const int DW,std::unordered_set<size_t>& unorderset, std::vector<size_t>& lossless_index) {
+  // x and y are positions, and h is the step size
+  double rk1[2] = {0};
+  const double p1[2] = {x[0], x[1]};
+
+
+  if(!inside(p1, DH, DW)){
+    //return std::array<Type, 2>{x[0], x[1]};
+    return std::array<Type, 2>{x[0], x[1]};
+  }
+  interp2d(p1, rk1,data);
+  auto coords_p1 = get_three_offsets(p1, DW, DH);
+  // for (auto offset:coords){
+  //   lossless_index.insert(offset);
+  // }
+  
+  double rk2[2] = {0};
+  const double p2[2] = {x[0] + 0.5 * h * rk1[0], x[1] + 0.5 * h * rk1[1]};
+  if (!inside(p2, DH, DW)){
+    //return std::array<Type, 2>{p1[0], p1[1]};
+    return std::array<Type, 2>{x[0], x[1]};
+  }
+  interp2d(p2, rk2,data);
+  auto coords_p2 = get_three_offsets(p2, DW, DH);
+  // for (auto offset:coords){
+  //   lossless_index.insert(offset);
+  // }
+  
+  double rk3[2] = {0};
+  const double p3[2] = {x[0] + 0.5 * h * rk2[0], x[1] + 0.5 * h * rk2[1]};
+  if (!inside(p3, DH, DW)){
+    //return std::array<Type, 2>{p2[0], p2[1]};
+    return std::array<Type, 2>{x[0], x[1]};
+  }
+  interp2d(p3, rk3,data);
+  auto coords_p3 = get_three_offsets(p3, DW, DH);
+  // for (auto offset:coords){
+  //   lossless_index.insert(offset);
+  // }
+  
+  double rk4[2] = {0};
+  const double p4[2] = {x[0] + h * rk3[0], x[1] + h * rk3[1]};
+  if (!inside(p4, DH, DW)){
+    //return std::array<Type, 2>{p3[0], p3[1]};
+    return std::array<Type, 2>{x[0], x[1]};
+  }
+  interp2d(p4, rk4,data);
+  auto coords_p4 = get_three_offsets(p4, DW, DH);
+  // for (auto offset:coords){
+  //   lossless_index.insert(offset);
+  // }
+  
+  Type next_x = x[0] + h * (rk1[0] + 2 * rk2[0] + 2 * rk3[0] + rk4[0]) / 6.0;
+  Type next_y = x[1] + h * (rk1[1] + 2 * rk2[1] + 2 * rk3[1] + rk4[1]) / 6.0;
+  // printf("shift: (%f, %f)\n", next_x - x[0], next_y - x[1]);
+  // printf("coefficients: (%f,%f)\n",(rk1[0] + 2 * rk2[0] + 2 * rk3[0] + rk4[0]) / 6, (rk1[1] + 2 * rk2[1] + 2 * rk3[1] + rk4[1]) / 6);
+  // printf("current h sign: %d\n", printsign(h));
+  // printf("sign of coefficients x (%d,%d,%d,%d)\n", printsign(rk1[0]), printsign(rk2[0]), printsign(rk3[0]), printsign(rk4[0]));
+  // printf("sign of coefficients y (%d,%d,%d,%d)\n", printsign(rk1[1]), printsign(rk2[1]), printsign(rk3[1]), printsign(rk4[1]));
+  if (!inside(std::array<Type, 2>{next_x, next_y}, DH, DW)){
+    //return std::array<Type, 2>{p4[0], p4[1]};
+    return std::array<Type, 2>{x[0], x[1]};
+  }
+  std::array<Type, 2> result = {next_x, next_y};
+  auto coords_final = get_three_offsets(result, DW, DH);
+  // lossless_index.insert(coords_p1.begin(), coords_p1.end());
+  // lossless_index.insert(coords_p2.begin(), coords_p2.end());
+  // lossless_index.insert(coords_p3.begin(), coords_p3.end());
+  // lossless_index.insert(coords_p4.begin(), coords_p4.end());
+  // lossless_index.insert(coords_final.begin(), coords_final.end());
+
+  // check if contains, if not, insert
+  for (auto offset:coords_p1){
+    if (unorderset.find(offset) == unorderset.end()){
+      unorderset.insert(offset);
+      lossless_index.push_back(offset);
+    }
+  }
+  for (auto offset:coords_p2){
+    if (unorderset.find(offset) == unorderset.end()){
+      unorderset.insert(offset);
+      lossless_index.push_back(offset);
+    }
+  }
+  for (auto offset:coords_p3){
+    if (unorderset.find(offset) == unorderset.end()){
+      unorderset.insert(offset);
+      lossless_index.push_back(offset);
+    }
+  }
+  for (auto offset:coords_p4){
+    if (unorderset.find(offset) == unorderset.end()){
+      unorderset.insert(offset);
+      lossless_index.push_back(offset);
+    }
+  }
+  for (auto offset:coords_final){
+    if (unorderset.find(offset) == unorderset.end()){
+      unorderset.insert(offset);
+      lossless_index.push_back(offset);
+    }
+  }
+  return result;
+}
+
+template<typename Type>
+std::array<Type, 2> newRK4_parallel(const Type* x, const Type* v, const ftk::ndarray<float>& data, Type h, const int DH, const int DW, std::vector<std::unordered_set<size_t>>& thread_unorderset, std::vector<std::vector<size_t>>& thread_lossless_index, int thread_id) {
+    // x and y are positions, and h is the step size
+    double rk1[2] = {0};
+    const double p1[2] = {x[0], x[1]};
+
+    if (!inside(p1, DH, DW)) {
+        return std::array<Type, 2>{x[0], x[1]};
+    }
+    //updateOffsets(p1, DW, DH, thread_lossless_index, thread_id);
+    interp2d(p1, rk1, data);
+
+    double rk2[2] = {0};
+    const double p2[2] = {x[0] + 0.5 * h * rk1[0], x[1] + 0.5 * h * rk1[1]};
+    if (!inside(p2, DH, DW)) {
+        return std::array<Type, 2>{x[0], x[1]};
+    }
+    //updateOffsets(p2, DW, DH, thread_lossless_index, thread_id);
+    interp2d(p2, rk2, data);
+
+    double rk3[2] = {0};
+    const double p3[2] = {x[0] + 0.5 * h * rk2[0], x[1] + 0.5 * h * rk2[1]};
+    if (!inside(p3, DH, DW)) {
+        return std::array<Type, 2>{x[0], x[1]};
+    }
+    //updateOffsets(p3, DW, DH,thread_lossless_index, thread_id);
+    interp2d(p3, rk3, data);
+
+    double rk4[2] = {0};
+    const double p4[2] = {x[0] + h * rk3[0], x[1] + h * rk3[1]};
+    if (!inside(p4, DH, DW)) {
+        return std::array<Type, 2>{x[0], x[1]};
+    }
+    //updateOffsets(p4, DW, DH,thread_lossless_index, thread_id);
+    interp2d(p4, rk4, data);
+
+    Type next_x = x[0] + h * (rk1[0] + 2 * rk2[0] + 2 * rk3[0] + rk4[0]) / 6.0;
+    Type next_y = x[1] + h * (rk1[1] + 2 * rk2[1] + 2 * rk3[1] + rk4[1]) / 6.0;
+    if (!inside(std::array<Type, 2>{next_x, next_y}, DH, DW)) {
+        return std::array<Type, 2>{x[0],x[1]};
+    }
+    std::array<Type, 2> result = {next_x, next_y};
+    updateOffsets_unorderset(p1, DW, DH, thread_unorderset, thread_lossless_index, thread_id);
+    updateOffsets_unorderset(p2, DW, DH, thread_unorderset, thread_lossless_index, thread_id);
+    updateOffsets_unorderset(p3, DW, DH, thread_unorderset, thread_lossless_index, thread_id);
+    updateOffsets_unorderset(p4, DW, DH, thread_unorderset, thread_lossless_index, thread_id);
+    updateOffsets_unorderset(result.data(), DW, DH, thread_unorderset, thread_lossless_index, thread_id);
+    return result;
+}
+
+std::vector<std::array<double, 2>> trajectory(double *X_original,const std::array<double, 2>& initial_x, const double time_step, const int max_length, const int DH,const int DW, const std::unordered_map<size_t, critical_point_t>& critical_points, ftk::ndarray<float>& data,std::unordered_set<size_t>& unorderset,std::vector<size_t>& lossless_index){
+  std::vector<std::array<double, 2>> result;
+  result.reserve(max_length);
+  int flag = 0; // 1 means found, -1 means out of bound， 0 means reach max length
+  int length = 0;
+  result.push_back({X_original[0], X_original[1]}); //add original true position
+  length ++;
+  int orginal_offset = get_cell_offset(X_original, DW, DH);
+
+  std::array<double, 2> current_x = initial_x;
+
+  //add original and initial_x position's offset
+  auto ori_offset = get_three_offsets(X_original, DW, DH);
+
+  // for (auto offset:ori_offset){
+  //   lossless_index.insert(offset);
+  // }  
+  if(!inside(current_x, DH, DW)){ //seed outside 
+    return result;
+  }
+
+  result.push_back(current_x); //add initial position(seed)
+  length ++;
+  auto ini_offset = get_three_offsets(current_x, DW, DH);
+  // lossless_index.insert(ini_offset.begin(), ini_offset.end());
+  for (auto offset:ini_offset){
+    if (unorderset.find(offset) == unorderset.end()){
+      unorderset.insert(offset);
+      lossless_index.push_back(offset);
+    }
+  }
+  auto original_offset = get_cell_offset(current_x.data(), DW, DH);
+
+
+  while (result.size() < max_length) {
+    double current_v[2] = {0};  
+    std::array<double, 2> RK4result = newRK4(current_x.data(), current_v, data, time_step, DH, DW, unorderset, lossless_index);
+    size_t current_offset = get_cell_offset(RK4result.data(), DW, DH);
+
+    if (!inside(RK4result, DH, DW)) { // Out of bound
+        result.push_back(current_x);
+        return result;
+    }
+
+    if (current_offset != original_offset) { // Moved to another cell
+        auto it = critical_points.find(current_offset);
+        if (it != critical_points.end()) {
+            auto cp = it->second;
+            double error = 1e-3;
+            if (cp.type != SADDLE && fabs(RK4result[0] - cp.x[0]) < error && fabs(RK4result[1] - cp.x[1]) < error) {
+                result.push_back({RK4result[0], RK4result[1]});
+                result.push_back({cp.x[0], cp.x[1]}); // Add true critical point
+                auto final_offset_rk = get_three_offsets(RK4result, DW, DH);
+                // lossless_index.insert(final_offset_rk.begin(), final_offset_rk.end());
+                for (auto offset:final_offset_rk){
+                  if (unorderset.find(offset) == unorderset.end()){
+                    unorderset.insert(offset);
+                    lossless_index.push_back(offset);
+                  }
+                }
+                return result;
+            }
+        }
+    }
+    current_x = RK4result;
+    result.push_back(current_x);
+  }
+
+  return result;
+}
+
+std::vector<std::array<double, 2>> trajectory_parallel(double *X_original,const std::array<double, 2>& initial_x, const double time_step, const int max_length, const int DH,const int DW, const std::unordered_map<size_t, critical_point_t>& critical_points, ftk::ndarray<float>& data ,std::vector<std::unordered_set<size_t>>& thread_unorderset,std::vector<std::vector<size_t>> &thread_lossless_index,int thread_id){
+  std::vector<std::array<double, 2>> result;
+  result.reserve(max_length);
+  int flag = 0; // 1 means found, -1 means out of bound， 0 means reach max length
+  int length = 0;
+  result.push_back({X_original[0], X_original[1]}); //add original true position
+  length ++;
+  int orginal_offset = get_cell_offset(X_original, DW, DH);
+
+  std::array<double, 2> current_x = initial_x;
+
+  //add original and initial_x position's offset
+  auto ori_offset = get_three_offsets(X_original, DW, DH);
+
+  // for (auto offset:ori_offset){
+  //   lossless_index.insert(offset);
+  // }  
+  if(!inside(current_x, DH, DW)){ //seed outside 
+    return result;
+  }
+
+  result.push_back(current_x); //add initial position(seed)
+  length ++;
+  auto ini_offset = get_three_offsets(current_x, DW, DH);
+  // thread_lossless_index[thread_id].insert(ini_offset.begin(), ini_offset.end());
+  for (auto offset:ini_offset){
+    if (thread_unorderset[thread_id].find(offset) == thread_unorderset[thread_id].end()){
+      thread_unorderset[thread_id].insert(offset);
+      thread_lossless_index[thread_id].push_back(offset);
+    }
+  }
+  auto original_offset = get_cell_offset(current_x.data(), DW, DH);
+
+
+  while (result.size() < max_length) {
+    double current_v[2] = {0};  
+    std::array<double, 2> RK4result = newRK4_parallel(current_x.data(), current_v, data, time_step, DH, DW,thread_unorderset,thread_lossless_index,thread_id);
+    size_t current_offset = get_cell_offset(RK4result.data(), DW, DH);
+
+    if (!inside(RK4result, DH, DW)) { // Out of bound
+        result.push_back(current_x);
+        return result;
+    }
+
+    if (current_offset != original_offset) { // Moved to another cell
+        auto it = critical_points.find(current_offset);
+        if (it != critical_points.end()) {
+            auto cp = it->second;
+            double error = 1e-3;
+            if (cp.type != SADDLE && fabs(RK4result[0] - cp.x[0]) < error && fabs(RK4result[1] - cp.x[1]) < error) {
+                result.push_back({RK4result[0], RK4result[1]});
+                result.push_back({cp.x[0], cp.x[1]}); // Add true critical point
+                auto final_offset_rk = get_three_offsets(RK4result, DW, DH);
+                // thread_lossless_index[thread_id].insert(final_offset_rk.begin(), final_offset_rk.end());
+                for (auto offset:final_offset_rk){
+                  if (thread_unorderset[thread_id].find(offset) == thread_unorderset[thread_id].end()){
+                    thread_unorderset[thread_id].insert(offset);
+                    thread_lossless_index[thread_id].push_back(offset);
+                  }
+                }
                 return result;
             }
         }

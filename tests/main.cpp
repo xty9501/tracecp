@@ -23,11 +23,11 @@
 #include <chrono>
 #include "advect.hpp"
 #include <math.h>
-#include "fpzip.h"
-#include <climits>
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
+// #include "fpzip.h"
+// #include <climits>
+// #include <cstdio>
+// #include <cstdlib>
+// #include <cstring>
 
 // #include <hypermesh/ndarray.hh>
 // #include <hypermesh/regular_simplex_mesh.hh>
@@ -54,6 +54,13 @@
 #include<omp.h>
 
 #define CPSZ_OMP_FLAG 1
+#define SZ3_FLAG 0 //flag for sz3+abs_mode
+#define SOS_FLAG 1 // when == 1, set CPSZ_OMP_FLAG = 0
+
+
+
+
+
 
 std::array<double, 2> findLastNonNegativeOne(const std::vector<std::array<double, 2>>& vec) {
     for (auto it = vec.rbegin(); it != vec.rend(); ++it) {
@@ -326,9 +333,15 @@ void verify(Type * ori_data, Type * data, size_t num_elements, double &nrmse){
             if(maxpw_relerr<relerr)
                 maxpw_relerr = relerr;
         }
-
-        if (diffMax < err)
+        if (err > diffMax)
             diffMax = err;
+        
+        // //for test purpose
+        // if (err > 0.05){
+        //   //print index pos
+        //   printf("index = %d,x = %d, y = %d,err = %f\n", i,i %3600, i /3600,err);
+        //   exit(0);
+        // }
         prodSum += (ori_data[i]-mean1)*(data[i]-mean2);
         sum3 += (ori_data[i] - mean1)*(ori_data[i]-mean1);
         sum4 += (data[i] - mean2)*(data[i]-mean2);
@@ -468,6 +481,10 @@ template<typename T>
 void
 fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_config,int totoal_thread, int obj,std::string eb_type,double threshold,double threshold_outside, double threshold_max_iter, std::string file_dir = ""){
   
+  bool sos_flag = false;
+  if(SOS_FLAG == 1){
+    sos_flag = true;
+  }
   //控制写入文件的flag
   bool write_flag = true;
   
@@ -475,6 +492,7 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
   int DH = r1;
   bool stop = false;
   std::set<size_t> all_vertex_for_all_diff_traj;
+
 
 
 
@@ -496,17 +514,41 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
   std::array<int,3> origin_traj_detail;
   std::vector<int> fixed_cpsz_trajID;
   //get cp for original data
-  auto critical_points_ori = compute_critical_points(U, V, r1, r2);
+  std::unordered_map<size_t, critical_point_t> critical_points_ori;
+  uint64_t vector_field_scaling_factor = 1;
+  if (SOS_FLAG == 1){
+    // compute vector_field_resolution
+    const int type_bits = 63;
+    double vector_field_resolution = 0;
+    for (int i=0; i<r1*r2; i++){
+      double min_val = std::max(fabs(U[i]), fabs(V[i]));
+      vector_field_resolution = std::max(vector_field_resolution, min_val);
+    }
+    int vbits = std::ceil(std::log2(vector_field_resolution));
+    int nbits = (type_bits - 3) / 2;
+    vector_field_scaling_factor = 1 << (nbits - vbits);
+    std::cerr << "resolution=" << vector_field_resolution 
+    << ", factor=" << vector_field_scaling_factor 
+    << ", nbits=" << nbits << ", vbits=" << vbits << ", shift_bits=" << nbits - vbits << std::endl;
+    critical_points_ori = sos_compute_critical_points(U,V,r1,r2,vector_field_scaling_factor);
+  }
+  else{
+    critical_points_ori = compute_critical_points(U, V, r1, r2);
+  }
+
   if (file_dir != ""){
     record_criticalpoints(file_dir + "critical_points_ori", critical_points_ori);
   }
-  //exit(0);
+  printf("sos_flag = %d,critical_points_ori size = %ld\n", SOS_FLAG, critical_points_ori.size());
 
   auto cpsz_comp_start = std::chrono::high_resolution_clock::now();
   size_t result_size = 0;
   unsigned char * result = NULL;
   double current_pwr_eb = 0;
-  if(eb_type == "rel"){
+  if(SOS_FLAG == 1){
+    result = sz_compress_cp_preserve_sos_2d_online_fp(U, V, r1, r2, result_size, false, max_pwr_eb);
+  }
+  else if(eb_type == "rel"){
     //****original version of cpsz********
     if (CPSZ_OMP_FLAG == 0){
       result = sz_compress_cp_preserve_2d_fix(U, V, r1, r2, result_size, false, max_pwr_eb, current_pwr_eb);
@@ -523,20 +565,42 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
   else if (eb_type == "abs"){
     if (CPSZ_OMP_FLAG == 0){
       //****** cpsz with absolute error bound ******
-      result = sz_compress_cp_preserve_2d_online_abs_record_vertex(U, V, r1, r2, result_size, false, max_pwr_eb);
+      if (SZ3_FLAG == 1){
+        std::set<size_t> empty_set;
+        result = sz3_compress_cp_preserve_2d_online_record_vertex(U, V, r1, r2, result_size, false, max_pwr_eb,empty_set,eb_type);
+      }
+      else{
+        result = sz_compress_cp_preserve_2d_online_abs_record_vertex(U, V, r1, r2, result_size, false, max_pwr_eb);
+      }
+
     }
     else{
-      std::set<size_t> empty_set;
-      float * dec_inplace_U = NULL;
-      float * dec_inplace_V = NULL;
-      result = omp_sz_compress_cp_preserve_2d_record_vertex(U, V, r1, r2,result_size,false,max_pwr_eb,empty_set,totoal_thread,dec_inplace_U,dec_inplace_V,eb_type);
+      if(SZ3_FLAG == 1 && eb_type == "abs"){
+        printf("sz3-abs-omp\n");
+        std::set<size_t> empty_set;
+        float * dec_inplace_U = NULL;
+        float * dec_inplace_V = NULL;
+        result = omp_sz3_compress_cp_preserve_2d_record_vertex(U, V, r1, r2,result_size,false,max_pwr_eb,empty_set,totoal_thread,dec_inplace_U,dec_inplace_V,eb_type);
+        double placehold = 0;
+        verify(U,dec_inplace_U, r1*r2,placehold);
+        verify(V,dec_inplace_V, r1*r2,placehold);
+      }
+      else{
+        std::set<size_t> empty_set;
+        float * dec_inplace_U = NULL;
+        float * dec_inplace_V = NULL;
+        result = omp_sz_compress_cp_preserve_2d_record_vertex(U, V, r1, r2,result_size,false,max_pwr_eb,empty_set,totoal_thread,dec_inplace_U,dec_inplace_V,eb_type);
+      }
     }
     
   }
   else{
-    printf("eb_type must be rel or abs\n");
+    printf("eb_type must be rel or abs or SOS_FLAG =1\n");
     exit(0);
   }
+
+  printf("done compression...\n");
+  // exit(0);
 
   //***** use cpsz+st2 **********
   //result = sz_compress_cp_preserve_2d_st2_fix(U, V, r1, r2, result_size, false, max_pwr_eb, current_pwr_eb, critical_points_ori);
@@ -556,7 +620,10 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
   size_t lossless_output = sz_lossless_decompress(ZSTD_COMPRESSOR, result_after_lossless, lossless_outsize, &result, result_size);
   float * dec_U = NULL;
   float * dec_V = NULL;
-  if (eb_type == "rel"){
+  if(SOS_FLAG == 1){
+    sz_decompress_cp_preserve_sos_2d_online_fp<float>(result, r1,r2, dec_U, dec_V);
+  }
+  else if (eb_type == "rel"){
     if (CPSZ_OMP_FLAG == 0){
       sz_decompress_cp_preserve_2d_online<float>(result, r1,r2, dec_U, dec_V); // use cpsz
     }
@@ -566,10 +633,21 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
   }
   else if (eb_type == "abs"){
     if (CPSZ_OMP_FLAG == 0){
-      sz_decompress_cp_preserve_2d_online_record_vertex<float>(result, r1,r2, dec_U, dec_V); // use cpsz
+      if (SZ3_FLAG == 1){
+        sz3_decompress_cp_preserve_2d_online_record_vertex<float>(result, r1,r2, dec_U, dec_V);
+      }
+      else{
+        sz_decompress_cp_preserve_2d_online_record_vertex<float>(result, r1,r2, dec_U, dec_V); // use cpsz
+      }
+      
     }
     else{
-      omp_sz_decompress_cp_preserve_2d_online(result, r1,r2, dec_U, dec_V);
+      if (SZ3_FLAG == 1){
+        omp_sz3_decompress_cp_preserve_2d_online(result, r1,r2, dec_U, dec_V);
+      }
+      else{
+        omp_sz_decompress_cp_preserve_2d_online(result, r1,r2, dec_U, dec_V);
+      }
     }
     
   }
@@ -608,8 +686,21 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
 
 
 
+
   //get cp for decompressed data
-  auto critical_points_dec = compute_critical_points(dec_U, dec_V, r1, r2);
+  std::unordered_map<size_t, critical_point_t> critical_points_dec;
+  if (SOS_FLAG == 1){
+    // compute vector_field_resolution
+    critical_points_dec = sos_compute_critical_points(dec_U, dec_V, r1, r2, vector_field_scaling_factor);
+    printf("dec: vector_field_scaling_factor = %d\n", vector_field_scaling_factor);
+    
+  }
+  else{
+    critical_points_dec = compute_critical_points(dec_U, dec_V, r1, r2);
+  }
+  
+
+  printf("decomp cp: sos_flag = %d, critical_points_dec size: %ld\n",SOS_FLAG, critical_points_dec.size());
   //check two have same cp
   //check if all cretical_points_ori in critical_points_dec
   for (const auto& cpd:critical_points_ori){
@@ -1056,6 +1147,11 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
     origin_traj_detail = {num_outside, num_max_iter, num_find_cp};
   }
 
+  if(SOS_FLAG == 1){
+    printf("SOS_FLAG is 1, exit\n");
+    exit(0);
+  }
+
   auto fix_traj_start = std::chrono::high_resolution_clock::now();
   //exit(0);
   //*************开始修复轨迹*************   
@@ -1084,6 +1180,7 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
     printf("current iteration size: %ld\n", trajID_need_fix_vector.size());
     
     std::vector<std::set<size_t>> local_all_vertex_for_all_diff_traj(totoal_thread);
+    std::vector<std::vector<size_t>> local_all_vertex_for_all_diff_traj_vec(totoal_thread);
 
     omp_lock_t lock;
     omp_init_lock(&lock);  // 初始化锁
@@ -1201,7 +1298,6 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
       } while (success == false);
       
       //printf("processed current_trajID: %ld by thread:%d, ori_type: %s, end_fix_index: %d ori_len: %d\n", current_trajID, omp_get_thread_num(), ori_type.c_str(), end_fix_index, t1.size());
-    
       // while (!success){
       //   //printf("thread: %d, current_trajID: %ld, current_end_fix_index: %d\n", thread_id, current_trajID, end_fix_index);
       //   //cout << "thread: " << thread_id << ", current_trajID: " << current_trajID << ", current_end_fix_index: " << end_fix_index << endl;
@@ -1213,14 +1309,11 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
       //   // std::unordered_map<size_t,double> rollback_dec_v;
       //   // std::set<size_t> rollback_vertexID;
       //   //计算一次rk4直到终止点，统计经过的cellID，然后替换数据
-        
       //   /* 使用简单的版本*/
       //   auto temp_trajs_ori_time_start = std::chrono::high_resolution_clock::now();
       //   end_fix_index = std::min(end_fix_index,t_config.max_length);
       //   auto temp_trajs_ori = trajectory(t1[0].data(), t1[1], direction * t_config.h, end_fix_index, DH, DW, critical_points_ori, grad_ori,temp_vertexID);
-        
       //   //auto temp_trajs_ori_time_end = std::chrono::high_resolution_clock::now();
-
       //   //此时temp_vertexID记录了从起点到分岔点需要经过的所有vertex
       //   // for (auto o:temp_vertexID){
       //   //   rollback_dec_u[o] = dec_U[o];
@@ -1250,9 +1343,7 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
       //   2. 不从0开始，而是从end_fix_index开始，走max_length-end_fix_index+2步
       //   */
       //   //auto temp_debug = trajectory(t2[0].data(), t2[1],direction * t_config.h,end_fix_index, DH, DW, critical_points_dec, grad_dec,temp_index_check);
-
       //   auto temp_trajs_check = trajectory(t1[0].data(), t1[1], direction * t_config.h, end_fix_index, DH, DW, critical_points_dec, grad_dec,temp_vertexID_check);
-
       //   // switch (obj)
       //   // {
       //   //   case 0:
@@ -1293,7 +1384,6 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
       //   }
       //   //     break;
       //   // }
-      
       //   if (!success){
       //     //rollback
       //     // for (auto o:temp_vertexID){
@@ -1577,76 +1667,76 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
   printf("lossless_value using zstd size: %zu\n", lossless_value_size_after_zstd);
   free(lossless_value);
   // 使用fpzip压缩，看大小
-  int type = FPZIP_TYPE_FLOAT;
-  int prec = 0;
-  int nx = all_vertex_for_all_diff_traj.size();
-  int ny = 2; //u and v
-  int nz = 1;
-  int nf = 1;
-  size_t count = (size_t)nx * ny * nz * nf;
-  size_t size = (type == FPZIP_TYPE_FLOAT ? sizeof(float) : sizeof(double));
-  void * data;
-  data = (type == FPZIP_TYPE_FLOAT ? static_cast<void*>(new float[count]) : static_cast<void*>(new double[count]));
-  data = (void*)lossless_data.data();
-  if (prec == 0)
-    prec = (int)(CHAR_BIT * size);
-  char * buff = (char*)malloc(size * nx * ny * nz * nf);
-  FPZ* fpz = fpzip_write_to_buffer(buff,size * nx * ny * nz * nf);
-  fpz->type = FPZIP_TYPE_FLOAT;
-  fpz->prec = prec;
-  fpz->nx = nx;
-  fpz->ny = ny;
-  fpz->nz = nz;
-  fpz->nf = nf;
-  if (!fpzip_write_header(fpz)) {
-      fprintf(stderr, "cannot write header: %s\n", fpzip_errstr[fpzip_errno]);
-      exit(0);
-  }
-  size_t outbytes = fpzip_write(fpz, data);
-  fprintf(stderr, "outbytes=%lu ratio=%.2f\n", (unsigned long)outbytes, double(nx) * ny * nz * nf * size / outbytes);
-  fpzip_write_close(fpz);
+  // int type = FPZIP_TYPE_FLOAT;
+  // int prec = 0;
+  // int nx = all_vertex_for_all_diff_traj.size();
+  // int ny = 2; //u and v
+  // int nz = 1;
+  // int nf = 1;
+  // size_t count = (size_t)nx * ny * nz * nf;
+  // size_t size = (type == FPZIP_TYPE_FLOAT ? sizeof(float) : sizeof(double));
+  // void * data;
+  // //data = (type == FPZIP_TYPE_FLOAT ? static_cast<void*>(new float[count]) : static_cast<void*>(new double[count]));
+  // data = (void*)lossless_data.data();
+  // if (prec == 0)
+  //   prec = (int)(CHAR_BIT * size);
+  // char * buff = (char*)malloc(size * nx * ny * nz * nf);
+  // FPZ* fpz = fpzip_write_to_buffer(buff,size * nx * ny * nz * nf);
+  // fpz->type = FPZIP_TYPE_FLOAT;
+  // fpz->prec = prec;
+  // fpz->nx = nx;
+  // fpz->ny = ny;
+  // fpz->nz = nz;
+  // fpz->nf = nf;
+  // if (!fpzip_write_header(fpz)) {
+  //     fprintf(stderr, "cannot write header: %s\n", fpzip_errstr[fpzip_errno]);
+  //     exit(0);
+  // }
+  // size_t outbytes = fpzip_write(fpz, data);
+  // fprintf(stderr, "outbytes=%lu ratio=%.2f\n", (unsigned long)outbytes, double(nx) * ny * nz * nf * size / outbytes);
+  // fpzip_write_close(fpz);
 
-  //now decompress
-  FPZ* fpz_dec = fpzip_read_from_buffer(buff);
-  //read header
-  if(!fpzip_read_header(fpz_dec)){
-    fprintf(stderr, "cannot read header: %s\n", fpzip_errstr[fpzip_errno]);
-    exit(0);
-  }
-  type = fpz_dec->type;
-  prec = fpz_dec->prec;
-  nx = fpz_dec->nx;
-  ny = fpz_dec->ny;
-  nz = fpz_dec->nz;
-  nf = fpz_dec->nf;
-  printf("dec: type: %d, prec: %d, nx: %d, ny: %d, nz: %d, nf: %d\n", type, prec, nx, ny, nz, nf);
-  void * data_dec;
-  data_dec = (type == FPZIP_TYPE_FLOAT ? static_cast<void*>(new float[count]) : static_cast<void*>(new double[count]));
-  size_t outbytes_dec = fpzip_read(fpz_dec, data_dec);
-  printf("outbytes_dec: %zu\n", outbytes_dec);
-  //check decompressed data
-  for (size_t i = 0; i < nx; ++i){
-    for (size_t j = 0; j < ny; ++j){
-      if (type == FPZIP_TYPE_FLOAT){
-        float * data_dec_f = (float *)data_dec;
-        float * data_f = (float *)data;
-        if (data_dec_f[i * ny + j] != data_f[i * ny + j]){
-          printf("error: decompressed data is not equal to original data\n");
-          break;
-        }
-      }
-      else{
-        double * data_dec_d = (double *)data_dec;
-        double * data_d = (double *)data;
-        if (data_dec_d[i * ny + j] != data_d[i * ny + j]){
-          printf("error: decompressed data is not equal to original data\n");
-          break;
-        }
-      }
-    }
-  }
-  free(data_dec);
-  free(data);
+  // //now decompress
+  // FPZ* fpz_dec = fpzip_read_from_buffer(buff);
+  // //read header
+  // if(!fpzip_read_header(fpz_dec)){
+  //   fprintf(stderr, "cannot read header: %s\n", fpzip_errstr[fpzip_errno]);
+  //   exit(0);
+  // }
+  // type = fpz_dec->type;
+  // prec = fpz_dec->prec;
+  // nx = fpz_dec->nx;
+  // ny = fpz_dec->ny;
+  // nz = fpz_dec->nz;
+  // nf = fpz_dec->nf;
+  // printf("dec: type: %d, prec: %d, nx: %d, ny: %d, nz: %d, nf: %d\n", type, prec, nx, ny, nz, nf);
+  // void * data_dec;
+  // data_dec = (type == FPZIP_TYPE_FLOAT ? static_cast<void*>(new float[count]) : static_cast<void*>(new double[count]));
+  // size_t outbytes_dec = fpzip_read(fpz_dec, data_dec);
+  // printf("outbytes_dec: %zu\n", outbytes_dec);
+  // //check decompressed data
+  // for (size_t i = 0; i < nx; ++i){
+  //   for (size_t j = 0; j < ny; ++j){
+  //     if (type == FPZIP_TYPE_FLOAT){
+  //       float * data_dec_f = (float *)data_dec;
+  //       float * data_f = (float *)data;
+  //       if (data_dec_f[i * ny + j] != data_f[i * ny + j]){
+  //         printf("error: decompressed data is not equal to original data\n");
+  //         break;
+  //       }
+  //     }
+  //     else{
+  //       double * data_dec_d = (double *)data_dec;
+  //       double * data_d = (double *)data;
+  //       if (data_dec_d[i * ny + j] != data_d[i * ny + j]){
+  //         printf("error: decompressed data is not equal to original data\n");
+  //         break;
+  //       }
+  //     }
+  //   }
+  // }
+  // free(data_dec);
+  //free(data);
 
   // exit(0);
   //check compression ratio
@@ -1669,9 +1759,12 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
   }
   else if(eb_type == "abs"){
     if (CPSZ_OMP_FLAG == 0){
-    final_result = sz_compress_cp_preserve_2d_online_abs_record_vertex(U, V, r1, r2, final_result_size, true, max_pwr_eb, all_vertex_for_all_diff_traj);
-    final_result = sz_compress_cp_preserve_2d_online_abs_record_vertex(U, V, r1, r2, final_result_size, true, max_pwr_eb, all_vertex_for_all_diff_traj);
-      final_result = sz_compress_cp_preserve_2d_online_abs_record_vertex(U, V, r1, r2, final_result_size, true, max_pwr_eb, all_vertex_for_all_diff_traj);
+      if(SZ3_FLAG == 1){
+        final_result =  sz3_compress_cp_preserve_2d_online_record_vertex(U, V, r1, r2, final_result_size, true, max_pwr_eb, all_vertex_for_all_diff_traj,eb_type);
+      }
+      else{
+        final_result = sz_compress_cp_preserve_2d_online_abs_record_vertex(U, V, r1, r2, final_result_size, true, max_pwr_eb, all_vertex_for_all_diff_traj);
+      }
     }
     else{
       float * dec_inplace_U = NULL;
@@ -1699,10 +1792,21 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
   float * final_dec_U = NULL;
   float * final_dec_V = NULL;
   if (CPSZ_OMP_FLAG == 0){
-    sz_decompress_cp_preserve_2d_online_record_vertex<float>(final_result, r1, r2, final_dec_U, final_dec_V);
+    if (SZ3_FLAG == 1 && eb_type == "abs"){
+      sz3_decompress_cp_preserve_2d_online_record_vertex<float>(final_result, r1, r2, final_dec_U, final_dec_V);
+    }
+    else {
+      sz_decompress_cp_preserve_2d_online_record_vertex<float>(final_result, r1, r2, final_dec_U, final_dec_V);
+    }    
   }
   else{
-    omp_sz_decompress_cp_preserve_2d_online(final_result, r1, r2, final_dec_U, final_dec_V);
+    if (SZ3_FLAG == 1 && eb_type == "abs"){
+      omp_sz3_decompress_cp_preserve_2d_online(final_result, r1, r2, final_dec_U, final_dec_V);
+    }
+    else{
+      omp_sz_decompress_cp_preserve_2d_online(final_result, r1, r2, final_dec_U, final_dec_V);
+    }
+    
   }
   
   auto tpsz_decomp_end = std::chrono::high_resolution_clock::now();

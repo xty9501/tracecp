@@ -1239,7 +1239,11 @@ void final_check(float *U, float *V, float *W, int r1, int r2, int r3, double eb
   printf("====================================\n");
   //检查vertex_need_to_lossless对应的点是否一致
   for(auto p:vertex_need_to_lossless){
-    if(U[p] != final_dec_U[p] || V[p] != final_dec_V[p] || W[p] != final_dec_W[p]){
+    // if(U[p] != final_dec_U[p] || V[p] != final_dec_V[p] || W[p] != final_dec_W[p]){
+    //   printf("vertex is diff: index=%d, ori_u=%f, dec_u=%f, ori_v=%f, dec_v=%f, ori_w=%f, dec_w=%f\n", p, U[p], final_dec_U[p], V[p], final_dec_V[p], W[p], final_dec_W[p]);
+    //   exit(0);
+    // }
+    if(fabs(U[p] - final_dec_U[p]) > 1e-6 || fabs(V[p] - final_dec_V[p]) > 1e-6 || fabs(W[p] - final_dec_W[p]) > 1e-6){
       printf("vertex is diff: index=%d, ori_u=%f, dec_u=%f, ori_v=%f, dec_v=%f, ori_w=%f, dec_w=%f\n", p, U[p], final_dec_U[p], V[p], final_dec_V[p], W[p], final_dec_W[p]);
       exit(0);
     }

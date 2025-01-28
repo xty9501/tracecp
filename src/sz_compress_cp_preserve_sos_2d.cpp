@@ -72,6 +72,11 @@ derive_cp_abs_eb_sos_online(const T u0, const T u1, const T u2, const T v0, cons
 template<typename T_fp>
 static int 
 check_cp(T_fp vf[3][2], int indices[3]){
+	for(int i=0; i<3; i++){ //skip if any of the vertex is 0 //
+		if((vf[i][0] == 0) && (vf[i][1] == 0)){ //
+			return -1; //
+		} //
+	} //
 	// robust critical point test
 	bool succ = ftk::robust_critical_point_in_simplex2(vf, indices);
 	if (!succ) return -1;
@@ -143,7 +148,6 @@ compute_cp(const T_fp * U_fp, const T_fp * V_fp, int r1, int r2, const T_data * 
 				vf[p][0] = U_fp[indices[p]];
 				vf[p][1] = V_fp[indices[p]];
 			}
-
 			T_data v[3][2]; 
 			for(int p=0; p<3; p++){
 				v[p][0] = U[indices[p]];
@@ -154,7 +158,7 @@ compute_cp(const T_fp * U_fp, const T_fp * V_fp, int r1, int r2, const T_data * 
 				{0, 1},
 				{1, 1}
 			};
-			cp_exist[2*(i * (r2-1) + j)] = (check_cp_numeric(v,X1, indices) == 1);
+			cp_exist[2*(i * (r2-1) + j)] = (check_cp(vf, indices) == 1);
 			//cp_exist[2*(i * (r2-1) + j)] = (check_cp(vf, indices) == 1);
 			for(int k=0; k<3; k++){
 				// skip if any of the vertex is 0
@@ -163,22 +167,18 @@ compute_cp(const T_fp * U_fp, const T_fp * V_fp, int r1, int r2, const T_data * 
 					break;
 				}
 			 }
-
 			// cell index 1
 			indices[1] = i*r2 + (j+1);
 			vf[1][0] = U_fp[indices[1]];
 			vf[1][1] = V_fp[indices[1]];
-
 			v[1][0] = U[indices[1]];
 			v[1][1] = V[indices[1]];
-
 			T_data X2[3][2] = {
 				{0, 0},
 				{1, 0},
 				{1, 1}
 			};
-
-			cp_exist[2*(i * (r2-1) + j) + 1] = (check_cp_numeric(v,X2, indices) == 1);
+			cp_exist[2*(i * (r2-1) + j) + 1] = (check_cp(vf, indices) == 1);
 			//cp_exist[2*(i * (r2-1) + j) + 1] = (check_cp(vf, indices) == 1);
 			for (int k=0; k<3; k++){
 				// skip if any of the vertex is 0
@@ -192,6 +192,33 @@ compute_cp(const T_fp * U_fp, const T_fp * V_fp, int r1, int r2, const T_data * 
 	return cp_exist;	
 }
 
+// template<typename T_fp>
+// static vector<bool> 
+// compute_cp(const T_fp * U_fp, const T_fp * V_fp, int r1, int r2){
+// 	// check cp for all cells
+// 	vector<bool> cp_exist(2*(r1-1)*(r2-1), 0);
+// 	for(int i=0; i<r1-1; i++){
+// 		for(int j=0; j<r2-1; j++){
+// 			int indices[3];
+// 			indices[0] = i*r2 + j;
+// 			indices[1] = (i+1)*r2 + j;
+// 			indices[2] = (i+1)*r2 + (j+1); 
+// 			T_fp vf[3][2];
+// 			// cell index 0
+// 			for(int p=0; p<3; p++){
+// 				vf[p][0] = U_fp[indices[p]];
+// 				vf[p][1] = V_fp[indices[p]];
+// 			}
+// 			cp_exist[2*(i * (r2-1) + j)] = (check_cp(vf, indices) == 1);
+// 			// cell index 1
+// 			indices[1] = i*r2 + (j+1);
+// 			vf[1][0] = U_fp[indices[1]];
+// 			vf[1][1] = V_fp[indices[1]];
+// 			cp_exist[2*(i * (r2-1) + j) + 1] = (check_cp(vf, indices) == 1);
+// 		}
+// 	}
+// 	return cp_exist;	
+// }
 
 // //overload compute_cp
 // template<typename T_fp>
@@ -351,7 +378,6 @@ convert_to_fixed_point(const T * U, const T * V, size_t num_elements, T_fp * U_f
 template<typename T_data>
 unsigned char *
 sz_compress_cp_preserve_sos_2d_online_fp(const T_data * U, const T_data * V, size_t r1, size_t r2, size_t& compressed_size, bool transpose, double max_pwr_eb){
-
 	using T = int64_t;
 	size_t num_elements = r1 * r2;
 	T * U_fp = (T *) malloc(num_elements*sizeof(T));
@@ -410,7 +436,7 @@ sz_compress_cp_preserve_sos_2d_online_fp(const T_data * U, const T_data * V, siz
 	T * V_pos = V_fp;
 	T threshold = 1;
 	// check cp for all cells
-	vector<bool> cp_exist = compute_cp(U_fp, V_fp, r1, r2,U,V);
+	vector<bool> cp_exist = compute_cp(U_fp, V_fp, r1, r2, U, V);
 	//count cp number
 	int trueCount = 0;
 	for (bool value : cp_exist) {

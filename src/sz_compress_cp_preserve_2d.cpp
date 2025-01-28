@@ -9,6 +9,7 @@
 #include "cp.hpp"
 #include <omp.h>
 #include "utilsIO.h"
+#include "sz3_utils.hpp"
 
 
 inline std::set<size_t> convert_simplexID_to_coords(const std::set<size_t>& simplex, const int DW, const int DH){
@@ -443,7 +444,7 @@ triangle mesh x0, x1, x2, derive absolute cp-preserving eb for x2 given x0, x1
 */
 template<typename T>
 double 
-derive_cp_eb_for_positions_online_abs(const T u0, const T u1, const T u2, const T v0, const T v1, const T v2, const T c[4]){//, conditions_2d& cond){
+derive_cp_eb_for_positions_online_abs(const T u0, const T u1, const T u2, const T v0, const T v1, const T v2){//, conditions_2d& cond){
 	double M0 = u2*v0 - u0*v2;
   double M1 = u1*v2 - u2*v1;
   double M2 = u0*v1 - u1*v0;
@@ -819,9 +820,7 @@ sz_compress_cp_preserve_2d_online(const double * U, const double * V, size_t r1,
 template<typename T>
 unsigned char *
 sz_compress_cp_preserve_2d_fix(const T * U, const T * V, size_t r1, size_t r2, size_t& compressed_size, bool transpose, double max_pwr_eb,double modified_eb,const std::set<size_t> &index_need_to_fix){
-	
 	std::vector<float> eb_result(r1*r2, 0);
-
 	size_t num_elements = r1 * r2;
 	T * decompressed_U = (T *) malloc(num_elements*sizeof(T));
 	memcpy(decompressed_U, U, num_elements*sizeof(T));
@@ -1581,7 +1580,7 @@ sz_compress_cp_preserve_2d_online_abs_record_vertex(const T * U, const T * V, si
 					if(in_mesh){
 						// derive abs eb
 						required_eb = MINF(required_eb, derive_cp_eb_for_positions_online_abs(cur_U_pos[offsets[k]], cur_U_pos[offsets[k+1]], cur_U_pos[0],
-							cur_V_pos[offsets[k]], cur_V_pos[offsets[k+1]], cur_V_pos[0], inv_C[k]));
+							cur_V_pos[offsets[k]], cur_V_pos[offsets[k+1]], cur_V_pos[0]));
 					}
 				}				
 			}
@@ -1983,14 +1982,15 @@ std::tuple<int, int, int, int> calculate_block(int n, int m, int num_threads, in
     return std::make_tuple(start_row, start_col, block_height, block_width);
 }
 
-template<typename T>
+template<typename T >
 unsigned char *
-omp_sz_compress_cp_preserve_2d_record_vertex(const T * U, const T * V, size_t r1, size_t r2, size_t& compressed_size, bool transpose, double max_pwr_eb,const std::set<size_t> &index_need_to_fix,int n_threads, T * &decompressed_U_ptr, T * &decompressed_V_ptr,std::string eb_type){
+omp_sz_compress_cp_preserve_2d_record_vertex(const T * U, const T * V, size_t r1, size_t r2, size_t& compressed_size, bool transpose, double max_pwr_eb,const std::set<size_t>& index_need_to_fix, int n_threads, T * &decompressed_U_ptr, T * &decompressed_V_ptr,std::string eb_type){
 	size_t num_elements = r1 * r2;
 	size_t intArrayLength = num_elements;
 	size_t num_bytes = (intArrayLength % 8 == 0) ? intArrayLength / 8 : intArrayLength / 8 + 1;
 	unsigned char * bitmap;
 	if(index_need_to_fix.size() != 0){
+		printf("comp index_need_to_fix_size = %ld\n", index_need_to_fix.size());
 		printf("parpare bitmap\n");
 		//准备bitmap#####################
 		bitmap = (unsigned char *) malloc(num_elements*sizeof(unsigned char));
@@ -2279,7 +2279,7 @@ omp_sz_compress_cp_preserve_2d_record_vertex(const T * U, const T * V, size_t r1
 					if (in_mesh) {
 						double update_eb;
 						(eb_type == "abs") ? update_eb = derive_cp_eb_for_positions_online_abs(decompressed_U[position_idx + offsets[k]], decompressed_U[position_idx + offsets[k + 1]], decompressed_U[position_idx],
-							decompressed_V[position_idx + offsets[k]], decompressed_V[position_idx + offsets[k + 1]], decompressed_V[position_idx], inv_C[k]) :
+							decompressed_V[position_idx + offsets[k]], decompressed_V[position_idx + offsets[k + 1]], decompressed_V[position_idx]) :
 							update_eb = derive_cp_eb_for_positions_online(decompressed_U[position_idx + offsets[k]], decompressed_U[position_idx + offsets[k + 1]], decompressed_U[position_idx],
 								decompressed_V[position_idx + offsets[k]], decompressed_V[position_idx + offsets[k + 1]], decompressed_V[position_idx], inv_C[k]);
 						required_eb = MINF(required_eb, update_eb);
@@ -2527,7 +2527,7 @@ omp_sz_compress_cp_preserve_2d_record_vertex(const T * U, const T * V, size_t r1
 					if (in_mesh) {
 						double update_eb;
 						(eb_type == "abs") ? update_eb = derive_cp_eb_for_positions_online_abs(decompressed_U[position_idx + offsets[k]], decompressed_U[position_idx + offsets[k + 1]], decompressed_U[position_idx],
-							decompressed_V[position_idx + offsets[k]], decompressed_V[position_idx + offsets[k + 1]], decompressed_V[position_idx], inv_C[k]) :
+							decompressed_V[position_idx + offsets[k]], decompressed_V[position_idx + offsets[k + 1]], decompressed_V[position_idx]) :
 							update_eb = derive_cp_eb_for_positions_online(decompressed_U[position_idx + offsets[k]], decompressed_U[position_idx + offsets[k + 1]], decompressed_U[position_idx],
 								decompressed_V[position_idx + offsets[k]], decompressed_V[position_idx + offsets[k + 1]], decompressed_V[position_idx], inv_C[k]);
 						required_eb = MINF(required_eb, update_eb);
@@ -2668,7 +2668,7 @@ omp_sz_compress_cp_preserve_2d_record_vertex(const T * U, const T * V, size_t r1
 						// }
 						double update_eb;
 						(eb_type == "abs") ? update_eb = derive_cp_eb_for_positions_online_abs(decompressed_U[position_idx + offsets[k]], decompressed_U[position_idx + offsets[k + 1]], decompressed_U[position_idx],
-							decompressed_V[position_idx + offsets[k]], decompressed_V[position_idx + offsets[k + 1]], decompressed_V[position_idx], inv_C[k]) :
+							decompressed_V[position_idx + offsets[k]], decompressed_V[position_idx + offsets[k + 1]], decompressed_V[position_idx]) :
 							update_eb = derive_cp_eb_for_positions_online(decompressed_U[position_idx + offsets[k]], decompressed_U[position_idx + offsets[k + 1]], decompressed_U[position_idx],
 								decompressed_V[position_idx + offsets[k]], decompressed_V[position_idx + offsets[k + 1]], decompressed_V[position_idx], inv_C[k]);
 						required_eb = MINF(required_eb, update_eb);
@@ -2820,7 +2820,7 @@ omp_sz_compress_cp_preserve_2d_record_vertex(const T * U, const T * V, size_t r1
 					if (in_mesh) {
 						double updated_eb;
 						(eb_type == "abs") ? updated_eb = derive_cp_eb_for_positions_online_abs(decompressed_U[position_idx + offsets[k]], decompressed_U[position_idx + offsets[k + 1]], decompressed_U[position_idx],
-							decompressed_V[position_idx + offsets[k]], decompressed_V[position_idx + offsets[k + 1]], decompressed_V[position_idx], inv_C[k]) :
+							decompressed_V[position_idx + offsets[k]], decompressed_V[position_idx + offsets[k + 1]], decompressed_V[position_idx]) :
 							updated_eb = derive_cp_eb_for_positions_online(decompressed_U[position_idx + offsets[k]], decompressed_U[position_idx + offsets[k + 1]], decompressed_U[position_idx],
 							decompressed_V[position_idx + offsets[k]], decompressed_V[position_idx + offsets[k + 1]], decompressed_V[position_idx], inv_C[k]);
 						required_eb = MINF(required_eb, updated_eb);
@@ -2927,13 +2927,66 @@ omp_sz_compress_cp_preserve_2d_record_vertex(const T * U, const T * V, size_t r1
 	// if size of index_need_to_fix is not 0, write bitmap
 	if(index_need_to_fix.size() != 0){
 		convertIntArray2ByteArray_fast_1b_to_result_sz(bitmap, num_elements, compressed_pos);
-		//write index_need_to_fix's data(U and V)
-		for(auto it = index_need_to_fix.begin(); it != index_need_to_fix.end(); ++it){
-			write_variable_to_dst(compressed_pos, U[*it]);
+		if (FPZIP_FLAG){
+			// use fpzip to compress
+			int type = FPZIP_TYPE_FLOAT;
+			int prec = 0;
+			int nx = index_need_to_fix.size();
+			int ny = 2;
+			int nz = 1;
+			int nf = 1;
+			size_t count =(size_t) nx * ny * nz * nf;
+			size_t size = (type == FPZIP_TYPE_FLOAT ? sizeof(float) : sizeof(double));
+			void * data;
+			data = (type == FPZIP_TYPE_FLOAT ? static_cast<void*>(new float[count]) : static_cast<void*>(new double[count]));
+			//write all u then all v
+			std::vector<size_t> indices(index_need_to_fix.begin(), index_need_to_fix.end()); // 将 set 转为 vector
+			for (size_t i = 0; i < indices.size(); ++i) {
+				((float *)data)[i] = U[indices[i]];
+				((float *)data)[i + nx] = V[indices[i]];
+			}
+			// //calculate sum of data
+			double sum = 0;
+			for (size_t i = 0; i < count; i++){
+				sum += ((float *)data)[i];
+			}
+			printf("comp data sum = %f\n", sum);
+			if (prec == 0)
+				prec = (int)(CHAR_BIT * size);
+			char * buff = (char *) malloc(nx * ny * nz * nf * size);
+			FPZ* fpz = fpzip_write_to_buffer(buff,size*nx*ny*nz*nf);
+			fpz->type = FPZIP_TYPE_FLOAT;
+			fpz->prec = prec;
+			fpz->nx = nx;
+			fpz->ny = ny;
+			fpz->nz = nz;
+			fpz->nf = nf;
+			size_t outbytes = fpzip_write(fpz, data);
+			//print first u value
+			printf("U[0] = %f\n", U[indices[0]]);
+			//print first v value
+			printf("V[0] = %f\n", V[indices[0]]);
+			//write outbytes first
+			write_variable_to_dst(compressed_pos, outbytes);
+			printf("outbytes = %ld\n", outbytes);
+			//write compressed data to compressed_pos
+			memcpy(compressed_pos, buff, outbytes);
+			compressed_pos += outbytes;
+			fpzip_read_close(fpz);
+			delete[] static_cast<float*>(data);
 		}
-		for(auto it = index_need_to_fix.begin(); it != index_need_to_fix.end(); ++it){
-			write_variable_to_dst(compressed_pos, V[*it]);
+		else{
+		//write index_need_to_fix's data(U and V) 
+			for(auto it = index_need_to_fix.begin(); it != index_need_to_fix.end(); ++it){
+				write_variable_to_dst(compressed_pos, U[*it]);
+			}
+			for(auto it = index_need_to_fix.begin(); it != index_need_to_fix.end(); ++it){
+				write_variable_to_dst(compressed_pos, V[*it]);
+			}
 		}
+		// exit(0);
+
+		
 	}
 	
 	//write number of threads
@@ -3122,3 +3175,1592 @@ omp_sz_compress_cp_preserve_2d_record_vertex(const float * U, const float * V, s
 template
 unsigned char *
 omp_sz_compress_cp_preserve_2d_record_vertex(const double * U, const double * V, size_t r1, size_t r2, size_t& compressed_size, bool transpose, double max_pwr_eb,const std::set<size_t> &index_need_to_fix,int num_threads,double * &decompressed_U_ptr, double * &decompressed_V_ptr,std::string eb_type);
+
+
+// using SZ3
+
+template <class T>
+inline double
+derive_eb_abs_online_2d(T * cur_U_pos, T * cur_V_pos, int i, int j, size_t r1, size_t r2, double eb, const int index_offset[6][2][2], const int offsets[7]){
+	// return eb;
+	double required_eb = eb;
+	for(int k=0; k<6; k++){
+		bool in_mesh = true;
+		for(int p=0; p<2; p++){
+			// reserved order!
+			if(!(in_range(i + index_offset[k][p][1], (int)r1) && in_range(j + index_offset[k][p][0], (int)r2))){
+				in_mesh = false;
+				break;
+			}
+		}
+		if(in_mesh){
+			// derive abs eb
+			required_eb = MINF(required_eb, derive_cp_eb_for_positions_online_abs(cur_U_pos[offsets[k]], cur_U_pos[offsets[k+1]], cur_U_pos[0],
+				cur_V_pos[offsets[k]], cur_V_pos[offsets[k+1]], cur_V_pos[0]));
+		}
+	}				
+	return required_eb;
+}
+
+template <class T>
+inline double
+derive_eb_online_2d(T * cur_U_pos, T * cur_V_pos, int i, int j, size_t r1, size_t r2, double eb, const int index_offset[6][2][2], const int offsets[7], const T inv_C[6][4],std::string eb_type){
+	// return eb;
+
+	double required_eb = eb;
+	for(int k=0; k<6; k++){
+		bool in_mesh = true;
+		for(int p=0; p<2; p++){
+			// reserved order!
+			if(!(in_range(i + index_offset[k][p][1], (int)r1) && in_range(j + index_offset[k][p][0], (int)r2))){
+				in_mesh = false;
+				break;
+			}
+		}
+		if(in_mesh){
+			// derive abs eb
+			if (eb_type == "abs"){
+				required_eb = MINF(required_eb, derive_cp_eb_for_positions_online_abs(cur_U_pos[offsets[k]], cur_U_pos[offsets[k+1]], cur_U_pos[0],
+					cur_V_pos[offsets[k]], cur_V_pos[offsets[k+1]], cur_V_pos[0]));
+			}
+			if (eb_type == "rel"){
+				required_eb = MINF(required_eb, derive_cp_eb_for_positions_online(cur_U_pos[offsets[k]], cur_U_pos[offsets[k+1]], cur_U_pos[0],
+					cur_V_pos[offsets[k]], cur_V_pos[offsets[k+1]], cur_V_pos[0], inv_C[k]));
+			}
+
+		}
+	}				
+	return required_eb;
+}
+
+
+template <class T>
+void sz3_cp_preserve_2d_predict_r1(T * U_pos, T * V_pos, size_t n, size_t stride, size_t j, size_t i_stride, size_t r1, size_t r2, int * quantization, int& quant_count, int *& eb_quant_index_pos, 
+	int base, double log_of_base, double threshold, double eb, VariableEBLinearQuantizer<T, T>& quantizer, const int index_offset[6][2][2], const int offsets[7], const T inv_C[6][4], std::string eb_type){
+	if(n <= 1){
+		return;
+	}
+	if(n < 5){
+		// all linear
+		for (size_t i = 1; i + 1 < n; i += 2) {
+          T *dU = U_pos + i * stride;
+          T *dV = V_pos + i * stride;
+					double abs_eb = derive_eb_online_2d(dU, dV, j, i*i_stride, r1, r2, eb, index_offset, offsets, inv_C, eb_type);
+					*(eb_quant_index_pos++) = eb_exponential_quantize(abs_eb, base, log_of_base, threshold);
+        //   quantization[quant_count ++] = quantizer.quantize_and_overwrite(*dU, interp_linear(*(dU - stride), *(dU + stride)), abs_eb);
+        //   quantization[quant_count ++] = quantizer.quantize_and_overwrite(*dV, interp_linear(*(dV - stride), *(dV + stride)), abs_eb);
+		quantization[quant_count ++] = (eb_type == "abs") ? quantizer.quantize_and_overwrite(*dU, interp_linear(*(dU - stride), *(dU + stride)), abs_eb) : quantizer.quantize_and_overwrite(*dU, interp_linear(*(dU - stride), *(dU + stride)), fabs(*dU) * abs_eb);
+		quantization[quant_count ++] = (eb_type == "abs") ? quantizer.quantize_and_overwrite(*dV, interp_linear(*(dV - stride), *(dV + stride)), abs_eb) : quantizer.quantize_and_overwrite(*dV, interp_linear(*(dV - stride), *(dV + stride)), fabs(*dV) * abs_eb);
+		}
+		if (n % 2 == 0) {
+          // T *d = data + (n - 1) * stride;
+          T *dU = U_pos + (n - 1) * stride;
+          T *dV = V_pos + (n - 1) * stride;
+          // quantization[quant_count ++] = quantizer.quantize_and_overwrite(*d, *(d - stride), eb);
+					double abs_eb = derive_eb_online_2d(dU, dV, j, (n - 1)*i_stride, r1, r2, eb, index_offset, offsets,inv_C, eb_type);
+					*(eb_quant_index_pos++) = eb_exponential_quantize(abs_eb, base, log_of_base, threshold);
+        //   quantization[quant_count ++] = quantizer.quantize_and_overwrite(*dU, *(dU - stride), abs_eb);
+        //   quantization[quant_count ++] = quantizer.quantize_and_overwrite(*dV, *(dV - stride), abs_eb);
+		quantization[quant_count ++] = (eb_type == "abs") ? quantizer.quantize_and_overwrite(*dU, *(dU - stride), abs_eb) : quantizer.quantize_and_overwrite(*dU, *(dU - stride), fabs(*dU) * abs_eb);
+		quantization[quant_count ++] = (eb_type == "abs") ? quantizer.quantize_and_overwrite(*dV, *(dV - stride), abs_eb) : quantizer.quantize_and_overwrite(*dV, *(dV - stride), fabs(*dV) * abs_eb);
+		}
+      // std::cout << "quant_count = " << quant_count << std::endl;
+	}
+	else{
+		// cubic
+		size_t stride3x = 3 * stride;
+		size_t stride5x = 5 * stride;
+		size_t i = 1;
+		T *dU = U_pos + stride;
+		T *dV = V_pos + stride;
+		// quantization[quant_count ++] = quantizer.quantize_and_overwrite(*d, interp_quad_1(*(d - stride), *(d + stride), *(d + stride3x)), eb);
+		double abs_eb = derive_eb_online_2d(dU, dV, j, i*i_stride, r1, r2, eb, index_offset, offsets,inv_C, eb_type);
+		*(eb_quant_index_pos++) = eb_exponential_quantize(abs_eb, base, log_of_base, threshold);
+		// quantization[quant_count ++] = quantizer.quantize_and_overwrite(*dU, interp_quad_1(*(dU - stride), *(dU + stride), *(dU + stride3x)), abs_eb);
+		// quantization[quant_count ++] = quantizer.quantize_and_overwrite(*dV, interp_quad_1(*(dV - stride), *(dV + stride), *(dV + stride3x)), abs_eb);
+		quantization[quant_count ++] =  (eb_type == "abs") ? quantizer.quantize_and_overwrite(*dU, interp_quad_1(*(dU - stride), *(dU + stride), *(dU + stride3x)), abs_eb) : quantizer.quantize_and_overwrite(*dU, interp_quad_1(*(dU - stride), *(dU + stride), *(dU + stride3x)), fabs(*dU) * abs_eb);
+		quantization[quant_count ++] =  (eb_type == "abs") ? quantizer.quantize_and_overwrite(*dV, interp_quad_1(*(dV - stride), *(dV + stride), *(dV + stride3x)), abs_eb) : quantizer.quantize_and_overwrite(*dV, interp_quad_1(*(dV - stride), *(dV + stride), *(dV + stride3x)), fabs(*dV) * abs_eb);
+
+		for (i = 3; i + 3 < n; i += 2) {
+			dU = U_pos + i * stride;
+			dV = V_pos + i * stride;
+			// quantization[quant_count ++] = quantizer.quantize_and_overwrite(*d, interp_cubic(*(d - stride3x), *(d - stride), *(d + stride), *(d + stride3x)), eb);
+					abs_eb = derive_eb_online_2d(dU, dV, j, i*i_stride, r1, r2, eb, index_offset, offsets,inv_C, eb_type);
+					*(eb_quant_index_pos++) = eb_exponential_quantize(abs_eb, base, log_of_base, threshold);
+				// quantization[quant_count ++] = quantizer.quantize_and_overwrite(*dU, interp_cubic(*(dU - stride3x), *(dU - stride), *(dU + stride), *(dU + stride3x)), abs_eb);
+				// quantization[quant_count ++] = quantizer.quantize_and_overwrite(*dV, interp_cubic(*(dV - stride3x), *(dV - stride), *(dV + stride), *(dV + stride3x)), abs_eb);
+				quantization[quant_count ++] =  (eb_type == "abs") ? quantizer.quantize_and_overwrite(*dU, interp_cubic(*(dU - stride3x), *(dU - stride), *(dU + stride), *(dU + stride3x)), abs_eb) : quantizer.quantize_and_overwrite(*dU, interp_cubic(*(dU - stride3x), *(dU - stride), *(dU + stride), *(dU + stride3x)), fabs(*dU) * abs_eb);
+				quantization[quant_count ++] =  (eb_type == "abs") ? quantizer.quantize_and_overwrite(*dV, interp_cubic(*(dV - stride3x), *(dV - stride), *(dV + stride), *(dV + stride3x)), abs_eb) : quantizer.quantize_and_overwrite(*dV, interp_cubic(*(dV - stride3x), *(dV - stride), *(dV + stride), *(dV + stride3x)), fabs(*dV) * abs_eb);
+		}
+
+		dU = U_pos + i * stride;
+		dV = V_pos + i * stride;
+		// quantization[quant_count ++] = quantizer.quantize_and_overwrite(*d, interp_quad_2(*(d - stride3x), *(d - stride), *(d + stride)), eb);
+			abs_eb = derive_eb_online_2d(dU, dV, j, i*i_stride, r1, r2, eb, index_offset, offsets,inv_C, eb_type);
+			*(eb_quant_index_pos++) = eb_exponential_quantize(abs_eb, base, log_of_base, threshold);
+		// quantization[quant_count ++] = quantizer.quantize_and_overwrite(*dU, interp_quad_2(*(dU - stride3x), *(dU - stride), *(dU + stride)), abs_eb);
+		// quantization[quant_count ++] = quantizer.quantize_and_overwrite(*dV, interp_quad_2(*(dV - stride3x), *(dV - stride), *(dV + stride)), abs_eb);
+		quantization[quant_count ++] =  (eb_type == "abs") ? quantizer.quantize_and_overwrite(*dU, interp_quad_2(*(dU - stride3x), *(dU - stride), *(dU + stride)), abs_eb) : quantizer.quantize_and_overwrite(*dU, interp_quad_2(*(dU - stride3x), *(dU - stride), *(dU + stride)), fabs(*dU) * abs_eb);
+		quantization[quant_count ++] =  (eb_type == "abs") ? quantizer.quantize_and_overwrite(*dV, interp_quad_2(*(dV - stride3x), *(dV - stride), *(dV + stride)), abs_eb) : quantizer.quantize_and_overwrite(*dV, interp_quad_2(*(dV - stride3x), *(dV - stride), *(dV + stride)), fabs(*dV) * abs_eb);
+		if (n % 2 == 0) {
+			dU = U_pos + (n - 1) * stride;
+			dV = V_pos + (n - 1) * stride;
+			// quantization[quant_count ++] = quantizer.quantize_and_overwrite(*d, *(d - stride), eb);
+					abs_eb = derive_eb_online_2d(dU, dV, j, (n - 1)*i_stride, r1, r2, eb, index_offset, offsets,inv_C, eb_type);
+					*(eb_quant_index_pos++) = eb_exponential_quantize(abs_eb, base, log_of_base, threshold);
+			// quantization[quant_count ++] = quantizer.quantize_and_overwrite(*dU, *(dU - stride), abs_eb);
+			// quantization[quant_count ++] = quantizer.quantize_and_overwrite(*dV, *(dV - stride), abs_eb);
+			quantization[quant_count ++] =  (eb_type == "abs") ? quantizer.quantize_and_overwrite(*dU, *(dU - stride), abs_eb) : quantizer.quantize_and_overwrite(*dU, *(dU - stride), fabs(*dU) * abs_eb);
+			quantization[quant_count ++] =  (eb_type == "abs") ? quantizer.quantize_and_overwrite(*dV, *(dV - stride), abs_eb) : quantizer.quantize_and_overwrite(*dV, *(dV - stride), fabs(*dV) * abs_eb);
+		}
+	}
+}
+
+template <class T>
+void sz3_cp_preserve_2d_predict_r2(T * U_pos, T * V_pos, size_t n, size_t stride, size_t i_stride, size_t j, size_t r1, size_t r2,
+	int * quantization, int& quant_count, int *& eb_quant_index_pos, int base, double log_of_base, double threshold, double eb, 
+	VariableEBLinearQuantizer<T, T>& quantizer, const int index_offset[6][2][2], const int offsets[7], const T inv_C[6][4], std::string eb_type){
+	if(n <= 1){
+		return;
+	}
+	if(n < 5){
+		// all linear
+		for (size_t i = 1; i + 1 < n; i += 2) {
+			T *dU = U_pos + i * stride;
+			T *dV = V_pos + i * stride;
+			double abs_eb = derive_eb_online_2d(dU, dV, i*i_stride, j, r1, r2, eb, index_offset, offsets,inv_C, eb_type);
+			*(eb_quant_index_pos++) = eb_exponential_quantize(abs_eb, base, log_of_base, threshold);
+			// quantization[quant_count ++] = quantizer.quantize_and_overwrite(*dU, interp_linear(*(dU - stride), *(dU + stride)), abs_eb);
+			// quantization[quant_count ++] = quantizer.quantize_and_overwrite(*dV, interp_linear(*(dV - stride), *(dV + stride)), abs_eb);
+			quantization[quant_count ++] =  (eb_type == "abs") ? quantizer.quantize_and_overwrite(*dU, interp_linear(*(dU - stride), *(dU + stride)), abs_eb) : quantizer.quantize_and_overwrite(*dU, interp_linear(*(dU - stride), *(dU + stride)), fabs(*dU) * abs_eb);
+			quantization[quant_count ++] =  (eb_type == "abs") ? quantizer.quantize_and_overwrite(*dV, interp_linear(*(dV - stride), *(dV + stride)), abs_eb) : quantizer.quantize_and_overwrite(*dV, interp_linear(*(dV - stride), *(dV + stride)), fabs(*dV) * abs_eb);
+		}
+		if (n % 2 == 0) {
+			// T *d = data + (n - 1) * stride;
+			T *dU = U_pos + (n - 1) * stride;
+			T *dV = V_pos + (n - 1) * stride;
+			// quantization[quant_count ++] = quantizer.quantize_and_overwrite(*d, *(d - stride), eb);
+			double abs_eb = derive_eb_online_2d(dU, dV, (n - 1)*i_stride, j, r1, r2, eb, index_offset, offsets,inv_C, eb_type);
+			*(eb_quant_index_pos++) = eb_exponential_quantize(abs_eb, base, log_of_base, threshold);
+			// quantization[quant_count ++] = quantizer.quantize_and_overwrite(*dU, *(dU - stride), abs_eb);
+			// quantization[quant_count ++] = quantizer.quantize_and_overwrite(*dV, *(dV - stride), abs_eb);
+			quantization[quant_count ++] =  (eb_type == "abs") ? quantizer.quantize_and_overwrite(*dU, *(dU - stride), abs_eb) : quantizer.quantize_and_overwrite(*dU, *(dU - stride), fabs(*dU) * abs_eb);
+			quantization[quant_count ++] =  (eb_type == "abs") ? quantizer.quantize_and_overwrite(*dV, *(dV - stride), abs_eb) : quantizer.quantize_and_overwrite(*dV, *(dV - stride), fabs(*dV) * abs_eb);
+		}
+		// std::cout << "quant_count = " << quant_count << std::endl;
+
+	}
+	else{
+		// cubic
+		size_t stride3x = 3 * stride;
+		size_t stride5x = 5 * stride;
+
+		size_t i = 1;
+		T *dU = U_pos + stride;
+		T *dV = V_pos + stride;
+		// quantization[quant_count ++] = quantizer.quantize_and_overwrite(*d, interp_quad_1(*(d - stride), *(d + stride), *(d + stride3x)), eb);
+		double abs_eb = derive_eb_online_2d(dU, dV, i*i_stride, j, r1, r2, eb, index_offset, offsets,inv_C, eb_type);
+		*(eb_quant_index_pos++) = eb_exponential_quantize(abs_eb, base, log_of_base, threshold);
+		// quantization[quant_count ++] = quantizer.quantize_and_overwrite(*dU, interp_quad_1(*(dU - stride), *(dU + stride), *(dU + stride3x)), abs_eb);
+		// quantization[quant_count ++] = quantizer.quantize_and_overwrite(*dV, interp_quad_1(*(dV - stride), *(dV + stride), *(dV + stride3x)), abs_eb);
+		quantization[quant_count ++] =  (eb_type == "abs") ? quantizer.quantize_and_overwrite(*dU, interp_quad_1(*(dU - stride), *(dU + stride), *(dU + stride3x)), abs_eb) : quantizer.quantize_and_overwrite(*dU, interp_quad_1(*(dU - stride), *(dU + stride), *(dU + stride3x)), fabs(*dU) * abs_eb);
+		quantization[quant_count ++] =  (eb_type == "abs") ? quantizer.quantize_and_overwrite(*dV, interp_quad_1(*(dV - stride), *(dV + stride), *(dV + stride3x)), abs_eb) : quantizer.quantize_and_overwrite(*dV, interp_quad_1(*(dV - stride), *(dV + stride), *(dV + stride3x)), fabs(*dV) * abs_eb);
+
+
+		for (i = 3; i + 3 < n; i += 2) {
+			dU = U_pos + i * stride;
+			dV = V_pos + i * stride;
+			// quantization[quant_count ++] = quantizer.quantize_and_overwrite(*d, interp_cubic(*(d - stride3x), *(d - stride), *(d + stride), *(d + stride3x)), eb);
+			abs_eb = derive_eb_online_2d(dU, dV, i*i_stride, j, r1, r2, eb, index_offset, offsets,inv_C, eb_type);
+			*(eb_quant_index_pos++) = eb_exponential_quantize(abs_eb, base, log_of_base, threshold);
+			// quantization[quant_count ++] = quantizer.quantize_and_overwrite(*dU, interp_cubic(*(dU - stride3x), *(dU - stride), *(dU + stride), *(dU + stride3x)), abs_eb);
+			// quantization[quant_count ++] = quantizer.quantize_and_overwrite(*dV, interp_cubic(*(dV - stride3x), *(dV - stride), *(dV + stride), *(dV + stride3x)), abs_eb);
+			quantization[quant_count ++] =  (eb_type == "abs") ? quantizer.quantize_and_overwrite(*dU, interp_cubic(*(dU - stride3x), *(dU - stride), *(dU + stride), *(dU + stride3x)), abs_eb) : quantizer.quantize_and_overwrite(*dU, interp_cubic(*(dU - stride3x), *(dU - stride), *(dU + stride), *(dU + stride3x)), fabs(*dU) * abs_eb);
+			quantization[quant_count ++] =  (eb_type == "abs") ? quantizer.quantize_and_overwrite(*dV, interp_cubic(*(dV - stride3x), *(dV - stride), *(dV + stride), *(dV + stride3x)), abs_eb) : quantizer.quantize_and_overwrite(*dV, interp_cubic(*(dV - stride3x), *(dV - stride), *(dV + stride), *(dV + stride3x)), fabs(*dV) * abs_eb);
+		}
+
+		dU = U_pos + i * stride;
+		dV = V_pos + i * stride;
+		// quantization[quant_count ++] = quantizer.quantize_and_overwrite(*d, interp_quad_2(*(d - stride3x), *(d - stride), *(d + stride)), eb);
+		abs_eb = derive_eb_online_2d(dU, dV, i*i_stride, j, r1, r2, eb, index_offset, offsets,inv_C, eb_type);
+		*(eb_quant_index_pos++) = eb_exponential_quantize(abs_eb, base, log_of_base, threshold);
+		// quantization[quant_count ++] = quantizer.quantize_and_overwrite(*dU, interp_quad_2(*(dU - stride3x), *(dU - stride), *(dU + stride)), abs_eb);
+		// quantization[quant_count ++] = quantizer.quantize_and_overwrite(*dV, interp_quad_2(*(dV - stride3x), *(dV - stride), *(dV + stride)), abs_eb);
+		quantization[quant_count ++] =  (eb_type == "abs") ? quantizer.quantize_and_overwrite(*dU, interp_quad_2(*(dU - stride3x), *(dU - stride), *(dU + stride)), abs_eb) : quantizer.quantize_and_overwrite(*dU, interp_quad_2(*(dU - stride3x), *(dU - stride), *(dU + stride)), fabs(*dU) * abs_eb);
+		quantization[quant_count ++] =  (eb_type == "abs") ? quantizer.quantize_and_overwrite(*dV, interp_quad_2(*(dV - stride3x), *(dV - stride), *(dV + stride)), abs_eb) : quantizer.quantize_and_overwrite(*dV, interp_quad_2(*(dV - stride3x), *(dV - stride), *(dV + stride)), fabs(*dV) * abs_eb);
+		if (n % 2 == 0) {
+			dU = U_pos + (n - 1) * stride;
+			dV = V_pos + (n - 1) * stride;
+			// quantization[quant_count ++] = quantizer.quantize_and_overwrite(*d, *(d - stride), eb);
+			abs_eb = derive_eb_online_2d(dU, dV, (n - 1)*i_stride, j, r1, r2, eb, index_offset, offsets,inv_C, eb_type);
+			*(eb_quant_index_pos++) = eb_exponential_quantize(abs_eb, base, log_of_base, threshold);
+			// quantization[quant_count ++] = quantizer.quantize_and_overwrite(*dU, *(dU - stride), abs_eb);
+			// quantization[quant_count ++] = quantizer.quantize_and_overwrite(*dV, *(dV - stride), abs_eb);
+			quantization[quant_count ++] =  (eb_type == "abs") ? quantizer.quantize_and_overwrite(*dU, *(dU - stride), abs_eb) : quantizer.quantize_and_overwrite(*dU, *(dU - stride), fabs(*dU) * abs_eb);
+			quantization[quant_count ++] =  (eb_type == "abs") ? quantizer.quantize_and_overwrite(*dV, *(dV - stride), abs_eb) : quantizer.quantize_and_overwrite(*dV, *(dV - stride), fabs(*dV) * abs_eb);
+		}
+	}
+}
+
+
+
+template <class T>
+void sz3_omp_cp_preserve_2d_predict_r2(T * U_pos, T * V_pos, size_t n, size_t stride, size_t i_stride, size_t j, size_t r1, size_t r2, int * quantization,int *eb_quant_index, T * U_start, T * V_start, 
+								 int base, double log_of_base, double threshold, double eb, VariableEBLinearQuantizer<T, T>& quantizer, const int index_offset[6][2][2], const int offsets[7], size_t &processed_count, std::vector<int>& check_vec){
+ 	ptrdiff_t eb_pos;
+  if(n <= 1){
+      return;
+  }
+  if(n < 5){
+      // all linear
+      for (size_t i = 1; i + 1 < n; i += 2) {
+		T *dU = U_pos + i * stride;
+		T *dV = V_pos + i * stride;
+		eb_pos = dU - U_start;
+		if(eb_pos > r1*r2){
+			printf("outside range  %d\n", eb_pos);
+		}
+		double abs_eb = derive_eb_abs_online_2d(dU, dV, i*i_stride, j, r1, r2, eb, index_offset, offsets);
+		eb_quant_index[eb_pos] = eb_exponential_quantize(abs_eb, base, log_of_base, threshold);	
+		quantization[2*eb_pos] = quantizer.quantize_and_overwrite(*dU, interp_linear(*(dU - stride), *(dU + stride)), abs_eb);
+		quantization[2*eb_pos+1] = quantizer.quantize_and_overwrite(*dV, interp_linear(*(dV - stride), *(dV + stride)), abs_eb);
+		processed_count ++;
+		check_vec[eb_pos]++;
+
+      }
+      if (n % 2 == 0) {
+		// T *d = data + (n - 1) * stride;
+		T *dU = U_pos + (n - 1) * stride;
+		T *dV = V_pos + (n - 1) * stride;
+		eb_pos = dU - U_start;
+		if(eb_pos > r1*r2){
+			printf("outside range  %d\n", eb_pos);
+		}
+		// quantization[quant_count ++] = quantizer.quantize_and_overwrite(*d, *(d - stride), eb);
+		double abs_eb = derive_eb_abs_online_2d(dU, dV, (n - 1)*i_stride, j, r1, r2, eb, index_offset, offsets);
+		eb_quant_index[eb_pos] = eb_exponential_quantize(abs_eb, base, log_of_base, threshold);
+		quantization[2*eb_pos] = quantizer.quantize_and_overwrite(*dU, *(dU - stride), abs_eb);
+		quantization[2*eb_pos+1] = quantizer.quantize_and_overwrite(*dV, *(dV - stride), abs_eb);
+		processed_count ++;
+		check_vec[eb_pos]++;
+      }
+      // std::cout << "quant_count = " << quant_count << std::endl;
+
+  }
+  else{
+	// cubic
+	size_t stride3x = 3 * stride;
+	size_t stride5x = 5 * stride;
+
+	size_t i = 1;
+	T *dU = U_pos + stride;
+	T *dV = V_pos + stride;
+	eb_pos = dU - U_start;
+	if(eb_pos > r1*r2){
+		printf("r2_outside range  %d, eb_pos1 = %d\n", eb_pos, eb_pos);
+		printf("r1:%d, r2:%d\n", r1, r2);
+
+	}
+	// quantization[quant_count ++] = quantizer.quantize_and_overwrite(*d, interp_quad_1(*(d - stride), *(d + stride), *(d + stride3x)), eb);
+	double abs_eb = derive_eb_abs_online_2d(dU, dV, i*i_stride, j, r1, r2, eb, index_offset, offsets);
+	eb_quant_index[eb_pos] = eb_exponential_quantize(abs_eb, base, log_of_base, threshold);
+	quantization[2*eb_pos] = quantizer.quantize_and_overwrite(*dU, interp_quad_1(*(dU - stride), *(dU + stride), *(dU + stride3x)), abs_eb);
+	quantization[2*eb_pos+1] = quantizer.quantize_and_overwrite(*dV, interp_quad_1(*(dV - stride), *(dV + stride), *(dV + stride3x)), abs_eb);
+	processed_count ++;
+	check_vec[eb_pos] ++;
+
+	for (i = 3; i + 3 < n; i += 2) {
+		dU = U_pos + i * stride;
+		dV = V_pos + i * stride;
+		eb_pos = dU - U_start;
+					if(eb_pos > r1*r2){
+				printf("r2_outside range  %d, eb_pos1 = %d\n", eb_pos, eb_pos);
+				printf("r1:%d, r2:%d\n", r1, r2);
+			}
+		// quantization[quant_count ++] = quantizer.quantize_and_overwrite(*d, interp_cubic(*(d - stride3x), *(d - stride), *(d + stride), *(d + stride3x)), eb);
+				abs_eb = derive_eb_abs_online_2d(dU, dV, i*i_stride, j, r1, r2, eb, index_offset, offsets);
+				eb_quant_index[eb_pos] = eb_exponential_quantize(abs_eb, base, log_of_base, threshold);
+			quantization[2*eb_pos] = quantizer.quantize_and_overwrite(*dU, interp_cubic(*(dU - stride3x), *(dU - stride), *(dU + stride), *(dU + stride3x)), abs_eb);
+			quantization[2*eb_pos+1] = quantizer.quantize_and_overwrite(*dV, interp_cubic(*(dV - stride3x), *(dV - stride), *(dV + stride), *(dV + stride3x)), abs_eb);
+			processed_count ++;
+			check_vec[eb_pos] ++;
+	}
+
+	dU = U_pos + i * stride;
+	dV = V_pos + i * stride;
+	eb_pos = dU - U_start;
+	if(eb_pos > r1*r2){
+		printf("r2_outside range  %d, eb_pos1 = %d\n", eb_pos, eb_pos);
+		printf("r1:%d, r2:%d\n", r1, r2);
+	}
+	// quantization[quant_count ++] = quantizer.quantize_and_overwrite(*d, interp_quad_2(*(d - stride3x), *(d - stride), *(d + stride)), eb);
+	abs_eb = derive_eb_abs_online_2d(dU, dV, i*i_stride, j, r1, r2, eb, index_offset, offsets);
+	eb_quant_index[eb_pos] = eb_exponential_quantize(abs_eb, base, log_of_base, threshold);
+	quantization[2*eb_pos] = quantizer.quantize_and_overwrite(*dU, interp_quad_2(*(dU - stride3x), *(dU - stride), *(dU + stride)), abs_eb);
+	quantization[2*eb_pos+1] = quantizer.quantize_and_overwrite(*dV, interp_quad_2(*(dV - stride3x), *(dV - stride), *(dV + stride)), abs_eb);
+	processed_count ++;
+	check_vec[eb_pos]++;
+	if (n % 2 == 0) {
+		dU = U_pos + (n - 1) * stride;
+		dV = V_pos + (n - 1) * stride;
+		eb_pos = dU - U_start;
+					if(eb_pos > r1*r2){
+				printf("r2_outside range  %d, eb_pos1 = %d\n", eb_pos, eb_pos);
+				printf("r1:%d, r2:%d\n", r1, r2);
+			}
+		// quantization[quant_count ++] = quantizer.quantize_and_overwrite(*d, *(d - stride), eb);
+				abs_eb = derive_eb_abs_online_2d(dU, dV, (n - 1)*i_stride, j, r1, r2, eb, index_offset, offsets);
+					eb_quant_index[eb_pos]= eb_exponential_quantize(abs_eb, base, log_of_base, threshold);
+		quantization[2*eb_pos] = quantizer.quantize_and_overwrite(*dU, *(dU - stride), abs_eb);
+		quantization[2*eb_pos+1] = quantizer.quantize_and_overwrite(*dV, *(dV - stride), abs_eb);
+		processed_count ++;
+		check_vec[eb_pos] ++;
+	}
+  }
+}
+
+template <class T>
+void sz3_omp_cp_preserve_2d_predict_r1(T * U_pos, T * V_pos, size_t n, size_t stride, size_t j, size_t i_stride, size_t r1, size_t r2, int * quantization, int *eb_quant_index, T * U_start, T * V_start, 
+	int base, double log_of_base, double threshold, double eb, VariableEBLinearQuantizer<T, T>& quantizer, const int index_offset[6][2][2], const int offsets[7], size_t &processed_count, std::vector<int>& check_vec){
+	ptrdiff_t eb_pos;
+	if(n <= 1){
+		return;
+	}
+	if(n < 5){
+		// all linear
+		for (size_t i = 1; i + 1 < n; i += 2) {
+			T *dU = U_pos + i * stride;
+			T *dV = V_pos + i * stride;
+			eb_pos = dU - U_start;
+			if(eb_pos > r1*r2){
+				printf("outside range  %d\n", eb_pos);
+			}
+			double abs_eb = derive_eb_abs_online_2d(dU, dV, j, i*i_stride, r1, r2, eb, index_offset, offsets);
+			eb_quant_index[eb_pos] = eb_exponential_quantize(abs_eb, base, log_of_base, threshold);
+			quantization[2*eb_pos] = quantizer.quantize_and_overwrite(*dU, interp_linear(*(dU - stride), *(dU + stride)), abs_eb);
+			quantization[2*eb_pos+1] = quantizer.quantize_and_overwrite(*dV, interp_linear(*(dV - stride), *(dV + stride)), abs_eb);
+			processed_count ++;
+			check_vec[eb_pos]++;
+		}
+		if (n % 2 == 0) {
+			// T *d = data + (n - 1) * stride;
+			T *dU = U_pos + (n - 1) * stride;
+			T *dV = V_pos + (n - 1) * stride;
+			eb_pos = dU - U_start;
+			if(eb_pos > r1*r2){
+				printf("outside range  %d\n", eb_pos);
+			}
+			// quantization[quant_count ++] = quantizer.quantize_and_overwrite(*d, *(d - stride), eb);
+			double abs_eb = derive_eb_abs_online_2d(dU, dV, j, (n - 1)*i_stride, r1, r2, eb, index_offset, offsets);
+			eb_quant_index[eb_pos] = eb_exponential_quantize(abs_eb, base, log_of_base, threshold);
+			quantization[2*eb_pos] = quantizer.quantize_and_overwrite(*dU, *(dU - stride), abs_eb);
+			quantization[2*eb_pos+1] = quantizer.quantize_and_overwrite(*dV, *(dV - stride), abs_eb);
+			processed_count ++;
+			check_vec[eb_pos] ++;
+		}
+      // std::cout << "quant_count = " << quant_count << std::endl;
+	}
+	else{
+		// cubic
+		size_t stride3x = 3 * stride;
+		size_t stride5x = 5 * stride;
+		size_t i = 1;
+		T *dU = U_pos + stride;
+		T *dV = V_pos + stride;
+		eb_pos = dU - U_start;
+		if(eb_pos > r1*r2){
+			printf("r1_outside range  %d, eb_pos1 = %d\n", eb_pos, eb_pos);
+			printf("r1:%d, r2:%d\n", r1, r2);
+		}
+		// quantization[quant_count ++] = quantizer.quantize_and_overwrite(*d, interp_quad_1(*(d - stride), *(d + stride), *(d + stride3x)), eb);
+		double abs_eb = derive_eb_abs_online_2d(dU, dV, j, i*i_stride, r1, r2, eb, index_offset, offsets);
+		eb_quant_index[eb_pos] = eb_exponential_quantize(abs_eb, base, log_of_base, threshold);
+		quantization[2*eb_pos] = quantizer.quantize_and_overwrite(*dU, interp_quad_1(*(dU - stride), *(dU + stride), *(dU + stride3x)), abs_eb);
+		quantization[2*eb_pos+1] = quantizer.quantize_and_overwrite(*dV, interp_quad_1(*(dV - stride), *(dV + stride), *(dV + stride3x)), abs_eb);
+		processed_count ++;
+		check_vec[eb_pos]++;
+
+		for (i = 3; i + 3 < n; i += 2) {
+			dU = U_pos + i * stride;
+			dV = V_pos + i * stride;
+			eb_pos = dU - U_start;
+			if(eb_pos > r1*r2){
+				printf("r1_outside range  %d, eb_pos1 = %d\n", eb_pos, eb_pos);
+			}
+			// quantization[quant_count ++] = quantizer.quantize_and_overwrite(*d, interp_cubic(*(d - stride3x), *(d - stride), *(d + stride), *(d + stride3x)), eb);
+			abs_eb = derive_eb_abs_online_2d(dU, dV, j, i*i_stride, r1, r2, eb, index_offset, offsets);
+			eb_quant_index[eb_pos] = eb_exponential_quantize(abs_eb, base, log_of_base, threshold);
+			quantization[2*eb_pos] = quantizer.quantize_and_overwrite(*dU, interp_cubic(*(dU - stride3x), *(dU - stride), *(dU + stride), *(dU + stride3x)), abs_eb);
+			quantization[2*eb_pos+1] = quantizer.quantize_and_overwrite(*dV, interp_cubic(*(dV - stride3x), *(dV - stride), *(dV + stride), *(dV + stride3x)), abs_eb);
+			processed_count ++;
+			check_vec[eb_pos]++;
+		}
+
+		dU = U_pos + i * stride;
+		dV = V_pos + i * stride;
+		eb_pos = dU - U_start;
+		if(eb_pos > r1*r2){
+				printf("r1_outside range  %d, eb_pos1 = %d\n", eb_pos, eb_pos);
+		}
+		// quantization[quant_count ++] = quantizer.quantize_and_overwrite(*d, interp_quad_2(*(d - stride3x), *(d - stride), *(d + stride)), eb);
+		abs_eb = derive_eb_abs_online_2d(dU, dV, j, i*i_stride, r1, r2, eb, index_offset, offsets);
+		eb_quant_index[eb_pos] = eb_exponential_quantize(abs_eb, base, log_of_base, threshold);
+		quantization[2*eb_pos] = quantizer.quantize_and_overwrite(*dU, interp_quad_2(*(dU - stride3x), *(dU - stride), *(dU + stride)), abs_eb);
+		quantization[2*eb_pos+1] = quantizer.quantize_and_overwrite(*dV, interp_quad_2(*(dV - stride3x), *(dV - stride), *(dV + stride)), abs_eb);
+		processed_count ++;
+		check_vec[eb_pos]++;
+		if (n % 2 == 0) {
+			dU = U_pos + (n - 1) * stride;
+			dV = V_pos + (n - 1) * stride;
+			eb_pos = dU - U_start;
+			if(eb_pos > r1*r2){
+				printf("r1_outside range  %d, eb_pos1 = %d\n", eb_pos, eb_pos);
+			}
+			// quantization[quant_count ++] = quantizer.quantize_and_overwrite(*d, *(d - stride), eb);
+			abs_eb = derive_eb_abs_online_2d(dU, dV, j, (n - 1)*i_stride, r1, r2, eb, index_offset, offsets);
+			eb_quant_index[eb_pos] = eb_exponential_quantize(abs_eb, base, log_of_base, threshold);
+			quantization[2*eb_pos] = quantizer.quantize_and_overwrite(*dU, *(dU - stride), abs_eb);
+			quantization[2*eb_pos+1] = quantizer.quantize_and_overwrite(*dV, *(dV - stride), abs_eb);
+			processed_count ++;
+			check_vec[eb_pos]++;
+		}
+	}
+}
+
+
+template<typename T>
+unsigned char *
+sz3_compress_cp_preserve_2d_online_record_vertex(const T * U, const T * V, size_t r1, size_t r2, size_t& compressed_size, bool transpose, double max_pwr_eb,std::set<size_t>& index_need_to_fix,std::string eb_type) {
+	printf("sz3...");
+	size_t num_elements = r1 * r2;
+	size_t intArrayLength = num_elements;
+	size_t num_bytes = (intArrayLength % 8 == 0) ? intArrayLength / 8 : intArrayLength / 8 + 1;
+	
+	T * decompressed_U = (T *) malloc(num_elements*sizeof(T));
+	memcpy(decompressed_U, U, num_elements*sizeof(T));
+	T * decompressed_V = (T *) malloc(num_elements*sizeof(T));
+	memcpy(decompressed_V, V, num_elements*sizeof(T));
+	int * eb_quant_index = (int *) malloc(num_elements*sizeof(int));
+	int * quantization = (int *) malloc(2*num_elements*sizeof(int));
+	int * eb_quant_index_pos = eb_quant_index;
+	
+	//bitmap
+	std::vector<float> eb_result(r1*r2, 0);
+	unsigned char * bitmap;
+	if(index_need_to_fix.size() != 0){
+		printf("parpare bitmap\n");
+		//准备bitmap#####################
+		bitmap = (unsigned char *) malloc(num_elements*sizeof(unsigned char));
+		if (bitmap == NULL) {
+		fprintf(stderr, "Failed to allocate memory for bitmap\n");
+		exit(1);
+		}
+		// set all to 0
+		// memset(bitmap, 0, num_elements * sizeof(T));
+		memset(bitmap, 0, num_elements * sizeof(unsigned char));
+		//set index_need_to_fix to 1
+		for(auto it = index_need_to_fix.begin(); it != index_need_to_fix.end(); ++it){
+			assert(*it < num_elements);
+			bitmap[*it] = 1;
+		}
+		//准备bitmap#####################
+	}
+	// next, row by row
+	const int base = 4;
+	const double log_of_base = log2(base);
+	const unsigned int capacity = 65536;
+	const unsigned int intv_radius = (capacity >> 1);
+	unpred_vec<T> unpred_data;
+	T * U_pos = decompressed_U;
+	T * V_pos = decompressed_V;
+	// offsets to get six adjacent triangle indices
+	// the 7-th rolls back to T0
+	/*
+			T3	T4
+		T2	X 	T5
+		T1	T0(T6)
+	*/
+	const int offsets[7] = {
+		-(int)r2, -(int)r2 - 1, -1, (int)r2, (int)r2+1, 1, -(int)r2
+	};
+	const T x[6][3] = {
+		{1, 0, 1},
+		{0, 0, 1},
+		{0, 1, 1},
+		{0, 1, 0},
+		{1, 1, 0},
+		{1, 0, 0}
+	};
+	const T y[6][3] = {
+		{0, 0, 1},
+		{0, 1, 1},
+		{0, 1, 0},
+		{1, 1, 0},
+		{1, 0, 0},
+		{1, 0, 1}
+	};
+	int index_offset[6][2][2];
+	for(int i=0; i<6; i++){
+		for(int j=0; j<2; j++){
+			index_offset[i][j][0] = x[i][j] - x[i][2];
+			index_offset[i][j][1] = y[i][j] - y[i][2];
+		}
+	}
+	T inv_C[6][4];
+	for(int i=0; i<6; i++){
+		get_adjugate_matrix_for_position(x[i][0], x[i][1], x[i][2], y[i][0], y[i][1], y[i][2], inv_C[i]);
+	}
+
+	double threshold = std::numeric_limits<double>::epsilon();
+
+	int interpolation_level = (uint) ceil(log2(max(r1, r2)));
+	auto quantizer = VariableEBLinearQuantizer<T, T>(capacity>>1);
+	std::cout << r1 << " " << r2 << std::endl;
+	int quant_index = 0;
+	// quantize first data
+	double abs_eb = derive_eb_online_2d(U_pos, V_pos, 0, 0, r1, r2, max_pwr_eb*0.5, index_offset, offsets,inv_C, eb_type);
+	*(eb_quant_index_pos++) = eb_exponential_quantize(abs_eb, base, log_of_base, threshold);
+	// quantization[quant_index ++] = quantizer.quantize_and_overwrite(*U_pos, 0, abs_eb);
+	// quantization[quant_index ++] = quantizer.quantize_and_overwrite(*V_pos, 0, abs_eb);
+	quantization[quant_index ++] =  (eb_type == "abs") ? quantizer.quantize_and_overwrite(*U_pos, 0, abs_eb) : quantizer.quantize_and_overwrite(*U_pos, 0, fabs(*U_pos) * abs_eb);
+	quantization[quant_index ++] =  (eb_type == "abs") ? quantizer.quantize_and_overwrite(*V_pos, 0, abs_eb) : quantizer.quantize_and_overwrite(*V_pos, 0, fabs(*V_pos) * abs_eb);
+	for (uint level = interpolation_level; level > 0 && level <= interpolation_level; level--) {
+		double eb = max_pwr_eb;
+		if(level >= 3){
+			eb *= 0.5;
+		}
+		size_t stride = 1U << (level - 1);
+		int n1 = (r1 - 1) / stride + 1; // number of blocks along r1, each block size is stride
+		int n2 = (r2 - 1) / stride + 1;
+		// std::cout << "level = " << level << ", stride = " << stride << ", n1 = " << n1 << ", n2 = " << n2 << ", quant_index_before = " << quant_index;//  << std::endl;
+		// predict along r1
+		for(int j=0; j<r2; j+=stride*2){
+			sz3_cp_preserve_2d_predict_r2(U_pos + j, V_pos + j, n1, stride*r2, stride, j, r1, r2, quantization, quant_index, eb_quant_index_pos, 
+								 base, log_of_base, threshold, eb, quantizer, index_offset, offsets,inv_C, eb_type);
+			// predict(dec_data + j, n1, quantization, quant_index, stride*r2, quantizer, precision);
+		}
+		// std::cout << ", quant_index_middle = " << quant_index;
+		// predict along r2
+		for(int i=0; i<r1; i+=stride){
+			sz3_cp_preserve_2d_predict_r1(U_pos + i*r2, V_pos + i*r2, n2, stride, i, stride, r1, r2, quantization, quant_index, eb_quant_index_pos, 
+								 base, log_of_base, threshold, eb, quantizer, index_offset, offsets,inv_C, eb_type);
+			// predict(dec_data + i*r2, n2, quantization, quant_index, stride, quantizer, precision);
+		}
+		// std::cout << ", quant_index_after = " << quant_index << std::endl;
+	}
+
+	free(decompressed_U);
+	free(decompressed_V);
+	printf("offsets eb_q, data_q: %ld %ld\n", eb_quant_index_pos - eb_quant_index, quant_index);
+	unsigned char * compressed = (unsigned char *) malloc(2*num_elements*sizeof(T));
+	unsigned char * compressed_pos = compressed;
+	//写index_need_to_fix的大小
+	write_variable_to_dst(compressed_pos, index_need_to_fix.size());
+	printf("index_need_to_fix pos = %ld\n", compressed_pos - compressed);
+	printf("index_need_to_fix size = %ld\n", index_need_to_fix.size());
+	if(index_need_to_fix.size() != 0){
+		//修改：先写bitmap
+		// write_variable_to_dst(compressed_pos,num_elements); // 处理后的bitmap的长度 size_t
+		//write_array_to_dst(compressed_pos, compressedArray, num_bytes);
+		convertIntArray2ByteArray_fast_1b_to_result_sz(bitmap, num_elements, compressed_pos);
+		printf("bitmap pos = %ld\n", compressed_pos - compressed);
+		//再写index_need_to_fix对应U和V的数据
+		for (auto it = index_need_to_fix.begin(); it != index_need_to_fix.end(); it++){
+			write_variable_to_dst(compressed_pos, U[*it]); //T, index_need_to_fix对应的U的值
+		}
+		for (auto it = index_need_to_fix.begin(); it != index_need_to_fix.end(); it++){
+			write_variable_to_dst(compressed_pos, V[*it]); //T, index_need_to_fix对应的V的值
+		}
+		printf("index_need_to_fix lossless data pos = %ld\n", compressed_pos - compressed);
+	}
+	write_variable_to_dst(compressed_pos, base);
+	write_variable_to_dst(compressed_pos, threshold);
+	write_variable_to_dst(compressed_pos, capacity);
+	quantizer.save(compressed_pos);
+	Huffman_encode_tree_and_data(2*1024, eb_quant_index, num_elements, compressed_pos);
+	free(eb_quant_index);
+	Huffman_encode_tree_and_data(2*capacity, quantization, 2*num_elements, compressed_pos);
+	printf("pos = %ld\n", compressed_pos - compressed);
+	free(quantization);
+	compressed_size = compressed_pos - compressed;
+	return compressed;	
+}
+
+template
+unsigned char *
+sz3_compress_cp_preserve_2d_online_record_vertex(const float * U, const float * V, size_t r1, size_t r2, size_t& compressed_size, bool transpose, double max_pwr_eb,std::set<size_t>& index_need_to_fix,std::string eb_type);
+
+template
+unsigned char *
+sz3_compress_cp_preserve_2d_online_record_vertex(const double * U, const double * V, size_t r1, size_t r2, size_t& compressed_size, bool transpose, double max_pwr_eb,std::set<size_t>& index_need_to_fix,std::string eb_type);
+
+
+// sz3 + omp
+template<typename T>
+unsigned char *
+omp_sz3_compress_cp_preserve_2d_record_vertex(const T * U, const T * V, size_t r1, size_t r2, size_t& compressed_size, bool transpose, double max_pwr_eb,const std::set<size_t>& index_need_to_fix, int n_threads, T * &decompressed_U_ptr, T * &decompressed_V_ptr,std::string eb_type){
+	size_t num_elements = r1 * r2;
+	size_t intArrayLength = num_elements;
+	size_t num_bytes = (intArrayLength % 8 == 0) ? intArrayLength / 8 : intArrayLength / 8 + 1;
+	unsigned char * bitmap;
+	if(index_need_to_fix.size() != 0){
+		printf("comp index_need_to_fix_size = %ld\n", index_need_to_fix.size());
+		printf("parpare bitmap\n");
+		//准备bitmap#####################
+		bitmap = (unsigned char *) malloc(num_elements*sizeof(unsigned char));
+		if (bitmap == NULL) {
+		fprintf(stderr, "Failed to allocate memory for bitmap\n");
+		exit(1);
+		}
+		// set all to 0
+		// memset(bitmap, 0, num_elements * sizeof(T));
+		memset(bitmap, 0, num_elements * sizeof(unsigned char));
+		//set index_need_to_fix to 1
+		for(auto it = index_need_to_fix.begin(); it != index_need_to_fix.end(); ++it){
+			assert(*it < num_elements);
+			bitmap[*it] = 1;
+		}
+		//准备bitmap#####################
+	}
+	auto prepare_comp_start = std::chrono::high_resolution_clock::now();
+	//确定线程数是不是平方数
+	int num_threads = n_threads;
+	// if (sqrt(num_threads) != (int)sqrt(num_threads)){
+	// 	printf("The number of threads must be a square number!\n");
+	// 	exit(0);
+	// }
+	int M = (int)floor(sqrt(num_threads));
+	int K;
+
+	// 从 M 往下找，直到找到一个能整除 n 的因子
+	while (M > 0 && num_threads % M != 0) {
+		M--;
+	}
+
+	// 找到因子后，K = n / M
+	K = num_threads / M;
+	if (K == 1 || M == 1) {
+		printf("bad num_threads, prime\n");
+		exit(0);
+	}
+	int num_edges_x = M * K;
+	int num_edges_y = M * K;
+
+	T * decompressed_U = (T *) malloc(num_elements*sizeof(T));
+	memcpy(decompressed_U, U, num_elements*sizeof(T));
+	T * decompressed_V = (T *) malloc(num_elements*sizeof(T));
+	memcpy(decompressed_V, V, num_elements*sizeof(T));
+
+	// T * decompressed_U_2 = (T *) malloc(num_elements*sizeof(T));
+	// memcpy(decompressed_U_2, U, num_elements*sizeof(T));
+	// T * decompressed_V_2 = (T *) malloc(num_elements*sizeof(T));
+	// memcpy(decompressed_V_2, V, num_elements*sizeof(T));
+
+	int * eb_quant_index = (int *) malloc(num_elements*sizeof(int));
+	int * data_quant_index = (int *) malloc(2*num_elements*sizeof(int));
+	int * eb_quant_index_pos = eb_quant_index;
+	int * data_quant_index_pos = data_quant_index;
+	const int base = 4;
+	const double log_of_base = log2(base);
+	const int capacity = 65536;
+	const int intv_radius = (capacity >> 1);
+	//std::vector<unpred_vec<T>> unpred_data_thread(num_threads);
+
+	// T * U_pos = decompressed_U;
+	// T * V_pos = decompressed_V;
+	// size_t stateNum_eb_quant = 2*1024;
+	// size_t stateNum_data_quant = 2*capacity;
+	// HuffmanTree * huffmanTree_eb_quant = createHuffmanTree(stateNum_eb_quant);
+	// HuffmanTree * huffmanTree_data_quant = createHuffmanTree(stateNum_data_quant);
+	// offsets to get six adjacent triangle indices
+	// the 7-th rolls back to T0
+	/*
+			T3	T4
+		T2	X 	T5
+		T1	T0(T6)
+	*/
+	const int offsets[7] = {
+		-(int)r2, -(int)r2 - 1, -1, (int)r2, (int)r2+1, 1, -(int)r2
+	};
+	const T x[6][3] = {
+		{1, 0, 1},
+		{0, 0, 1},
+		{0, 1, 1},
+		{0, 1, 0},
+		{1, 1, 0},
+		{1, 0, 0}
+	};
+	const T y[6][3] = {
+		{0, 0, 1},
+		{0, 1, 1},
+		{0, 1, 0},
+		{1, 1, 0},
+		{1, 0, 0},
+		{1, 0, 1}
+	};
+	T inv_C[6][4];
+	for(int i=0; i<6; i++){
+		get_adjugate_matrix_for_position(x[i][0], x[i][1], x[i][2], y[i][0], y[i][1], y[i][2], inv_C[i]);
+	}
+	int index_offset[6][2][2];
+	for(int i=0; i<6; i++){
+		for(int j=0; j<2; j++){
+			index_offset[i][j][0] = x[i][j] - x[i][2];
+			index_offset[i][j][1] = y[i][j] - y[i][2];
+		}
+	}
+	double threshold = std::numeric_limits<double>::epsilon();
+	int n = r1, m = r2;
+
+
+
+	// int t = sqrt(num_threads);
+    // 计算每个块的大小
+    int block_height = n / M;
+    int block_width = m / K;
+
+    // 处理余数情况（如果 n 或 m 不能被 t 整除）
+    int remaining_rows = n % M;
+    int remaining_cols = m % K;
+
+    // 存储划分线的位置
+    std::vector<int> dividing_rows;
+    std::vector<int> dividing_cols;
+    for (int i = 1; i < M; ++i) {
+    	dividing_rows.push_back(i * block_height);
+	}
+	for (int j = 1; j < K; ++j) {
+		dividing_cols.push_back(j * block_width);
+	}
+	//print out dividing_rows and dividing_cols, and M and K
+	printf("M = %d, K = %d\n", M, K);
+	for (int i = 0; i < dividing_rows.size(); ++i) {
+		printf("dividing_rows[%d] = %d\n", i, dividing_rows[i]);
+	}
+	for (int i = 0; i < dividing_cols.size(); ++i) {
+		printf("dividing_cols[%d] = %d\n", i, dividing_cols[i]);
+	}
+
+	std::vector<bool> is_dividing_row(n, false);
+	std::vector<bool> is_dividing_col(m, false);
+	for (int i = 0; i < dividing_rows.size(); ++i) {
+		is_dividing_row[dividing_rows[i]] = true;
+	}
+	for (int i = 0; i < dividing_cols.size(); ++i) {
+		is_dividing_col[dividing_cols[i]] = true;
+	}
+
+	//总数据块数
+	int total_blocks = M * K;
+
+	/*
+	//统计总在划分线上的数据点数
+	int num_dividing_points = 0;
+	for (int i = 0; i < n; ++i) {
+		for (int j = 0; j < m; ++j) {
+			if (is_dividing_line[i * m + j]) {
+				num_dividing_points++;
+			}
+		}
+	}
+	int suppose_num_dividing_points = (sqrt(num_threads) -1) * (n + m) - (sqrt(num_threads) - 1) * (sqrt(num_threads) - 1);
+	printf("num_dividing_points = %d, suppose to be = %d\n", num_dividing_points,suppose_num_dividing_points);
+	//计算块内的数据的数量
+	int num_block_points = 0;
+	#pragma omp parallel for schedule(dynamic) reduction(+:num_block_points)
+	for (int block_id = 0; block_id < total_blocks; ++block_id){
+		int block_row = block_id / t;
+		int block_col = block_id % t;
+		// 计算块的起始和结束行列索引
+		int start_row = block_row * block_height;
+		int end_row = (block_row + 1) * block_height;
+		if (block_row == t - 1) {
+			end_row += remaining_rows;
+		}
+		int start_col = block_col * block_width;
+		int end_col = (block_col + 1) * block_width;
+		if (block_col == t - 1) {
+			end_col += remaining_cols;
+		}
+		// 处理块内的数据点
+		for(int i=start_row; i<end_row; ++i){
+			// 跳过划分线上的行
+			if (std::find(dividing_rows.begin(), dividing_rows.end(), i) != dividing_rows.end()) {
+				continue;
+			}
+			for (int j = start_col; j<end_col; ++j){
+				// 跳过划分线上的列
+				if (is_dividing_line[i * m + j]) {
+					continue;
+				}
+				num_block_points ++;
+			}
+		}
+	}
+	printf("num_block_points = %d\n", num_block_points);
+	printf("sum of num_block_points + num_dividing_points = %d, suppose to be = %d\n", num_block_points + num_dividing_points, num_elements);
+	// exit(0);
+	*/
+	size_t processed_points_count = 0;
+	size_t processed_block_count = 0;
+	size_t processed_edge_row_count = 0;
+	size_t processed_edge_col_count = 0;
+	size_t processed_dot_count = 0;
+	std::vector<int> proccessed_points(num_elements, 0);
+	std::vector<int> check_sz(num_elements, 0);
+
+	auto prepare_comp_end = std::chrono::high_resolution_clock::now();
+	std::chrono::duration<double> prepare_comp_time = prepare_comp_end - prepare_comp_start;
+	printf("prepare_comp_time = %f\n", prepare_comp_time.count());
+	auto comp_start = std::chrono::high_resolution_clock::now();
+	// 并行处理区域，不包括划分线上的数据点
+	size_t sz3_processed_points_count = 0;
+	size_t sz_count = 0;
+	omp_set_num_threads(total_blocks);
+	// std::vector<VariableEBLinearQuantizer<T,T>(capacity>>1)> local_quant_vec;
+	std::vector<VariableEBLinearQuantizer<T, T>> local_quant_vec(total_blocks, VariableEBLinearQuantizer<T, T>(capacity/2));
+	#pragma omp parallel for reduction(+:sz3_processed_points_count,sz_count)
+	for (int block_id = 0; block_id < total_blocks; ++block_id){
+		int block_row = block_id / K;
+		int block_col = block_id % K;
+
+		// 计算块的起始和结束行列索引
+		int start_row = block_row * block_height;
+		int end_row = (block_row + 1) * block_height;
+		if (block_row == K - 1) {
+			end_row += remaining_rows;
+		}
+		int start_col = block_col * block_width;
+		int end_col = (block_col + 1) * block_width;
+		if (block_col == K - 1) {
+			end_col += remaining_cols;
+		}
+		//printf("threadID = %d, start_row = %d, end_row = %d, start_col = %d, end_col = %d\n", omp_get_thread_num(),start_row,end_row,start_col,end_col);
+		
+		// //计算实际的行列起始值，不算划分线上的
+		// int true_start_row = (std::find(dividing_rows.begin(), dividing_rows.end(), start_row) != dividing_rows.end()) ? start_row + 1 : start_row;
+		// int true_end_row = (std::find(dividing_rows.begin(), dividing_rows.end(), end_row) != dividing_rows.end()) ? end_row - 1 : end_row;
+		// int true_start_col = (std::find(dividing_cols.begin(), dividing_cols.end(), start_col) != dividing_cols.end()) ? start_col + 1 : start_col;
+		// int true_end_col = (std::find(dividing_cols.begin(), dividing_cols.end(), end_col) != dividing_cols.end()) ? end_col - 1 : end_col;
+		// printf("threadID = %d, row = %d, row = %d, col = %d, col = %d,total = %d\n", omp_get_thread_num(),start_row,end_row,start_col,end_col,(end_row - start_row) * (end_col - start_col));
+		// printf("threadID = %d, row_s = %d, row_e = %d, col_s = %d, col_e = %d,total = %d\n", omp_get_thread_num(),true_start_row,true_end_row,true_start_col,true_end_col,(true_end_row - true_start_row) * (true_end_col - true_start_col));
+		//计算实际的行列数，不算划分线上的
+		int true_r1 = 0, true_r2 = 0;
+		for(int i=start_row; i<end_row; ++i){
+			if (is_dividing_row[i]) {
+				continue;
+			}
+			true_r1 ++;
+		}
+		for(int j=start_col; j<end_col; ++j){
+			if (is_dividing_col[j]) {
+				continue;
+			}
+			true_r2 ++;
+		}
+		int true_start_row = start_row;
+		int true_end_row = start_row + true_r1;
+		int true_start_col = start_col;
+		int true_end_col = start_col + true_r2;
+		// 跳过划分线上的数据点
+		true_start_col = (std::find(dividing_cols.begin(), dividing_cols.end(), start_col) != dividing_cols.end()) ? start_col + 1 : start_col;
+		true_start_row = (std::find(dividing_rows.begin(), dividing_rows.end(), start_row) != dividing_rows.end()) ? start_row + 1 : start_row;
+		printf("threadID = %d, true_start_row = %d, true_end_row = %d, true_start_col = %d, true_end_col = %d\n", omp_get_thread_num(),true_start_row,true_end_row,true_start_col,true_end_col);
+
+		//printf("threadID = %d, true_r1 = %d, true_r2 = %d,total = %d\n", omp_get_thread_num(),true_r1,true_r2,true_r1 * true_r2);
+		int interpolated_level = (uint) ceil(log2(max(true_r1, true_r2)));
+		// auto quantizer = VariableEBLinearQuantizer<T, T>(capacity>>1);
+		// auto quantizer = &local_quant_vec[block_id];
+
+		auto it = local_quant_vec.begin() + block_id; // Get an iterator pointing to the element
+		auto& quantizer = *it; 
+
+		int quant_index = 0;
+		//TODO: 在这里改成interpolation
+		//quantize first data
+		size_t first_data_pos = true_start_row * r2 + true_start_col;
+		printf("threadid = %d, first_data_pos = %ld\n", block_id, first_data_pos);
+		double abs_eb = derive_eb_abs_online_2d(decompressed_U+first_data_pos, decompressed_V + first_data_pos, true_start_col, true_start_row, r1, r2, max_pwr_eb*0.5, index_offset, offsets);
+		eb_quant_index[first_data_pos] = eb_exponential_quantize(abs_eb, base, log_of_base, threshold);
+		data_quant_index[first_data_pos] = quantizer.quantize_and_overwrite(decompressed_U[first_data_pos], 0, abs_eb);
+		data_quant_index[first_data_pos + 1] = quantizer.quantize_and_overwrite(decompressed_V[first_data_pos], 0, abs_eb);
+		sz3_processed_points_count++;
+		proccessed_points[first_data_pos] ++;
+		// then process the rest data in the block
+		//TODO....... write for loop for each level...
+		for (uint level = interpolated_level; level > 0 && level <= interpolated_level; level --){
+			double eb = max_pwr_eb;
+			if(level >= 3){
+				eb *= 0.5;
+			}
+			size_t stride = 1U << (level - 1); // stride = 2^(level-1)
+			int n1 = (true_r1 - 1) / stride + 1; // number of blocks along r1, each block size is stride
+			int n2 = (true_r2 - 1) / stride + 1;
+			// predict along r1
+			for(int j=0; j<true_r2; j+=stride*2){
+				size_t eb_pos1 = first_data_pos + j;
+
+				sz3_omp_cp_preserve_2d_predict_r2(decompressed_U+ first_data_pos + j, decompressed_V + first_data_pos+ j, n1, stride*r2, stride, j, r1, r2, data_quant_index, eb_quant_index, decompressed_U,decompressed_V, 
+					base, log_of_base, threshold, eb, quantizer, index_offset, offsets,sz3_processed_points_count,proccessed_points);
+
+
+				// predict(dec_data + j, n1, quantization, quant_index, stride*r2, quantizer, precision);
+			}
+			// predict along r2
+			for(int i=0; i<true_r1; i+=stride){
+				// sz3_cp_preserve_2d_predict_r1(decompressed_U + i*r2, decompressed_V + i*r2, n2, stride, i, stride, r1, r2, data_quant_index, quant_index, eb_quant_index + i*r2, 
+				// 	base, log_of_base, threshold, eb, quantizer, index_offset, offsets);
+				size_t eb_pos1 = first_data_pos + i*r2;
+
+				sz3_omp_cp_preserve_2d_predict_r1(decompressed_U + first_data_pos+ i*r2, decompressed_V + first_data_pos+ i*r2, n2, stride, i, stride, r1, r2, data_quant_index, eb_quant_index, decompressed_U,decompressed_V,  
+					base, log_of_base, threshold, eb, quantizer, index_offset, offsets,sz3_processed_points_count,proccessed_points);
+				
+
+				// predict(dec_data + i*r2, n2, quantization, quant_index, stride, quantizer, precision);
+			}
+			
+		}
+		// local_quant_vec[omp_get_thread_num()] = quantizer;
+		// 处理块内的数据点
+		for(int i=start_row; i<end_row; ++i){
+			// 跳过划分线上的行
+			if (is_dividing_row[i]) {
+				continue;
+			}
+			for (int j = start_col; j<end_col; ++j){
+				// 跳过划分线上的列
+				if (is_dividing_col[j]) {
+					continue;
+				}
+				size_t position_idx = (i * r2 + j);
+				if (position_idx >= num_elements){
+					printf("position_idx = %ld, num_elements = %ld\n",position_idx,num_elements);
+					exit(0);
+				}
+				sz_count ++;
+				#pragma omp critical
+				{
+					check_sz[position_idx]++;
+				}
+			}
+		}
+	}
+
+	printf("sz3_count = %ld, sz_count = %ld\n",sz3_processed_points_count,sz_count);
+
+	//calculate the sum of vector check_sz
+	int sum_check_sz = 0;
+	for (int i = 0; i < num_elements; i++){
+		sum_check_sz += check_sz[i];
+	}
+	int sum_proccessed_points = 0;
+	for (int i = 0; i < num_elements; i++){
+		sum_proccessed_points += proccessed_points[i];
+	}
+	printf("sum_check_sz = %d, sum_check_sz3= %d\n",sum_check_sz,sum_proccessed_points);
+
+	int not_equal_count = 0;
+	int double_processed_count = 0;
+	for (int i = 0; i < num_elements; i++){
+		if (check_sz[i] != proccessed_points[i]){
+			not_equal_count ++;
+		}
+		if (proccessed_points[i] > 1){
+			double_processed_count ++;
+		}
+	}	
+	printf("not_equal_count = %d\n",not_equal_count);
+	printf("double_processed_count = %d\n",double_processed_count);
+	printf("0: sz=%d,sz3=%d\n",check_sz[0],proccessed_points[0]);
+	// printf("1800+3600: sz=%d,sz3=%d\n",check_sz[1800+3600],proccessed_points[1800+3600]);
+	// printf("3599+3600: sz=%d,sz3=%d\n",check_sz[3599+3600],proccessed_points[3599+3600]);
+	// printf("1200*3600+3600: sz=%d,sz3=%d\n",check_sz[1200*3600+3600],proccessed_points[1200*3600+3600]);
+	printf("3600*1201: sz=%d,sz3=%d\n",check_sz[3600*1201],proccessed_points[3600*1201]);
+
+	std::vector<std::vector<T>> unpred_data_row(num_edges_x);
+	omp_set_num_threads(num_edges_x);
+	#pragma omp parallel for collapse(2) //reduction(+:processed_edge_row_count)
+	for(int i : dividing_rows){
+		for (int j = -1; j < (int)dividing_cols.size();j++){
+			//printf("j = %d, dividing_col[j] = %d\n", j, dividing_cols[j]);
+			int thread_id = omp_get_thread_num();
+
+			int start_col = (j == -1) ? 0 : dividing_cols[j];
+			int end_col = (j == dividing_cols.size() - 1) ? m : dividing_cols[j+1];
+			//printf("threadID = %d, row = %d, start_col = %d, end_col = %d\n", thread_id, i, start_col, end_col);
+			//处理线上的数据
+			for (int c = start_col; c < end_col; ++c){
+				if (std::find(dividing_cols.begin(), dividing_cols.end(), c) != dividing_cols.end()) {
+					//c is a dividing point
+					continue;
+				}
+				//processed_edge_row_count ++;
+				size_t position_idx = (i * r2 + c);
+				#pragma omp critical
+				{
+					proccessed_points[position_idx] ++;
+					check_sz[position_idx] ++;
+				}
+				double required_eb;
+				required_eb = max_pwr_eb;
+				// derive eb given six adjacent triangles
+				for (int k = 0; k < 6; k++) {
+					bool in_mesh = true;
+					for (int p = 0; p < 2; p++) {
+						//reserved order!
+						//if (!(in_range(i + index_offset[k][p][1], (int)end_row) && in_range(j + index_offset[k][p][0], (int)end_col))) {
+						// if (!(in_range(i + index_offset[k][p][1], (int)r1) && in_range(j + index_offset[k][p][0], (int)r2)) ||
+						// 	(c - start_col == 1) || (c - start_col == end_col - start_col - 1)){
+						if (!(in_range(i + index_offset[k][p][1], (int)r1) && in_range(c + index_offset[k][p][0], (int)r2))){
+							in_mesh = false;
+							break;
+						}
+						// if (!(in_local_range(j + index_offset[k][p][0], (int)start_col, (int)end_col))) {
+						// 	in_mesh = false;
+						// 	break;
+						// }
+					}
+					if (in_mesh) {
+						double update_eb;
+						update_eb = derive_cp_eb_for_positions_online_abs(decompressed_U[position_idx + offsets[k]], decompressed_U[position_idx + offsets[k + 1]], decompressed_U[position_idx],
+							decompressed_V[position_idx + offsets[k]], decompressed_V[position_idx + offsets[k + 1]], decompressed_V[position_idx]);
+						required_eb = MINF(required_eb, update_eb);
+						// required_eb = MINF(required_eb, derive_cp_eb_for_positions_online(decompressed_U[position_idx + offsets[k]], decompressed_U[position_idx + offsets[k + 1]], decompressed_U[position_idx], 
+						// decompressed_V[position_idx + offsets[k]], decompressed_V[position_idx + offsets[k + 1]],decompressed_V[position_idx],inv_C[k]));
+					}
+				}
+
+				if(required_eb >0){
+					bool unpred_flag = false;
+					T decompressed[2];
+					int temp_eb_quant_index[2];
+					// compress U and V
+					for (int k = 0; k < 2; k++) {
+						// T * cur_data_pos = (k == 0) ? cur_U_pos : cur_V_pos;
+						T * cur_data_field = (k == 0) ? decompressed_U : decompressed_V;
+						// T cur_data = *cur_data_pos;
+						double abs_eb;
+						abs_eb = required_eb;
+						//double abs_eb = fabs(cur_data_field[position_idx]) * required_eb;
+
+						// eb_quant_index_pos[2*(i*r2 + j) + k] = eb_exponential_quantize(abs_eb, base, log_of_base, threshold);
+						eb_quant_index[position_idx] = eb_exponential_quantize(abs_eb, base, log_of_base, threshold);
+						if (eb_quant_index[position_idx] > 0) {
+							// get adjacent data and perform Lorenzo
+							//use 1d Lorenzo
+							//T d0 = (c) ? cur_data_field[position_idx -1] : 0;
+							T d0 = (c && (c - start_col > 1)) ? cur_data_field[position_idx -1] : 0; 
+							T pred = d0;
+							double diff = cur_data_field[position_idx] - pred;
+							double quant_diff = fabs(diff) / abs_eb + 1;
+							if (quant_diff < capacity) {
+								quant_diff = (diff > 0) ? quant_diff : -quant_diff;
+								int quant_index = (int)(quant_diff / 2) + intv_radius;
+								// data_quant_index_pos[2*(i*r2 + j) + k] = quant_index;
+								data_quant_index[2*position_idx + k] = quant_index;
+								decompressed[k] = pred + 2 * (quant_index - intv_radius) * abs_eb;
+								// check original data
+								// if (position_idx == 2506800){
+								// 	printf("=======\n");
+								// 	printf("i = %d, j = %d, k = %d, d0 = %f, d1 = %f, d2 = %f, pred = %f, eb = %f, data_quant_index = %d, decompressed = %f\n", i, j, k, d0, d1, d2, pred, abs_eb, quant_index, decompressed[k]);
+								// 	printf("decompressed[k] = %f, cur_data_field[position_idx] = %f\n", decompressed[k], cur_data_field[position_idx]);
+								// }
+								if (fabs(decompressed[k] - cur_data_field[position_idx]) >= abs_eb) {
+									unpred_flag = true;
+									break;
+								}
+							}
+							else {
+								unpred_flag = true;
+								break;
+							}
+						}
+						else {
+							unpred_flag = true;
+							}
+					}
+					
+				
+					if(unpred_flag){
+						eb_quant_index[position_idx] = 0;
+						data_quant_index[2*position_idx] = intv_radius;
+						data_quant_index[2*position_idx + 1] = intv_radius;
+						unpred_data_row[thread_id].push_back(decompressed_U[position_idx]);
+						unpred_data_row[thread_id].push_back(decompressed_V[position_idx]);
+					}
+					else{
+						decompressed_U[position_idx] = decompressed[0];
+						decompressed_V[position_idx] = decompressed[1];
+					}
+				}
+				else{
+					eb_quant_index[position_idx] = 0;
+					data_quant_index[2*position_idx] = intv_radius;
+					data_quant_index[2*position_idx + 1] = intv_radius;
+					unpred_data_row[thread_id].push_back(decompressed_U[position_idx]);
+					unpred_data_row[thread_id].push_back(decompressed_V[position_idx]);
+				}
+			}
+		}
+	}
+
+	//处理竖着的线（列）
+	std::vector<std::vector<T>> unpred_data_col(num_edges_y);
+	omp_set_num_threads(num_edges_y);
+	#pragma omp parallel for collapse(2) //reduction(+:processed_edge_col_count)
+	for(int j : dividing_cols){
+		for (int i = -1; i < (int)dividing_rows.size();i++){
+			//printf("j = %d, dividing_col[j] = %d\n", j, dividing_cols[j]);
+			int thread_id = omp_get_thread_num();
+			int start_row = (i == -1) ? 0 : dividing_rows[i];
+			int end_row = (i == dividing_rows.size() - 1) ? n : dividing_rows[i+1];
+			//printf("threadID = %d, col = %d, start_row = %d, end_row = %d\n", thread_id, j, start_row, end_row);
+			//处理线上的数据
+			for (int r = start_row; r < end_row; ++r){
+				if (std::find(dividing_rows.begin(), dividing_rows.end(), r) != dividing_rows.end()) {
+					//k is a dividing point
+					continue;
+				}
+				//processed_edge_col_count ++;
+				size_t position_idx = (r * r2 + j);
+				#pragma omp critical
+				{
+					proccessed_points[position_idx] ++;
+					check_sz[position_idx] ++;
+				}
+
+				// if (position_idx == 1864*3600+1800){
+				// 	printf("now i = %d, j = %d is on vetical line\n", r, j);
+				// }
+				double required_eb;
+				required_eb = max_pwr_eb;
+				// derive eb given six adjacent triangles
+				for (int k = 0; k < 6; k++) {
+					bool in_mesh = true;
+					for (int p = 0; p < 2; p++) {
+						//reserved order!
+						//if (!(in_range(i + index_offset[k][p][1], (int)end_row) && in_range(j + index_offset[k][p][0], (int)end_col))) {
+						// if (!(in_range(i + index_offset[k][p][1], (int)r1) && in_range(j + index_offset[k][p][0], (int)r2)) ||
+						// 	(r - start_row == 1) || (r - start_row == end_row - start_row - 1)){
+						if (!(in_range(r + index_offset[k][p][1], (int)r1) && in_range(j + index_offset[k][p][0], (int)r2))){
+							in_mesh = false;
+							// if (position_idx == 1864*3600+1800){
+							// 	printf("out of mesh!!, r = %d, index_offset[k][p][1] = %d, r1 = %d, j = %d, index_offset[k][p][0] = %d, r2 = %d\n", r, index_offset[k][p][1], r1, j, index_offset[k][p][0], r2);
+							// }
+							break;
+						}
+						// if (!(in_local_range(i + index_offset[k][p][1], (int)start_row, (int)end_row))) {
+						// 	in_mesh = false;
+						// 	break;
+						// }
+					}
+					if (in_mesh) {
+						// if (position_idx == 1864*3600+1800){
+						// 	printf("in_mesh!!\n");
+						// }
+						double update_eb;
+						update_eb = derive_cp_eb_for_positions_online_abs(decompressed_U[position_idx + offsets[k]], decompressed_U[position_idx + offsets[k + 1]], decompressed_U[position_idx],
+							decompressed_V[position_idx + offsets[k]], decompressed_V[position_idx + offsets[k + 1]], decompressed_V[position_idx]);
+						required_eb = MINF(required_eb, update_eb);
+						// required_eb = MINF(required_eb, derive_cp_eb_for_positions_online(decompressed_U[position_idx + offsets[k]], decompressed_U[position_idx + offsets[k + 1]], decompressed_U[position_idx], 
+						// decompressed_V[position_idx + offsets[k]], decompressed_V[position_idx + offsets[k + 1]],decompressed_V[position_idx],inv_C[k]));
+					}
+				}
+				// if (position_idx == 1864*3600+1800){
+				// 	printf("now i = %d, j = %d, required_eb = %f\n", r, j, required_eb);
+				// }
+
+				if(required_eb >0){
+					bool unpred_flag = false;
+					T decompressed[2];
+					// compress U and V
+					for (int k = 0; k < 2; k++) {
+						// T * cur_data_pos = (k == 0) ? cur_U_pos : cur_V_pos;
+						T * cur_data_field = (k == 0) ? decompressed_U : decompressed_V;
+						// T cur_data = *cur_data_pos;
+						double abs_eb;
+						abs_eb = required_eb;
+						//double abs_eb = fabs(cur_data_field[position_idx]) * required_eb;
+
+						// eb_quant_index_pos[2*(i*r2 + j) + k] = eb_exponential_quantize(abs_eb, base, log_of_base, threshold);
+						eb_quant_index[position_idx] = eb_exponential_quantize(abs_eb, base, log_of_base, threshold);
+						if (eb_quant_index[position_idx] > 0) {
+							// get adjacent data and perform Lorenzo
+							//use 1d Lorenzo
+							//T d0 = (r) ? cur_data_field[position_idx - r2] : 0;
+							T d0 = (r && (r - start_row > 1)) ? cur_data_field[position_idx - r2] : 0; 
+							T pred = d0;
+							double diff = cur_data_field[position_idx] - pred;
+							double quant_diff = fabs(diff) / abs_eb + 1;
+							if (quant_diff < capacity) {
+								quant_diff = (diff > 0) ? quant_diff : -quant_diff;
+								int quant_index = (int)(quant_diff / 2) + intv_radius;
+								// data_quant_index_pos[2*(i*r2 + j) + k] = quant_index;
+								data_quant_index[2*position_idx + k] = quant_index;
+								decompressed[k] = pred + 2 * (quant_index - intv_radius) * abs_eb;
+								// check original data
+								// if (position_idx == 2506800){
+								// 	printf("=======\n");
+								// 	printf("i = %d, j = %d, k = %d, d0 = %f, d1 = %f, d2 = %f, pred = %f, eb = %f, data_quant_index = %d, decompressed = %f\n", i, j, k, d0, d1, d2, pred, abs_eb, quant_index, decompressed[k]);
+								// 	printf("decompressed[k] = %f, cur_data_field[position_idx] = %f\n", decompressed[k], cur_data_field[position_idx]);
+								// }
+
+								if (fabs(decompressed[k] - cur_data_field[position_idx]) >= abs_eb) {
+									unpred_flag = true;
+									break;
+								}
+							}
+							else {
+
+								unpred_flag = true;
+								break;
+							}
+						
+						}
+						else {
+							unpred_flag = true;
+							}
+					}
+					
+				
+					if(unpred_flag){
+						eb_quant_index[position_idx] = 0;
+						data_quant_index[2*position_idx] = intv_radius;
+						data_quant_index[2*position_idx + 1] = intv_radius;
+						unpred_data_col[thread_id].push_back(decompressed_U[position_idx]);
+						unpred_data_col[thread_id].push_back(decompressed_V[position_idx]);
+						
+					}
+					else{
+						decompressed_U[position_idx] = decompressed[0];
+						decompressed_V[position_idx] = decompressed[1];
+					}
+				}
+				else{
+					eb_quant_index[position_idx] = 0;
+					data_quant_index[2*position_idx] = intv_radius;
+					data_quant_index[2*position_idx + 1] = intv_radius;
+					unpred_data_col[thread_id].push_back(decompressed_U[position_idx]);
+					unpred_data_col[thread_id].push_back(decompressed_V[position_idx]);
+				}
+			}
+		}
+	}
+	
+	sum_check_sz = 0;
+	for (int i = 0; i < num_elements; i++){
+		sum_check_sz += check_sz[i];
+		if (check_sz[i] > 1){
+			printf("index %d > 1\n",i);
+			exit(0);
+		}
+	}
+	double_processed_count = 0;
+	not_equal_count = 0;
+	for (int i = 0; i < num_elements; i++){
+		if (check_sz[i] != proccessed_points[i]){
+			not_equal_count ++;
+		}
+		if (proccessed_points[i] > 1){
+			double_processed_count ++;
+		}
+	}
+	printf("num_check_sz_after_rowcol = %d\n",sum_check_sz);
+	printf("sz3_notequal_rowcol = %d\n",not_equal_count);
+	printf("sz3_double_rowcol = %d\n",double_processed_count);
+	printf("3600*1201_rowcol: sz=%d,sz3=%d\n",check_sz[3600*1201],proccessed_points[3600*1201]);
+	std::vector<T> unpred_dot;
+	//处理点,串行
+	for(int i : dividing_rows){
+		for(int j : dividing_cols){
+				processed_dot_count ++;
+				size_t position_idx = (i * r2 + j);
+				proccessed_points[position_idx] ++;
+				//lossless record
+				eb_quant_index[position_idx] = 0;
+				data_quant_index[2*position_idx] = intv_radius;
+				data_quant_index[2*position_idx + 1] = intv_radius;
+				unpred_dot.push_back(decompressed_U[position_idx]);
+				unpred_dot.push_back(decompressed_V[position_idx]);
+		}
+	}
+
+	auto comp_end = std::chrono::high_resolution_clock::now();
+	std::chrono::duration<double> comp_time = comp_end - comp_start;
+	printf("derivation time = %f\n", comp_time.count());
+
+	
+	// free(decompressed_U);
+	// free(decompressed_V);
+	//set decompressed_U_ptr and decompressed_V_ptr
+	decompressed_U_ptr = decompressed_U;
+	decompressed_V_ptr = decompressed_V;
+
+	auto write_variables_start = std::chrono::high_resolution_clock::now();
+
+	unsigned char * compressed = (unsigned char *) malloc(2*num_elements*sizeof(T));
+	unsigned char * compressed_pos = compressed;
+	//write size of index_need_to_fix
+	write_variable_to_dst(compressed_pos, index_need_to_fix.size());
+
+	write_variable_to_dst(compressed_pos, base);
+	printf("base = %d,pos = %ld\n", base, compressed_pos - compressed);
+	write_variable_to_dst(compressed_pos, threshold);
+	//printf("threshold = %d ,pos = %ld%f\n", threshold, compressed_pos - compressed);
+	write_variable_to_dst(compressed_pos, intv_radius);
+	printf("intv_radius = %d\n",intv_radius);
+	
+	// if size of index_need_to_fix is not 0, write bitmap
+	if(index_need_to_fix.size() != 0){
+		convertIntArray2ByteArray_fast_1b_to_result_sz(bitmap, num_elements, compressed_pos);
+		if(FPZIP_FLAG){
+			// use fpzip to compress
+			int type = FPZIP_TYPE_FLOAT;
+			int prec = 0;
+			int nx = index_need_to_fix.size();
+			int ny = 2;
+			int nz = 1;
+			int nf = 1;
+			size_t count =(size_t) nx * ny * nz * nf;
+			size_t size = (type == FPZIP_TYPE_FLOAT ? sizeof(float) : sizeof(double));
+			void * data;
+			data = (type == FPZIP_TYPE_FLOAT ? static_cast<void*>(new float[count]) : static_cast<void*>(new double[count]));
+			//write all u then all v
+			std::vector<size_t> indices(index_need_to_fix.begin(), index_need_to_fix.end()); // 将 set 转为 vector
+			for (size_t i = 0; i < indices.size(); ++i) {
+				((float *)data)[i] = U[indices[i]];
+				((float *)data)[i + nx] = V[indices[i]];
+			}
+			// //calculate sum of data
+			double sum = 0;
+			for (size_t i = 0; i < count; i++){
+				sum += ((float *)data)[i];
+			}
+			printf("comp data sum = %f\n", sum);
+			if (prec == 0)
+				prec = (int)(CHAR_BIT * size);
+			char * buff = (char *) malloc(nx * ny * nz * nf * size);
+			FPZ* fpz = fpzip_write_to_buffer(buff,size*nx*ny*nz*nf);
+			fpz->type = FPZIP_TYPE_FLOAT;
+			fpz->prec = prec;
+			fpz->nx = nx;
+			fpz->ny = ny;
+			fpz->nz = nz;
+			fpz->nf = nf;
+			size_t outbytes = fpzip_write(fpz, data);
+			//print first u value
+			printf("U[0] = %f\n", U[indices[0]]);
+			//print first v value
+			printf("V[0] = %f\n", V[indices[0]]);
+			//write outbytes first
+			write_variable_to_dst(compressed_pos, outbytes);
+			printf("outbytes = %ld\n", outbytes);
+			//write compressed data to compressed_pos
+			memcpy(compressed_pos, buff, outbytes);
+			compressed_pos += outbytes;
+			fpzip_read_close(fpz);
+			delete[] static_cast<float*>(data);
+		}
+		
+		// exit(0);
+		else{
+		//write index_need_to_fix's data(U and V) 
+			for(auto it = index_need_to_fix.begin(); it != index_need_to_fix.end(); ++it){
+				write_variable_to_dst(compressed_pos, U[*it]);
+			}
+			for(auto it = index_need_to_fix.begin(); it != index_need_to_fix.end(); ++it){
+				write_variable_to_dst(compressed_pos, V[*it]);
+			}
+		}
+
+		
+	}
+	
+	//write number of threads
+	write_variable_to_dst(compressed_pos, num_threads);
+	printf("num_threads = %d,pos = %ld\n", num_threads, compressed_pos - compressed);
+
+	//写每个block的unpred_data size,如果用quantizer就不需要记录
+	// for (auto threadID = 0; threadID < num_threads; threadID++){
+	// 	// write_variable_to_dst(compressed_pos, unpred_data_thread[threadID].size());
+	// 	write_variable_to_dst(compressed_pos, local_quant_vec[threadID].num_unpred());
+	// 	//printf("thread %d, unpred_data size = %ld,maxvalue = %f\n", threadID, unpred_data_thread[threadID].size(), *std::max_element(unpred_data_thread[threadID].begin(), unpred_data_thread[threadID].end()));
+	// }
+
+	//写每个block的unpred_data,use quantizer
+	for (auto threadID = 0; threadID < num_threads; threadID++){
+		// write_array_to_dst(compressed_pos, (T *)&unpred_data_thread[threadID][0], unpred_data_thread[threadID].size());
+		printf("comp: threadid = %d, num_unpred for this quantizer=%ld \n", threadID,local_quant_vec[threadID].num_unpred());
+		local_quant_vec[threadID].save(compressed_pos);
+		
+	}
+
+	//写每个row的unpred_data size
+	for (auto threadID = 0; threadID < num_edges_x; threadID++){
+		write_variable_to_dst(compressed_pos, unpred_data_row[threadID].size());
+		//printf("thread %d, unpred_row size = %ld,maxvalue = %f\n", threadID, unpred_data_row[threadID].size(), (unpred_data_row[threadID].size() == 0)? 0:*std::max_element(unpred_data_row[threadID].begin(), unpred_data_row[threadID].end()) );
+	}
+	//写每个row的unpred_data
+	for (auto threadID = 0; threadID < num_edges_x; threadID++){
+		write_array_to_dst(compressed_pos, (T *)&unpred_data_row[threadID][0], unpred_data_row[threadID].size());
+	}
+
+	//写每个col的unpred_data size
+	for (auto threadID = 0; threadID < num_edges_y; threadID++){
+		write_variable_to_dst(compressed_pos, unpred_data_col[threadID].size());
+	}
+
+	//写每个col的unpred_data
+	for (auto threadID = 0; threadID < num_edges_y; threadID++){
+		write_array_to_dst(compressed_pos, (T *)&unpred_data_col[threadID][0], unpred_data_col[threadID].size());
+	}
+
+	//写dot的unpred_data size
+	write_variable_to_dst(compressed_pos,unpred_dot.size());
+	//写dot的unpred_data
+	write_array_to_dst(compressed_pos, (T *)&unpred_dot[0], unpred_dot.size());
+
+	auto write_variables_end = std::chrono::high_resolution_clock::now();
+	std::chrono::duration<double> write_variable_time = write_variables_end - write_variables_start;
+	printf("write variables time: %f\n",write_variable_time.count());
+	//printf("pos after write all upredict= %ld\n", compressed_pos - compressed);
+
+	//printf("intv_radius = %d,pos = %ld\n", intv_radius, compressed_pos - compressed);
+	//unpredictable data size is sum of all thread's unpredictable data size
+
+	/*
+	// //write dividing line data
+	// write_variable_to_dst(compressed_pos, (size_t)unpred_data_dividing.size());
+	// //printf("comp unpred_data_dividing_count = %ld\n", unpred_data_dividing.size());
+	// write_array_to_dst(compressed_pos, (T *)&unpred_data_dividing[0], unpred_data_dividing.size());
+	//printf("comp pos after all upredict_dividing = %ld\n", compressed_pos - compressed);
+	*/
+	
+
+	// size_t * freq = (size_t *) calloc(num_threads * 4 * 1024, sizeof(size_t));
+	// size_t * freq = (size_t *) malloc(num_threads* 4*1024*sizeof(size_t));
+	// memset(freq, 0, num_threads* 4*1024*sizeof(size_t));
+
+	//std::cout<<"eb max = "<<*std::max_element(eb_quant_index, eb_quant_index + 2*num_elements)<<std::endl;
+	//std::cout<<"eb min = "<<*std::min_element(eb_quant_index, eb_quant_index + 2*num_elements)<<std::endl;
+
+	/*
+	// serial huffman****************************************************
+	auto serial_eb_quant_huffman_start = std::chrono::high_resolution_clock::now();
+	omp_Huffman_encode_tree_and_data(2*1024, eb_quant_index, 2*num_elements, compressed_pos,freq,num_threads);
+	auto serial_eb_quant_huffman_end = std::chrono::high_resolution_clock::now();
+	std::chrono::duration<double> serial_eb_quant_huffman_time = serial_eb_quant_huffman_end - serial_eb_quant_huffman_start;
+	std::cout<<"serial_eb_quant_huffman_time = "<<serial_eb_quant_huffman_time.count()<<std::endl;
+	//Huffman_encode_tree_and_data(2*1024, eb_quant_index, 2*num_elements, compressed_pos);
+	// serial huffman****************************************************
+	*/
+
+	//naive parallel huffman****************************************************
+	printf("start huffman\n");
+	auto parallel_eb_quant_huffman_start = std::chrono::high_resolution_clock::now();
+	std::vector<std::vector<unsigned char>> compressed_buffers(num_threads);
+	std::vector<size_t> compressed_sizes(num_threads);
+	//resize
+	for (int i = 0; i < num_threads; i++){
+		compressed_buffers[i].resize(num_elements / num_threads);
+	}
+	#pragma omp parallel for num_threads(num_threads)
+	for (int i = 0; i < num_threads; i++){
+		size_t start_pos = i * num_elements / num_threads;
+		size_t end_pos = (i == num_threads - 1) ? num_elements : (i + 1) * num_elements / num_threads;
+		unsigned char *local_compressed_pos = compressed_buffers[i].data();
+		size_t local_compressed_size = 0;
+		Huffman_encode_tree_and_data(2*1024,eb_quant_index + start_pos, (end_pos - start_pos), local_compressed_pos,local_compressed_size);
+		compressed_sizes[i] = local_compressed_size;
+	}
+
+	// write compressed_sizes first
+	for (int i = 0; i < num_threads; i++){
+		write_variable_to_dst(compressed_pos, compressed_sizes[i]);
+		//printf("comp thread %d, compressed_size = %ld\n", i, compressed_sizes[i]);
+	}
+	//merge compressed_buffers write to compressed
+	for (int i = 0; i < num_threads; i++){
+		memcpy(compressed_pos, compressed_buffers[i].data(), compressed_sizes[i]);
+		compressed_pos += compressed_sizes[i];
+	}
+	auto parallel_eb_quant_huffman_end = std::chrono::high_resolution_clock::now();
+	std::chrono::duration<double> parallel_eb_quant_huffman_time = parallel_eb_quant_huffman_end - parallel_eb_quant_huffman_start;
+	std::cout<<"parallel_eb_quant_huffman_time = "<<parallel_eb_quant_huffman_time.count()<<std::endl;
+	//naive parallel huffman eb quant****************************************************
+	
+	//writefile("comp_eb_quant_index.txt",eb_quant_index, 2*num_elements);
+	printf("done with eb_quant huffman\n");
+	//printf("comp eb max = %d\n", *std::max_element(eb_quant_index, eb_quant_index + 2*num_elements));
+	//printf("comp eb min = %d\n", *std::min_element(eb_quant_index, eb_quant_index + 2*num_elements));
+	free(eb_quant_index);
+	// free(freq);
+	// freq = NULL;
+	//freq = (size_t *) calloc(num_threads * 4 * capacity*sizeof(size_t), sizeof(size_t));
+	// freq = (size_t *) malloc(num_threads* 4*capacity*sizeof(size_t));
+	// memset(freq, 0, num_threads* 4*capacity*sizeof(size_t));
+	//std::cout<<"quant max = "<<*std::max_element(data_quant_index, data_quant_index + 2*num_elements)<<std::endl;
+	//std::cout<<"quant min = "<<*std::min_element(data_quant_index, data_quant_index + 2*num_elements)<<std::endl;
+	//omp_Huffman_encode_tree_and_data(capacity, data_quant_index, 2*num_elements, compressed_pos,freq, num_threads);
+	
+	/*
+	// serial huffman data quant ****************************************************
+	auto data_quant_huffman_start = std::chrono::high_resolution_clock::now();
+	Huffman_encode_tree_and_data(capacity, data_quant_index, 2*num_elements, compressed_pos);
+	auto data_quant_huffman_end = std::chrono::high_resolution_clock::now();
+	std::chrono::duration<double> data_quant_huffman_time = data_quant_huffman_end - data_quant_huffman_start;
+	std::cout<<"serial data_quant_huffman_time = "<<data_quant_huffman_time.count()<<std::endl;
+	// serial huffman data quant ****************************************************
+	*/
+
+	// parallel huffman data quant ****************************************************
+	auto parallel_data_quant_huffman_start = std::chrono::high_resolution_clock::now();
+	printf("qqqq_num_threads = %d\n", num_threads);	
+	std::vector<std::vector<unsigned char>> compressed_buffers_data_quant(num_threads);
+	std::vector<size_t> compressed_sizes_data_quant(num_threads);
+	//resize
+	auto resize_start = std::chrono::high_resolution_clock::now();
+	for (int i = 0; i < num_threads; i++){
+		compressed_buffers_data_quant[i].resize(2*num_elements);
+	}
+	auto resize_end = std::chrono::high_resolution_clock::now();
+	printf("resize time = %f\n", std::chrono::duration<double>(resize_end - resize_start).count());
+	#pragma omp parallel for num_threads(num_threads)
+	for (int i = 0; i < num_threads; i++){
+		size_t start_pos = i * num_elements / num_threads;
+		size_t end_pos = (i == num_threads - 1) ? num_elements : (i + 1) * num_elements / num_threads;
+		unsigned char *local_compressed_pos = compressed_buffers_data_quant[i].data();
+		size_t local_compressed_size = 0;
+		Huffman_encode_tree_and_data(capacity,data_quant_index + 2*start_pos, 2*(end_pos - start_pos), local_compressed_pos,local_compressed_size);
+		compressed_sizes_data_quant[i] = local_compressed_size;
+	}
+	//write compressed_sizes_data_quant first
+	for (int i = 0; i < num_threads; i++){
+		write_variable_to_dst(compressed_pos, compressed_sizes_data_quant[i]);
+		//printf("comp thread %d, compressed_size = %ld\n", i, compressed_sizes_data_quant[i]);
+	}
+
+	//merge compressed_buffers_data_quant write to compressed
+	for (int i = 0; i < num_threads; i++){
+		memcpy(compressed_pos, compressed_buffers_data_quant[i].data(), compressed_sizes_data_quant[i]);
+		compressed_pos += compressed_sizes_data_quant[i];
+	}
+	auto parallel_data_quant_huffman_end = std::chrono::high_resolution_clock::now();
+	std::chrono::duration<double> parallel_data_quant_huffman_time = parallel_data_quant_huffman_end - parallel_data_quant_huffman_start;
+	std::cout<<"parallel_data_quant_huffman_time = "<<parallel_data_quant_huffman_time.count()<<std::endl;
+	// parallel huffman data quant ****************************************************
+	printf("comp data max = %d\n", *std::max_element(data_quant_index, data_quant_index + 2*num_elements));
+	printf("comp data min = %d\n", *std::min_element(data_quant_index, data_quant_index + 2*num_elements));
+	free(data_quant_index);
+	compressed_size = compressed_pos - compressed;
+	return compressed;
+}
+
+
+template
+unsigned char *
+omp_sz3_compress_cp_preserve_2d_record_vertex(const float * U, const float * V, size_t r1, size_t r2, size_t& compressed_size, bool transpose, double max_pwr_eb,const std::set<size_t> &index_need_to_fix,int num_threads,float * &decompressed_U_ptr, float * &decompressed_V_ptr,std::string eb_type);
+
+template
+unsigned char *
+omp_sz3_compress_cp_preserve_2d_record_vertex(const double * U, const double * V, size_t r1, size_t r2, size_t& compressed_size, bool transpose, double max_pwr_eb,const std::set<size_t> &index_need_to_fix,int num_threads,double * &decompressed_U_ptr, double * &decompressed_V_ptr,std::string eb_type);

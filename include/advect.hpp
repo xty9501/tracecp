@@ -22,3 +22,13 @@ std::array<Type, 2> rkf45(const Type * x, const Type * v, const ftk::ndarray<flo
 std::vector<std::array<double, 2>> trajectory_parallel(double *X_original,const std::array<double, 2>& initial_x, const double time_step, const int max_length, const int DH,const int DW, const std::unordered_map<size_t, critical_point_t>& critical_points, ftk::ndarray<float>& data ,std::vector<std::set<size_t>>& thread_lossless_index,int thread_id);
 
 std::vector<std::array<double, 2>> trajectory(double *X_original,const std::array<double, 2>& initial_x, const double time_step, const int max_length, const int DH,const int DW, const std::unordered_map<size_t, critical_point_t>& critical_points, ftk::ndarray<float>& data ,std::set<size_t>& lossless_index);
+
+// MODIFIED, using unorderset + vector to store lossless index
+template<typename Type>
+std::array<Type, 2> newRK4(const Type * x, const Type * v, const ftk::ndarray<float> &data,  Type h, const int DH, const int DW,std::unordered_set<size_t>& unorderset, std::vector<size_t>& lossless_index);
+
+template<typename Type>
+std::array<Type, 2> newRK4_parallel(const Type* x, const Type* v, const ftk::ndarray<float>& data, Type h, const int DH, const int DW, std::vector<std::unordered_set<size_t>>& thread_unorderset, std::vector<std::vector<size_t>>& thread_lossless_index, int thread_id);
+
+std::vector<std::array<double, 2>> trajectory_parallel(double *X_original,const std::array<double, 2>& initial_x, const double time_step, const int max_length, const int DH,const int DW, const std::unordered_map<size_t, critical_point_t>& critical_points, ftk::ndarray<float>& data ,std::vector<std::unordered_set<size_t>>& thread_unorderset,std::vector<std::vector<size_t>> &thread_lossless_index,int thread_id);
+std::vector<std::array<double, 2>> trajectory(double *X_original,const std::array<double, 2>& initial_x, const double time_step, const int max_length, const int DH,const int DW, const std::unordered_map<size_t, critical_point_t>& critical_points, ftk::ndarray<float>& data,std::unordered_set<size_t>& unorderset,std::vector<size_t>& lossless_index);
