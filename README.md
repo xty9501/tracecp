@@ -47,7 +47,7 @@ eg:
 
 ~/tracecp/test3d ~/data/nek5000/U.dat ~/data/nek5000/V.dat ~/data/nek5000/W.dat 512 512 512 0.025 0.01 1000 0.05 abs 125 1.414 5 10
 
-<threadshold2> <threadshold3> are placeholder.
+threadshold2, and threadshold3 are placeholder.
 if <traj_output_dir> is not specified， then the trajs file will not be wriiten.
 
 To enable/disable OMP for cpSZ, set CPSZ_OMP_FLAG to 0 in main.cpp and main3d.cpp.
