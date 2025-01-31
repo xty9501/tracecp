@@ -52,7 +52,7 @@
 #include <omp.h>
 #define CPSZ_OMP_FLAG 1
 
-#define TPSZ_OMP_FLAG 1 //usually set to 1
+#define SOS_FLAG  1
 
 #define TRANSTER_TEST_FLAG 0
 #define SPEED_TEST_FLAG 1
@@ -308,9 +308,6 @@ void verify(Type * ori_data, Type * data, size_t num_elements, double &nrmse){
               maxpw_abserr = err;
             }
         }
-
-            
-
         if (diffMax < err)
             diffMax = err;
         prodSum += (ori_data[i]-mean1)*(data[i]-mean2);
@@ -750,7 +747,129 @@ void updateOffsets(const Type* p, const int DW, const int DH, const int DD, std:
     thread_lossless_index[thread_id].insert(coords.begin(), coords.end());
 }
 
+//SoS method ===============
 
+template<typename T, typename T_fp> //overload for sos method
+static inline void 
+update_index_and_value(double v[4][3], int64_t vf[4][3], int indices[4], int local_id, int global_id, const T * U, const T * V, const T * W, const T_fp * U_fp, const T_fp * V_fp, const T_fp * W_fp){
+  indices[local_id] = global_id;
+  update_value(v, local_id, global_id, U, V, W);
+  update_value(vf, local_id, global_id, U_fp, V_fp, W_fp);
+}
+
+template<typename T_fp> //overload for sos method
+static void 
+check_simplex_seq(const T_fp vf[4][3], const double v[4][3], const double X[3][3], const int indices[4], int i, int j, int k, int simplex_id, std::unordered_map<size_t, critical_point_t_3d>& critical_points){
+  // robust critical point test
+  bool succ = ftk::robust_critical_point_in_simplex3(vf, indices);
+  if (!succ) return;
+  double mu[4]; // check intersection
+  double cond;
+  for (int i = 0; i < 4; i++) {
+    if (v[i][0] == 0 && v[i][1] == 0 && v[i][2] == 0) {
+      return;
+      }
+  }
+  bool succ2 = ftk::inverse_lerp_s3v3(v, mu, &cond);
+  if(!succ2) ftk::clamp_barycentric<4>(mu);
+  double x[3]; // position
+  ftk::lerp_s3v3(X, mu, x);
+  critical_point_t_3d cp;
+  cp.x[0] = k + x[0]; cp.x[1] = j + x[1]; cp.x[2] = i + x[2];
+  cp.type = get_cp_type(X, v);
+  cp.simplex_id = simplex_id;
+  double J[3][3]; // jacobian
+  double eigenvalues[3];
+  double eigenvec[3][3];
+  ftk::jacobian_3dsimplex(X, v, J);
+  if (cp.type >= 3 && cp.type <= 6){
+    computeEigenvaluesAndEigenvectors(J, eigenvalues, eigenvec);
+    //computeEigenvaluesAndEigenvectores_ftk(J, eigenvalues, eigenvec);
+    //copy eigenvec to cp.eig_vec
+    for(int i=0; i<3; i++){
+        for(int j=0; j<3; j++){
+        cp.eig_vec[i][j] = eigenvec[i][j];
+        }
+    }
+    //copy eigenvalues to cp.eig
+    for(int i=0; i<3; i++){
+        cp.eigvalues[i] = eigenvalues[i];
+    }
+  }
+
+  critical_points[simplex_id] = cp;
+}
+
+template<typename T>
+std::unordered_map<size_t, critical_point_t_3d>
+sos_compute_critical_points(const T * U, const T * V, const T * W, int r1, int r2, int r3,uint64_t vector_field_scaling_factor){ //r1=DD,r2=DH,r3=DW
+  using T_fp = int64_t;
+  // check cp for all cells
+  ptrdiff_t dim0_offset = r2*r3;
+  ptrdiff_t dim1_offset = r3;
+  ptrdiff_t cell_dim0_offset = (r2-1)*(r3-1);
+  ptrdiff_t cell_dim1_offset = r3-1;
+  size_t num_elements = r1*r2*r3;
+  T_fp * U_fp = (T_fp *) malloc(num_elements * sizeof(T_fp));
+  T_fp * V_fp = (T_fp *) malloc(num_elements * sizeof(T_fp));
+  T_fp * W_fp = (T_fp *) malloc(num_elements * sizeof(T_fp));
+  for(int i=0; i<num_elements; i++){
+    U_fp[i] = U[i]*vector_field_scaling_factor;
+    V_fp[i] = V[i]*vector_field_scaling_factor;
+    W_fp[i] = W[i]*vector_field_scaling_factor;
+  }
+  int indices[4] = {0};
+  int64_t vf[4][3] = {0};
+  double v[4][3] = {0};
+  double actual_coords[6][4][3];
+  for(int i=0; i<6; i++){
+    for(int j=0; j<4; j++){
+      for(int k=0; k<3; k++){
+        actual_coords[i][j][k] = tet_coords[i][j][k];
+      }
+    }
+  }
+  std::unordered_map<size_t, critical_point_t_3d> critical_points;
+  for(int i=1; i<r1-2; i++){
+    if(i%10==0) std::cout << i << " / " << r1-1 << std::endl;
+    for(int j=1; j<r2-2; j++){
+      for(int k=1; k<r3-2; k++){
+        // order (reserved, z->x):
+        // ptrdiff_t cell_offset = 6*(i*cell_dim0_offset + j*cell_dim1_offset + k);
+        // ftk index
+        ptrdiff_t cell_offset = 6*(i*dim0_offset + j*dim1_offset + k);
+        // (ftk-0) 000, 001, 011, 111
+        update_index_and_value(v, vf, indices, 0, i*dim0_offset + j*dim1_offset + k, U, V, W, U_fp, V_fp, W_fp);
+        update_index_and_value(v, vf, indices, 1, (i+1)*dim0_offset + j*dim1_offset + k, U, V, W, U_fp, V_fp, W_fp);
+        update_index_and_value(v, vf, indices, 2, (i+1)*dim0_offset + (j+1)*dim1_offset + k, U, V, W, U_fp, V_fp, W_fp);
+        update_index_and_value(v, vf, indices, 3, (i+1)*dim0_offset + (j+1)*dim1_offset + (k+1), U, V, W, U_fp, V_fp, W_fp);
+        check_simplex_seq(vf, v, actual_coords[0], indices, i, j, k, cell_offset, critical_points);
+        // (ftk-2) 000, 010, 011, 111
+        update_index_and_value(v, vf, indices, 1, i*dim0_offset + (j+1)*dim1_offset + k, U, V, W, U_fp, V_fp, W_fp);
+        check_simplex_seq(vf, v, actual_coords[1], indices, i, j, k, cell_offset + 2, critical_points);
+        // (ftk-1) 000, 001, 101, 111
+        update_index_and_value(v, vf, indices, 1, (i+1)*dim0_offset + j*dim1_offset + k, U, V, W, U_fp, V_fp, W_fp);
+        update_index_and_value(v, vf, indices, 2, (i+1)*dim0_offset + j*dim1_offset + k+1, U, V, W, U_fp, V_fp, W_fp);
+        check_simplex_seq(vf, v, actual_coords[2], indices, i, j, k, cell_offset + 1, critical_points);
+        // (ftk-4) 000, 100, 101, 111
+        update_index_and_value(v, vf, indices, 1, i*dim0_offset + j*dim1_offset + k+1, U, V, W, U_fp, V_fp, W_fp);
+        check_simplex_seq(vf, v, actual_coords[3], indices, i, j, k, cell_offset + 4, critical_points);
+        // (ftk-3) 000, 010, 110, 111
+        update_index_and_value(v, vf, indices, 1, i*dim0_offset + (j+1)*dim1_offset + k, U, V, W, U_fp, V_fp, W_fp);
+        update_index_and_value(v, vf, indices, 2, i*dim0_offset + (j+1)*dim1_offset + k+1, U, V, W, U_fp, V_fp, W_fp);
+        check_simplex_seq(vf, v, actual_coords[4], indices, i, j, k, cell_offset + 3, critical_points);
+        // (ftk-5) 000, 100, 110, 111
+        update_index_and_value(v, vf, indices, 1, i*dim0_offset + j*dim1_offset + k+1, U, V, W, U_fp, V_fp, W_fp);
+        check_simplex_seq(vf, v, actual_coords[5], indices, i, j, k, cell_offset + 5, critical_points);
+      }
+    }
+  }
+  return critical_points; 
+}
+
+
+
+//SoS method =============== end
 
 template<typename Type>
 std::array<Type, 3> newRK4_3d(const Type * x, const Type * v, const ftk::ndarray<float> &data,  Type h, const int DW, const int DH, const int DD, std::set<size_t>& lossless_index, bool verbose = false) {
@@ -1594,8 +1713,29 @@ int main(int argc, char ** argv){
     // pre-compute critical points
     auto cp_cal_start = std::chrono::high_resolution_clock::now();
     //auto critical_points_0 = compute_critical_points(U, V, W, r1, r2, r3); //r1=DD,r2=DH,r3=DW
-    cout << "using omp to compute critical points" << endl;
-    auto critical_points_0 = omp_compute_critical_points(U, V, W, r1, r2, r3);
+    uint64_t vector_field_scaling_factor = 1;
+    std::unordered_map<size_t, critical_point_t_3d> critical_points_0;
+    if (SOS_FLAG){
+      printf("using SOS to compute critical points\n");
+      const int type_bits = 63;
+      double vector_field_resolution = 0;
+      for (int i=0; i<r1*r2*r3; i++){
+        double min_val = std::max(std::max(fabs(U[i]), fabs(V[i])), fabs(W[i]));
+        vector_field_resolution = std::max(vector_field_resolution, min_val);
+      }
+      int vbits = std::ceil(std::log2(vector_field_resolution));
+      int nbits = (type_bits - 5) / 3;
+      vector_field_scaling_factor = 1 << (nbits - vbits);
+      std::cerr << "resolution=" << vector_field_resolution 
+      << ", factor=" << vector_field_scaling_factor 
+      << ", nbits=" << nbits << ", vbits=" << vbits << ", shift_bits=" << nbits - vbits << std::endl;
+      critical_points_0 = sos_compute_critical_points(U, V, W, r1, r2, r3, vector_field_scaling_factor);
+    }
+    else{
+      cout << "using omp to compute critical points" << endl;
+      critical_points_0 = omp_compute_critical_points(U, V, W, r1, r2, r3);
+    }
+
     auto cp_cal_end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> cp_cal_duration = cp_cal_end - cp_cal_start;
     cout << "critical points #: " << critical_points_0.size() << endl;
@@ -1619,7 +1759,10 @@ int main(int argc, char ** argv){
       std::cout << "start Compression\n";
       unsigned char * result;
       auto comp_time_start = std::chrono::high_resolution_clock::now();
-      if(eb_type == "rel"){
+      if(SOS_FLAG){
+        result = sz_compress_cp_preserve_sos_3d_online_fp<float>(U, V, W, r1, r2, r3, result_size, false,max_eb);
+      }
+      else if(eb_type == "rel"){
         if (CPSZ_OMP_FLAG == 0){
           result =  sz_compress_cp_preserve_3d_online_log(U, V, W, r1, r2, r3, result_size, false, max_eb);
         }
@@ -1674,7 +1817,10 @@ int main(int argc, char ** argv){
       // exit(0);
       auto decomp_time_start = std::chrono::high_resolution_clock::now();
       size_t lossless_output = sz_lossless_decompress(ZSTD_COMPRESSOR, result_after_lossless, lossless_outsize, &result, result_size);
-      if (eb_type == "rel"){
+      if(SOS_FLAG){
+        sz_decompress_cp_preserve_3d_online_fp(result, r1, r2, r3, dec_U, dec_V, dec_W);
+      }
+      else if (eb_type == "rel"){
         if(CPSZ_OMP_FLAG == 0){
           sz_decompress_cp_preserve_3d_online_log<float>(result, r1, r2, r3, dec_U, dec_V, dec_W);
         }
@@ -1705,6 +1851,7 @@ int main(int argc, char ** argv){
     verify(V, dec_V, r1*r2*r3, nrmse_v);
     verify(W, dec_W, r1*r2*r3, nrmse_w);
     psnr_cpsz_overall = 20 * log10(sqrt(3) / sqrt(nrmse_u * nrmse_u + nrmse_v * nrmse_v + nrmse_w * nrmse_w));
+    printf("=====PSNR OVERALL: %f\n", psnr_cpsz_overall);
     
     
 
@@ -1720,8 +1867,15 @@ int main(int argc, char ** argv){
 
     omp_set_num_threads(total_thread);
     //auto critical_points_out = compute_critical_points(dec_U,dec_V,dec_W, r1, r2, r3);
-    cout << "using omp to compute critical points" << endl;
-    auto critical_points_out = omp_compute_critical_points(dec_U, dec_V, dec_W, r1, r2, r3);
+    std::unordered_map<size_t, critical_point_t_3d> critical_points_out;
+    if (SOS_FLAG){
+      printf("using SOS to compute critical points dec\n");
+      critical_points_out = sos_compute_critical_points(dec_U, dec_V, dec_W, r1, r2, r3, vector_field_scaling_factor);
+    }
+    else{
+      cout << "using omp to compute critical points dec" << endl;
+      auto critical_points_out = omp_compute_critical_points(dec_U, dec_V, dec_W, r1, r2, r3);
+    }
     cout << "critical points dec: " << critical_points_out.size() << endl;
 
     
@@ -1744,6 +1898,7 @@ int main(int argc, char ** argv){
         }
       }
     }
+    printf("critical points check passed\n");
 
     //replace the points on surface with original data
     // for (int i = 0; i < r1; i++){
@@ -2039,6 +2194,8 @@ int main(int argc, char ** argv){
 
     }
     // exit(0);
+
+    
     
 
 
@@ -2181,6 +2338,11 @@ int main(int argc, char ** argv){
       trajID_need_fix_next_detail_vec.push_back({wrong_num_outside, wrong_num_max_iter, wrong_num_find_cp});
       origin_traj_detail = {num_outside, num_max_iter, num_find_cp};
       printf("original traj has: %d outside, %d max_iter, %d find_cp\n",num_outside, num_max_iter, num_find_cp);
+    }
+
+    if (SOS_FLAG){
+      printf("SOS method, exit\n");
+      exit(0);
     }
 
     //*************开始修复轨迹*************

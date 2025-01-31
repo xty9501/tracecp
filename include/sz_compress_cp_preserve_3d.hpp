@@ -43,5 +43,9 @@ unsigned char * omp_sz_compress_cp_preserve_3d_record_vertex(
 	size_t& compressed_size, double max_pwr_eb,const std::set<size_t>& index_need_to_lossless,
 	int n_threads, T* &decompressed_U_ptr, T* &decompressed_V_ptr, T* &decompressed_W_ptr);
 
+//sos-method
+template<typename T>
+unsigned char *
+sz_compress_cp_preserve_sos_3d_online_fp(const T * U, const T * V, const T * W, size_t r1, size_t r2, size_t r3, size_t& compressed_size, bool transpose=false, double max_pwr_eb=0.01);
 
 #endif

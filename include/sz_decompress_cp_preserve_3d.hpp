@@ -29,4 +29,10 @@ omp_sz_decompress_cp_preserve_3d_online_abs_record_vertex(const unsigned char * 
 template<typename T>
 void
 omp_sz_decompress_cp_preserve_3d_record_vertex(const unsigned char * compressed, size_t r1, size_t r2, size_t r3, T *& U, T *& V, T *& W);
+
+//sos-method
+template<typename T>
+void
+sz_decompress_cp_preserve_3d_online_fp(const unsigned char * compressed, size_t r1, size_t r2, size_t r3, T *& U, T *& V, T *& W);
+
 #endif

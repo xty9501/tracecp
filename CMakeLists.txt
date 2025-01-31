@@ -38,7 +38,7 @@ add_subdirectory(external/fpzip)
 # 添加可执行文件
 add_executable(test ${SOURCES} ../tests/main.cpp src/cp.cpp src/advect.cpp)
 # add_executable(single_traj ${SOURCES} tests/single_traj.cpp src/interp.cpp src/utilsIO.cpp include/advect.hpp include/utils.hpp include/cp.hpp)
-add_executable(test3d ${SOURCES} tests/main3d.cpp src/interp.cpp src/utilsIO.cpp include/advect.hpp include/utils.hpp include/cp.hpp)
+add_executable(test3d ${SOURCES} tests/main3d.cpp src/interp.cpp src/utilsIO.cpp include/advect.hpp include/utils.hpp include/cp.hpp src/sz_compress_cp_preserve_sos_3d.cpp)
 add_executable(naive2d ${SOURCES} ../tests/naive2d.cpp src/cp.cpp src/advect.cpp)
 add_executable(naive3d ${SOURCES} ../tests/naive3d.cpp src/cp.cpp src/advect.cpp)
 # add_executable(test_parallel ${SOURCES} ../tests/2d_parallel.cpp src/cp.cpp src/advect.cpp)
