@@ -2342,6 +2342,7 @@ int main(int argc, char ** argv){
 
     if (SOS_FLAG){
       printf("SOS method, exit\n");
+      save_trajs_to_binary_3d(trajs_ori, file_out_dir + "3d_trajs_ori.bin");
       exit(0);
     }
 

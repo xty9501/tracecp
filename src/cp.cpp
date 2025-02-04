@@ -1,6 +1,7 @@
 #include "cp.hpp"
 #include <iostream>
 #include <complex>
+#include <Eigen/Dense>
 
 std::string get_critical_point_type_string(int type){
   switch(type){
@@ -85,6 +86,7 @@ check_simplex_seq_saddle(const T v[3][2], const double X[3][2], const int indice
   double delta = ftk::solve_eigenvalues2x2(J, eig);
 
   // if(fabs(delta) < std::numeric_limits<double>::epsilon())
+  //   return;
   if (delta >= 0) { // two real roots
     if (eig[0].real() * eig[1].real() < 0) {
       cp.eig[0] = eig[0], cp.eig[1] = eig[1];
@@ -94,14 +96,17 @@ check_simplex_seq_saddle(const T v[3][2], const double X[3][2], const int indice
       double eig_r[2];
       eig_r[0] = eig[0].real(), eig_r[1] = eig[1].real();
       ftk::solve_eigenvectors2x2(J, 2, eig_r, eig_vec);
-    } else if (eig[0].real() < 0) {
+      } 
+    else if (eig[0].real() < 0) {
       cp_type = ATTRACTING;
     }
     else if (eig[0].real() > 0){
       cp_type = REPELLING;
     }
     else cp_type = SINGULAR;
-  } else { // two conjugate roots
+
+  } 
+  else { // two conjugate roots
     if (eig[0].real() < 0) {
       cp_type = ATTRACTING_FOCUS;
     } else if (eig[0].real() > 0) {
@@ -132,6 +137,12 @@ check_simplex_seq_saddle(const T v[3][2], const double X[3][2], const int indice
   // cp.v = mu[0]*v[0][0] + mu[1]*v[1][0] + mu[2]*v[2][0];
   // cp.u = mu[0]*v[0][1] + mu[1]*v[1][1] + mu[2]*v[2][1];
   critical_points[simplex_id] = cp;
+
+  // if (simplex_id == 10722683){
+  //   printf("type: %d,eigen_values1: [real:%f , img:%f] eigen_values2: [real:%f , img:%f]\n", cp.type, cp.eig[0].real(), cp.eig[0].imag(), cp.eig[1].real(), cp.eig[1].imag());
+  //   printf("eigenvector1: %f, %f, eigenvector2: %f, %f\n", cp.eig_vec[0][0], cp.eig_vec[0][1], cp.eig_vec[1][0], cp.eig_vec[1][1]);
+  //   exit(0);
+  // }
 
 }
 
@@ -167,16 +178,27 @@ sos_check_simplex_seq_saddle(const T_fp vf[3][2],const double v[3][2], const dou
   critical_point_t cp;
   double eig_vec[2][2]={0};
   double eig_r[2];
-  std::complex<double> eig[2];
+  // std::complex<double> eig[2];
   double x[2]; // position
   ftk::lerp_s2v2(X, mu, x);
   cp.x[0] = j + x[0]; cp.x[1] = i + x[1];
   double J[2][2]; // jacobian
   ftk::jacobian_2dsimplex2(X, v, J);  
   int cp_type = 0;
-  double delta = ftk::solve_eigenvalues2x2(J, eig);
+  // double delta = ftk::solve_eigenvalues2x2(J, eig); //使用eigen库
+  //使用eigen库计算J的特征值
+  Eigen::Matrix<double, 2, 2> J_eigen;
+  J_eigen << J[0][0], J[0][1], J[1][0], J[1][1];
+  Eigen::EigenSolver<Eigen::Matrix<double, 2, 2>> solver(J_eigen);
+  Eigen::Vector2cd eig = solver.eigenvalues();
+  double trace_J = J_eigen.trace();
+  double det_J = J_eigen.determinant();
+  double delta = trace_J * trace_J - 4 * det_J;
+  eig[0] = solver.eigenvalues()[0];
+  eig[1] = solver.eigenvalues()[1];
 
   // if(fabs(delta) < std::numeric_limits<double>::epsilon())
+  //   return;
   if (delta >= 0) { // two real roots
     if (eig[0].real() * eig[1].real() < 0) {
       cp.eig[0] = eig[0], cp.eig[1] = eig[1];
@@ -185,7 +207,15 @@ sos_check_simplex_seq_saddle(const T_fp vf[3][2],const double v[3][2], const dou
       cp_type = SADDLE;
       double eig_r[2];
       eig_r[0] = eig[0].real(), eig_r[1] = eig[1].real();
-      ftk::solve_eigenvectors2x2(J, 2, eig_r, eig_vec);
+      // ftk::solve_eigenvectors2x2(J, 2, eig_r, eig_vec); //这里有坑，他用的最小二乘法，算的时候a会变成zero vector 导致na
+      //用eigen库计算eigenvector
+      Eigen::Matrix<double, 2, 2> eigenvectors = solver.eigenvectors().real();
+      // 归一化特征向量
+      for (int i = 0; i < 2; i++) {
+        Eigen::Vector2d v = eigenvectors.col(i).normalized();
+        eig_vec[i][0] = v(0);
+        eig_vec[i][1] = v(1);
+      }
     } else if (eig[0].real() < 0) {
       cp_type = ATTRACTING;
     }
@@ -225,6 +255,11 @@ sos_check_simplex_seq_saddle(const T_fp vf[3][2],const double v[3][2], const dou
   // cp.u = mu[0]*v[0][1] + mu[1]*v[1][1] + mu[2]*v[2][1];
   critical_points[simplex_id] = cp;
 
+  // if (simplex_id == 10722683){
+  //   printf("type: %d,eigen_values1: [real:%f , img:%f] eigen_values2: [real:%f , img:%f]\n", cp.type, cp.eig[0].real(), cp.eig[0].imag(), cp.eig[1].real(), cp.eig[1].imag());
+  //   printf("eigenvector1: %f, %f, eigenvector2: %f, %f\n", cp.eig_vec[0][0], cp.eig_vec[0][1], cp.eig_vec[1][0], cp.eig_vec[1][1]);
+  //   printf("Jacobian: %f, %f\n%f, %f\n", cp.Jac[0][0], cp.Jac[0][1], cp.Jac[1][0], cp.Jac[1][1]);
+  // }
 }
 
 

@@ -28,9 +28,15 @@ sz_compress_cp_preserve_2d_online(const T * U, const T * V, size_t r1, size_t r2
 // unsigned char *
 // sz_compress_cp_preserve_sos_2d_online(const T * U, const T * V, size_t r1, size_t r2, size_t& compressed_size, bool transpose=false, double max_pwr_eb=0.1);
 
+//cpsz-sos option 0
 template<typename T>
 unsigned char *
 sz_compress_cp_preserve_sos_2d_online_fp(const T * U, const T * V, size_t r1, size_t r2, size_t& compressed_size, bool transpose=false, double max_pwr_eb=0.1);
+
+//cpsz-sos option 4
+template<typename T>
+unsigned char *
+sz_compress_cp_preserve_sos_2d_online_fp_spec_exec_all(const T * U, const T * V, size_t r1, size_t r2, size_t& compressed_size, bool transpose=false, double max_pwr_eb=0.1, double max_factor=8);
 
 template<typename T_data>
 unsigned char *

@@ -41,6 +41,7 @@ template<typename T>
 void
 omp_sz3_decompress_cp_preserve_2d_online(const unsigned char * compressed, size_t r1, size_t r2, T *& U, T *& V);
 
+//cpsz-sos option 0
 template<typename T>
 void
 sz_decompress_cp_preserve_sos_2d_online_fp(const unsigned char * compressed, size_t r1, size_t r2, T *& U, T *& V);

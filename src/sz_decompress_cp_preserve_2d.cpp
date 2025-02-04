@@ -1456,6 +1456,8 @@ convert_to_floating_point(const T_fp * U_fp, const T_fp * V_fp, size_t num_eleme
 		V[i] = V_fp[i] * (T)1.0 / vector_field_scaling_factor;
 	}
 }
+
+//cpsz-sos
 template<typename T_data>
 void
 sz_decompress_cp_preserve_sos_2d_online_fp(const unsigned char * compressed, size_t r1, size_t r2, T_data *& U, T_data *& V){

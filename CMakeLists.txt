@@ -44,7 +44,7 @@ add_executable(naive3d ${SOURCES} ../tests/naive3d.cpp src/cp.cpp src/advect.cpp
 # add_executable(test_parallel ${SOURCES} ../tests/2d_parallel.cpp src/cp.cpp src/advect.cpp)
 # add_executable(test_parallel3d ${SOURCES} ../tests/3d_parallel.cpp src/cp.cpp src/advect.cpp)
 # 链接库
-target_link_libraries(test PUBLIC FTK::libftk zstd::libzstd_shared fpzip)
+target_link_libraries(test PUBLIC FTK::libftk zstd::libzstd_shared Eigen3::Eigen fpzip)
 # target_link_libraries(single_traj PUBLIC FTK::libftk zstd::libzstd_shared)
 target_link_libraries(test3d PUBLIC FTK::libftk zstd::libzstd_shared Eigen3::Eigen fpzip)
 target_link_libraries(naive2d PUBLIC FTK::libftk zstd::libzstd_shared fpzip)

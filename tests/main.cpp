@@ -546,7 +546,8 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
   unsigned char * result = NULL;
   double current_pwr_eb = 0;
   if(SOS_FLAG == 1){
-    result = sz_compress_cp_preserve_sos_2d_online_fp(U, V, r1, r2, result_size, false, max_pwr_eb);
+    //result = sz_compress_cp_preserve_sos_2d_online_fp(U, V, r1, r2, result_size, false, max_pwr_eb); //option 0
+    result = sz_compress_cp_preserve_sos_2d_online_fp_spec_exec_all(U, V, r1, r2, result_size, false, max_pwr_eb, std::pow(2, 3)); //option 4
   }
   else if(eb_type == "rel"){
     //****original version of cpsz********
@@ -749,16 +750,19 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
   printf("critical_points_ori size: %ld, critical_points_dec size: %ld\n", critical_points_ori.size(), critical_points_dec.size());
 
   // check if all cp are exactly the same
-  for (auto p : critical_points_ori){
-    auto cp_ori = p.second.x;
-    auto cp_dec = critical_points_dec[p.first].x;
-    if (cp_ori[0] != cp_dec[0] || cp_ori[1] != cp_dec[1]){
-      printf("critical point not equal\n");
-      printf("cp_ori: %f, %f\n", cp_ori[0], cp_ori[1]);
-      printf("cp_dec: %f, %f\n", cp_dec[0], cp_dec[1]);
-      exit(0);
+  if (!SOS_FLAG){ //sos-method will have different cp position but same type and cell
+    for (auto p : critical_points_ori){
+      auto cp_ori = p.second.x;
+      auto cp_dec = critical_points_dec[p.first].x;
+      if (cp_ori[0] != cp_dec[0] || cp_ori[1] != cp_dec[1]){
+        printf("critical point not equal\n");
+        printf("cp_ori: %f, %f\n", cp_ori[0], cp_ori[1]);
+        printf("cp_dec: %f, %f\n", cp_dec[0], cp_dec[1]);
+        exit(0);
+      }
     }
   }
+
 
   // exit(0);
 
@@ -956,6 +960,15 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
       if(!inside(seed,DH, DW)){
         printf("seed is outside\n");
         printf("seed: (%f,%f)\n", seed[0], seed[1]);
+        printf("pt: (%f,%f)\n", pt[0], pt[1]);
+        printf("direction: %f\n", directions[i][0]);
+        printf("eigval_0: real: %f, imag: %f\n", eigval[0].real(), eigval[0].imag());
+        printf("eigval_1: real: %f, imag: %f\n", eigval[1].real(), eigval[1].imag());
+        printf("eigvec_0: (%f,%f)\n", eigvec[0][0], eigvec[0][1]);
+        printf("eigvec_1: (%f,%f)\n", eigvec[1][0], eigvec[1][1]);
+        printf("cp.simplexid: %ld\n", cp.simplex_id);
+
+
         //exit(0);
       }
       // size_t current_traj_index = trajs_dec.size();
@@ -1149,6 +1162,7 @@ fix_traj_v2(T * U, T * V,size_t r1, size_t r2, double max_pwr_eb,traj_config t_c
 
   if(SOS_FLAG == 1){
     printf("SOS_FLAG is 1, exit\n");
+    save_trajs_to_binary(trajs_ori, file_dir + "ori_traj.bin");
     exit(0);
   }
 
