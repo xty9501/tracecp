@@ -48,4 +48,11 @@ template<typename T>
 unsigned char *
 sz_compress_cp_preserve_sos_3d_online_fp(const T * U, const T * V, const T * W, size_t r1, size_t r2, size_t r3, size_t& compressed_size, bool transpose=false, double max_pwr_eb=0.01);
 
+
+//sos-method option 4
+template<typename T>
+unsigned char *
+sz_compress_cp_preserve_sos_3d_online_fp_spec_exec_all(const T * U, const T * V, const T * W, size_t r1, size_t r2, size_t r3, size_t& compressed_size, bool transpose=false, double max_pwr_eb=0.1, double max_factor=8);
+
+
 #endif

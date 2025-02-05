@@ -138,7 +138,8 @@ T relax_eb(T eb){
 
 template<typename T>
 T restrict_eb(T eb){
-	return eb / 2;
+	return eb / 2; //
+	//return (eb > 1) ? eb/2 : 1;
 }
 
 

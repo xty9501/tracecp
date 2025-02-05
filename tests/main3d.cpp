@@ -1760,7 +1760,9 @@ int main(int argc, char ** argv){
       unsigned char * result;
       auto comp_time_start = std::chrono::high_resolution_clock::now();
       if(SOS_FLAG){
-        result = sz_compress_cp_preserve_sos_3d_online_fp<float>(U, V, W, r1, r2, r3, result_size, false,max_eb);
+        //result = sz_compress_cp_preserve_sos_3d_online_fp<float>(U, V, W, r1, r2, r3, result_size, false,max_eb); //sos-method option 0
+        printf("CPSZ_SOS ST4...\n");
+        result = sz_compress_cp_preserve_sos_3d_online_fp_spec_exec_all<float>(U, V, W, r1, r2, r3, result_size, false,max_eb,8); //sos-method option 1
       }
       else if(eb_type == "rel"){
         if (CPSZ_OMP_FLAG == 0){
@@ -1885,20 +1887,23 @@ int main(int argc, char ** argv){
     exit(0);
     }
     //check two critical points are the same
-    for (auto p:critical_points_0){
-      //find the same point in critical_points_out
-      auto it = critical_points_out.find(p.first);
-      if (it != critical_points_out.end()){
-        auto cp_ori = p.second;
-        auto cp_dec = it->second;
-        if (cp_ori.x[0] != cp_dec.x[0] || cp_ori.x[1] != cp_dec.x[1] || cp_ori.x[2] != cp_dec.x[2] || cp_ori.type != cp_dec.type){
-          printf("critical points not same pos or type\n");
-          printf("ori: %.10f, %.10f, %.10f, dec: %.10f, %.10f, %.10f\n", cp_ori.x[0], cp_ori.x[1], cp_ori.x[2], cp_dec.x[0], cp_dec.x[1], cp_dec.x[2]);
-          //print u,v,w
+    if (!SOS_FLAG){
+      for (auto p:critical_points_0){
+        //find the same point in critical_points_out
+        auto it = critical_points_out.find(p.first);
+        if (it != critical_points_out.end()){
+          auto cp_ori = p.second;
+          auto cp_dec = it->second;
+          if (cp_ori.x[0] != cp_dec.x[0] || cp_ori.x[1] != cp_dec.x[1] || cp_ori.x[2] != cp_dec.x[2] || cp_ori.type != cp_dec.type){
+            printf("critical points not same pos or type\n");
+            printf("ori: %.10f, %.10f, %.10f, dec: %.10f, %.10f, %.10f\n", cp_ori.x[0], cp_ori.x[1], cp_ori.x[2], cp_dec.x[0], cp_dec.x[1], cp_dec.x[2]);
+            //print u,v,w
+          }
         }
       }
+      printf("critical points check passed\n");
     }
-    printf("critical points check passed\n");
+
 
     //replace the points on surface with original data
     // for (int i = 0; i < r1; i++){
